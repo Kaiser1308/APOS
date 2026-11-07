@@ -6,10 +6,11 @@ import type { GoalRepository } from '../store/journal.js';
 import { assertGitRoot } from '../store/project-history.js';
 import { VerificationService } from './verification.js';
 import { requiresIndependentReview } from '../domain/reviews.js';
+import type { PackageRuntimeRef } from './packages.js';
 
 export interface CommitInspector {
   exists(repoPath: string, ref: string): boolean;
-  files(repoPath: string, ref: string): string[];
+  files(repoPath: string, ref: string, baseCommit?: string): string[];
   contains(repoPath: string, ancestor: string, descendant: string): boolean;
 }
 
@@ -19,8 +20,12 @@ export class GitCommitInspector implements CommitInspector {
     try { execFileSync('git', ['-C', assertGitRoot(repoPath), 'cat-file', '-e', `${ref}^{commit}`], { stdio: 'ignore' }); return true; }
     catch { return false; }
   }
-  files(repoPath: string, ref: string): string[] {
+  files(repoPath: string, ref: string, baseCommit?: string): string[] {
     if (!/^[0-9a-fA-F]{40,64}$/.test(ref)) throw new Error('Full commit hash required');
+    if (baseCommit) {
+      if (!/^[0-9a-fA-F]{40,64}$/.test(baseCommit)) throw new Error('Full package base commit required');
+      return execFileSync('git', ['-C', assertGitRoot(repoPath), 'diff', '--name-only', baseCommit, ref], { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean);
+    }
     return execFileSync('git', ['-C', assertGitRoot(repoPath), 'diff-tree', '--root', '--no-commit-id', '--name-only', '-r', ref], { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean);
   }
   contains(repoPath: string, ancestor: string, descendant: string): boolean {
@@ -55,7 +60,7 @@ export class IntegrationService {
         if (!evidence || evidence.result !== 'pass' || evidence.packageVersion !== item.spec.version || evidence.owner !== item.spec.owner) throw new Error(`Stale or missing package evidence: ${item.spec.id}`);
         commits.add(evidence.commitRef);
         if (!this.inspector.exists(repoPath, evidence.commitRef)) throw new Error(`Package commit missing: ${evidence.commitRef}`);
-        for (const file of this.inspector.files(repoPath, evidence.commitRef)) {
+        for (const file of this.inspector.files(repoPath, evidence.commitRef, (item.runtimeRef as PackageRuntimeRef | undefined)?.baseCommit)) {
           if (!owners.has(file)) owners.set(file, new Set());
           owners.get(file)!.add(item.spec.id);
         }

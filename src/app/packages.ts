@@ -5,7 +5,7 @@ import type { PackageBlocker } from '../domain/transitions.js';
 import { requiresIndependentReview } from '../domain/reviews.js';
 import type { GoalRepository } from '../store/journal.js';
 
-export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string; terminal?: string; worktreeId?: string };
+export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string };
 export interface PackageRuntime {
   startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string }): Promise<PackageRuntimeRef>;
   inspectPackage?(ref: PackageRuntimeRef): Promise<'completed' | 'failed' | 'live' | 'unverifiable'>;

@@ -67,7 +67,10 @@ export function interpretWorkerShow(shown: Record<string, unknown>): RuntimeObse
 }
 
 export class OrcaRuntime implements RuntimeAdapter {
-  constructor(private readonly execute: (args: string[]) => Record<string, unknown> = runOrca) {}
+  constructor(
+    private readonly execute: (args: string[]) => Record<string, unknown> = runOrca,
+    private readonly gitHead: (repoPath: string) => string = repoPath => execFileSync('git', ['-C', repoPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  ) {}
   private readonly packageRuns = new Map<string, Promise<string>>();
 
   private listRuns(): Record<string, unknown>[] {
@@ -117,14 +120,16 @@ export class OrcaRuntime implements RuntimeAdapter {
 
   async startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string }): Promise<PackageRuntimeRef> {
     const item = input.package;
+    const baseCommit = this.gitHead(input.repoPath);
+    if (!/^[0-9a-fA-F]{40,64}$/.test(baseCommit)) throw new Error('Full package base commit required');
     this.execute(['repo', 'add', '--path', input.repoPath]);
     const runId = await this.packageRun(input.repoPath, item.goalId, item.goalVersion);
     this.execute(['orchestration', 'run-use', '--id', runId]);
-    const spec = `Target: ${input.repoPath}, ${item.goalId}, ${item.id}. Change: deliver ${item.outcome}. Constraints: read .apos/goals/${item.goalId}/goal.md, execution.md and packages/${item.id}.md; stay within scope; preserve other users' files; do not merge. Ownership: ${item.owner} owns this Work Package end to end. Observable acceptance: meet every local acceptance criterion, test, self-review, and report commit, diff and evidence. Write a concise committed report at .apos/goals/${item.goalId}/evidence/${item.id}-v${item.version}.md with commits, tests, decisions and Orca Run/Task/Dispatch IDs; include its path in worker_done. Follow the injected Orca preamble; report worker_done exactly once with explicit succeeded or failed outcome, then idle. APOS dispatch key: ${input.idempotencyKey}.`;
+    const spec = `Target: ${input.repoPath}, ${item.goalId}, ${item.id}. Change: deliver ${item.outcome}. Constraints: read .apos/goals/${item.goalId}/goal.md, execution.md and packages/${item.id}.md; stay within scope; preserve other users' files; do not merge. Ownership: ${item.owner} owns this Work Package end to end. Observable acceptance: meet every local acceptance criterion, test, self-review, and report commit, diff and evidence. Write a concise committed report at .apos/goals/${item.goalId}/evidence/${item.id}-v${item.version}.md with commits, tests, decisions and Orca Run/Task/Dispatch IDs; include its path in worker_done. Follow the injected Orca preamble; report worker_done exactly once with explicit succeeded or failed outcome, then idle. APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${baseCommit}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', 'HEAD', '--name', `apos-${item.goalId.toLowerCase()}-${item.id.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, '--agent', 'claude', '--run', runId]);
     const ref = extractStartedRef(started, input.repoPath);
     if (ref.runId !== runId) throw new Error('Orca Worker belongs to an unexpected Run');
-    return { ...ref, owner: 'worker' };
+    return { ...ref, owner: 'worker', baseCommit };
   }
 
   async inspectPackage(ref: PackageRuntimeRef): Promise<'completed' | 'failed' | 'live' | 'unverifiable'> {
@@ -139,11 +144,11 @@ export class OrcaRuntime implements RuntimeAdapter {
     const { prior, package: item } = input;
     if (!prior.terminal || !prior.worktreeId) throw new Error('Original Worker terminal and worktree required');
     this.execute(['orchestration', 'run-use', '--id', prior.runId]);
-    const spec = `Target: ${prior.repoPath}, ${item.goalId}, ${item.id}. Continue the same package owner for contract v${item.version}. Read .apos/goals/${item.goalId}/packages/${item.id}.md; recheck all local acceptance and report fresh evidence. Follow the injected Orca preamble and report worker_done exactly once. APOS dispatch key: ${input.idempotencyKey}.`;
+    const spec = `Target: ${prior.repoPath}, ${item.goalId}, ${item.id}. Continue the same package owner for contract v${item.version}. Read .apos/goals/${item.goalId}/packages/${item.id}.md; recheck all local acceptance and report fresh evidence. Follow the injected Orca preamble and report worker_done exactly once. APOS dispatch key: ${input.idempotencyKey}.${prior.baseCommit ? ` APOS base commit: ${prior.baseCommit}.` : ''}`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--run', prior.runId]);
     const ref = extractStartedRef(started, prior.repoPath);
     if (ref.runId !== prior.runId) throw new Error('Resumed Worker belongs to an unexpected Run');
-    return { ...ref, owner: 'worker', worktreeId: ref.worktreeId ?? prior.worktreeId };
+    return { ...ref, owner: 'worker', worktreeId: ref.worktreeId ?? prior.worktreeId, baseCommit: prior.baseCommit };
   }
 
   async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string): Promise<RuntimeRef> {
@@ -228,6 +233,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     const dispatchId = id(dispatch.id, 'Dispatch ID');
     const shown = this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]);
     const worker = object(shown.worker);
-    return { runId, taskId, dispatchId, owner: 'worker', repoPath: match[1], terminal: typeof dispatch.assignee_handle === 'string' ? dispatch.assignee_handle : undefined, worktreeId: typeof worker.worktreeId === 'string' ? worker.worktreeId : undefined };
+    const baseCommit = /APOS base commit: ([0-9a-fA-F]{40,64})\./.exec(String(task.spec))?.[1];
+    return { runId, taskId, dispatchId, owner: 'worker', repoPath: match[1], terminal: typeof dispatch.assignee_handle === 'string' ? dispatch.assignee_handle : undefined, worktreeId: typeof worker.worktreeId === 'string' ? worker.worktreeId : undefined, ...(baseCommit ? { baseCommit } : {}) };
   }
 }

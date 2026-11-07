@@ -15,7 +15,7 @@ it('registers an unmanaged project before starting its Solo Lead', async () => {
     if (args[0] === 'repo') return { repo: { id: 'repo_1' } };
     if (args[1] === 'run-create') return { run: { id: 'run_1' } };
     return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', effects: [] };
-  });
+  }, () => 'a'.repeat(40));
   const ref = await runtime.startSolo({ repoPath: 'C:/project', goalId: 'GOAL-001', proposalVersion: 1, idempotencyKey: 'key-1' });
   expect(calls[0]).toEqual(['repo', 'add', '--path', 'C:/project']);
   expect(ref.dispatchId).toBe('ctx_1');
@@ -29,7 +29,7 @@ it('starts a package Worker in a dedicated Orca worktree', async () => {
     if (args[1] === 'run-list') return { runs: [] };
     if (args[1] === 'run-create') return { run: { id: 'run_1' } };
     return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', effects: [] };
-  });
+  }, () => 'a'.repeat(40));
   const ref = await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-1', package: {
     id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies'
   } });
@@ -50,7 +50,7 @@ it('shares one Orca Run across independent packages in a dispatch wave', async (
     if (args[1] === 'run-list') return { runs: [] };
     if (args[1] === 'run-create') return { run: { id: 'run_shared' } };
     return { runId: 'run_shared', taskId: 'task_1', dispatchId: `ctx_${calls.length}`, effects: [] };
-  });
+  }, () => 'a'.repeat(40));
   const a = { id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies' };
   const refs = await Promise.all([runtime.startPackage({ package: a, repoPath: 'C:/project', idempotencyKey: 'key-1' }), runtime.startPackage({ package: { ...a, id: 'WP-02' }, repoPath: 'C:/project', idempotencyKey: 'key-2' })]);
   expect(calls.filter(args => args[1] === 'run-create')).toHaveLength(1);
@@ -65,7 +65,7 @@ it('rebinds an existing Goal Run before dispatching its next package wave', asyn
     if (args[1] === 'run-list') return { runs: [{ id: 'run_shared', objective: 'APOS package Run C:/project GOAL-001 goal v1' }] };
     if (args[1] === 'run-use') return { run: { id: 'run_shared' } };
     return { runId: 'run_shared', taskId: 'task_2', dispatchId: 'ctx_2', effects: [] };
-  });
+  }, () => 'a'.repeat(40));
   await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-2', package: { id: 'WP-02', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-b', outcome: 'History', scope: ['history'], exclusions: [], dependencies: [], interfaces: ['history()'], acceptance: [{ id: 'WP-AC-2', text: 'history' }], integration: 'Lead verifies' } });
   expect(calls.find(args => args[1] === 'run-use')).toEqual(['orchestration', 'run-use', '--id', 'run_shared']);
   expect(calls.some(args => args[1] === 'run-create')).toBe(false);
@@ -87,11 +87,11 @@ it('finds a package dispatch on an older Orca Run page', async () => {
 it('recovers a package from its shared Goal Run by the original dispatch key', async () => {
   const runtime = new OrcaRuntime(args => {
     if (args[1] === 'run-list') return { runs: [{ id: 'run_shared', objective: 'APOS package Run C:/project GOAL-001 goal v1' }] };
-    if (args[1] === 'task-list') return { tasks: [{ id: 'task_2', spec: 'Target: C:/project, GOAL-001, WP-02. APOS dispatch key: key-2.' }] };
+    if (args[1] === 'task-list') return { tasks: [{ id: 'task_2', spec: `Target: C:/project, GOAL-001, WP-02. APOS dispatch key: key-2. APOS base commit: ${'a'.repeat(40)}.` }] };
     if (args[1] === 'dispatch-show') return { dispatch: { id: 'ctx_2', assignee_handle: 'term_2' } };
     return { worker: { worktreeId: 'repo_1::C:/worktree' } };
   });
-  expect(await runtime.recoverPackage('key-2')).toMatchObject({ runId: 'run_shared', taskId: 'task_2', dispatchId: 'ctx_2', terminal: 'term_2', worktreeId: 'repo_1::C:/worktree' });
+  expect(await runtime.recoverPackage('key-2')).toMatchObject({ runId: 'run_shared', taskId: 'task_2', dispatchId: 'ctx_2', terminal: 'term_2', worktreeId: 'repo_1::C:/worktree', baseCommit: 'a'.repeat(40) });
 });
 
 it('resumes a revised package in its original terminal and worktree', async () => {

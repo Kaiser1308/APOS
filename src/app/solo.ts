@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { GoalEventType } from '../domain/transitions.js';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
-import type { SqliteStore } from '../store/sqlite.js';
+import type { GoalRepository } from '../store/journal.js';
 import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
 
 export class SoloService {
-  constructor(private readonly store: SqliteStore, private readonly runtime: RuntimeAdapter) {}
+  constructor(private readonly store: GoalRepository, private readonly runtime: RuntimeAdapter) {}
 
   private record(goalId: string, type: GoalEventType, data?: unknown): void {
     this.store.append({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });

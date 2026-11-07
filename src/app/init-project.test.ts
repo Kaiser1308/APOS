@@ -14,4 +14,7 @@ it('initializes a managed Git project twice without losing the first state', asy
   await initProject(dir);
   expect(existsSync(join(dir, '.apos', 'project.yaml'))).toBe(true);
   expect(existsSync(join(dir, '.apos', 'goals'))).toBe(true);
+  expect(existsSync(join(dir, '.claude', 'skills', 'apos-pm', 'SKILL.md'))).toBe(true);
+  expect(existsSync(join(dir, '.claude', 'skills', 'apos-lead', 'SKILL.md'))).toBe(true);
+  expect(existsSync(join(dir, '.claude', 'skills', 'apos-worker', 'SKILL.md'))).toBe(true);
 });

@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { Evidence, GoalId } from '../domain/contracts.js';
 import type { GoalEventType } from '../domain/transitions.js';
-import type { SqliteStore } from '../store/sqlite.js';
+import type { GoalRepository } from '../store/journal.js';
 
 export type VerificationResult = { passed: true; acceptanceIds: string[] };
 
 export class VerificationService {
-  constructor(private readonly store: SqliteStore) {}
+  constructor(private readonly store: GoalRepository) {}
 
   private record(goalId: GoalId, type: GoalEventType, data?: unknown): void {
     this.store.append({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });

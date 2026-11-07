@@ -21,6 +21,10 @@ export function assertGitRoot(repoPath: string): string {
 
 export class ProjectHistory {
   async record(repoPath: string, goalId: string, event: GoalEvent, documents: DocumentUpdate[] = []): Promise<HistoryRef> {
+    return this.recordSync(repoPath, goalId, event, documents);
+  }
+
+  recordSync(repoPath: string, goalId: string, event: GoalEvent, documents: DocumentUpdate[] = []): HistoryRef {
     const repo = assertGitRoot(repoPath);
     if (!/^GOAL-[A-Z0-9-]+$/.test(goalId) || event.goalId !== goalId || !event.id) throw new Error('Invalid Goal/event identity');
     const goalDir = join(repo, '.apos', 'goals', goalId);

@@ -121,4 +121,17 @@ describe('Solo dispatch', () => {
     expect(store.getGoal(spec.id)?.evidence).toEqual([]);
     store.close();
   });
+  it('parks Solo after its approved attempt budget is exhausted', async () => {
+    const { store, add, dir } = fixture();
+    add('goal-approved'); add('goal-selected'); add('proposal-drafted', { ...proposal, maxAttempts: 1 }); add('proposal-approved');
+    const runtime = new FakeRuntime();
+    const service = new SoloService(store, runtime);
+    await service.start(spec.id, dir);
+    add('checkpointed', { phase: 'repair', progress: 'Retry needed', evidenceRefs: [] });
+    runtime.state = 'settled'; runtime.outcome = 'failed';
+    await expect(service.resume(spec.id)).rejects.toThrow(/budget exhausted/);
+    expect(store.getGoal(spec.id)?.status).toBe('blocked');
+    expect(runtime.resumes).toBe(0);
+    store.close();
+  });
 });

@@ -11,6 +11,7 @@ import { IntegrationService, type CommitInspector } from './app/integration.js';
 import { ControllerService } from './app/controller.js';
 import { MergeService } from './app/merge.js';
 import { ReviewService } from './app/review.js';
+import { assertExecutionSettled } from './app/replan.js';
 import { VerificationService } from './app/verification.js';
 import { parseWorkPackage } from './domain/packages.js';
 import { OrcaRuntime, type RuntimeAdapter } from './runtime/orca.js';
@@ -61,18 +62,27 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   goal.command('select').argument('<id>').action((id: string) => withJournal(journal => {
     journal.append(event(id, 'goal-selected')); write(`Selected ${id}`);
   }));
+  goal.command('revise').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournalAsync(async journal => {
+    const revised = parseGoalSpec(JSON.parse(readFileSync(file, 'utf8')));
+    const current = journal.getGoal(revised.id);
+    if (!current || revised.version <= current.spec.version) throw new Error('Goal revision must advance the current version');
+    await assertExecutionSettled(current, runtime);
+    journal.append(event(revised.id, 'goal-revised', revised));
+    write(`Revised ${revised.id} v${revised.version}; Human approval required`);
+  }));
 
   const lead = program.command('lead');
   lead.command('recommend').action(() => withJournal(journal => {
     const candidate = journal.listGoals().filter(state => state.status === 'approved' && state.spec.dependencies.every(id => journal.getGoal(id)?.status === 'closed')).sort((a, b) => a.spec.priority - b.spec.priority)[0];
     write(candidate ? `${candidate.spec.id}: ${candidate.spec.outcome}` : 'No eligible Goal');
   }));
-  lead.command('propose').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournal(journal => {
+  lead.command('propose').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournalAsync(async journal => {
     const proposal = parseExecutionProposal(JSON.parse(readFileSync(file, 'utf8')));
     const state = journal.getGoal(proposal.goalId);
     if (!state || proposal.goalVersion !== state.spec.version) throw new Error('Proposal targets stale Goal version');
     const mapped = new Set(proposal.acceptanceMapping.map(item => item.acceptanceId));
     if (state.spec.acceptance.some(item => !mapped.has(item.id))) throw new Error('Every Goal acceptance criterion needs a verification mapping');
+    if (state.proposal) await assertExecutionSettled(state, runtime);
     journal.append(event(proposal.goalId, state.proposal ? 'proposal-revised' : 'proposal-drafted', proposal));
     write(`Proposed ${proposal.id}`);
   }));

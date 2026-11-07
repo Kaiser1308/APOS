@@ -28,7 +28,7 @@ export function committedGoalEvents(repoPath: string, goalId: string): GoalEvent
   return content.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as GoalEvent);
 }
 
-function withHistoryLock<T>(repo: string, action: () => T): T {
+export function withHistoryLock<T>(repo: string, action: () => T): T {
   const aposDir = join(repo, '.apos');
   mkdirSync(aposDir, { recursive: true });
   const lock = join(aposDir, '.history.lock');
@@ -52,6 +52,10 @@ export class ProjectHistory {
   recordSync(repoPath: string, goalId: string, event: GoalEvent, documents: DocumentUpdate[] = []): HistoryRef {
     const repo = assertGitRoot(repoPath);
     return withHistoryLock(repo, () => this.recordLocked(repo, goalId, event, documents));
+  }
+
+  recordUnderLock(repoPath: string, goalId: string, event: GoalEvent, documents: DocumentUpdate[] = []): HistoryRef {
+    return this.recordLocked(assertGitRoot(repoPath), goalId, event, documents);
   }
 
   private recordLocked(repo: string, goalId: string, event: GoalEvent, documents: DocumentUpdate[]): HistoryRef {

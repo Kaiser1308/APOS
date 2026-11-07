@@ -83,7 +83,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     this.execute(['repo', 'add', '--path', input.repoPath]);
     const run = this.execute(['orchestration', 'run-create', '--objective', `APOS ${input.goalId} proposal v${input.proposalVersion} key ${input.idempotencyKey}`]);
     const runId = id(object(run.run).id, 'Run ID');
-    const spec = `Target: ${input.repoPath}, ${input.goalId}. Change: implement approved Solo Goal end to end. Constraints: read .apos/goals/${input.goalId}/goal.md and execution.md; preserve scope and user files; do not merge without authorization. Ownership: Lead owns Goal. Observable acceptance: tests and evidence for every Goal acceptance criterion. APOS dispatch key: ${input.idempotencyKey}.`;
+    const spec = `Target: ${input.repoPath}, ${input.goalId}. Change: implement approved Solo Goal end to end. Constraints: read .apos/goals/${input.goalId}/goal.md and execution.md; preserve scope and user files; do not merge without authorization. Ownership: Lead owns Goal. Observable acceptance: tests and evidence for every Goal acceptance criterion. Follow the injected Orca preamble; report worker_done exactly once with explicit succeeded or failed outcome, then idle. APOS dispatch key: ${input.idempotencyKey}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', `path:${input.repoPath}`, '--agent', 'claude', '--run', runId]);
     const ref = extractStartedRef(started, input.repoPath);
     if (ref.runId !== runId) throw new Error('Orca worker belongs to an unexpected Run');
@@ -95,7 +95,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     this.execute(['repo', 'add', '--path', input.repoPath]);
     const run = this.execute(['orchestration', 'run-create', '--objective', `APOS ${item.goalId} ${item.id} v${item.version} key ${input.idempotencyKey}`]);
     const runId = id(object(run.run).id, 'Run ID');
-    const spec = `Target: ${input.repoPath}, ${item.goalId}, ${item.id}. Change: deliver ${item.outcome}. Constraints: read .apos/goals/${item.goalId}/goal.md, execution.md and packages/${item.id}.md; stay within scope; preserve other users' files; do not merge. Ownership: ${item.owner} owns this Work Package end to end. Observable acceptance: meet every local acceptance criterion, test, self-review, and report commit, diff and evidence. APOS dispatch key: ${input.idempotencyKey}.`;
+    const spec = `Target: ${input.repoPath}, ${item.goalId}, ${item.id}. Change: deliver ${item.outcome}. Constraints: read .apos/goals/${item.goalId}/goal.md, execution.md and packages/${item.id}.md; stay within scope; preserve other users' files; do not merge. Ownership: ${item.owner} owns this Work Package end to end. Observable acceptance: meet every local acceptance criterion, test, self-review, and report commit, diff and evidence. Follow the injected Orca preamble; report worker_done exactly once with explicit succeeded or failed outcome, then idle. APOS dispatch key: ${input.idempotencyKey}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', 'HEAD', '--name', `apos-${item.goalId.toLowerCase()}-${item.id.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, '--agent', 'claude', '--run', runId]);
     const ref = extractStartedRef(started, input.repoPath);
     if (ref.runId !== runId) throw new Error('Orca Worker belongs to an unexpected Run');
@@ -113,7 +113,7 @@ export class OrcaRuntime implements RuntimeAdapter {
   async resumePackage(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string }): Promise<PackageRuntimeRef> {
     const { prior, package: item } = input;
     if (!prior.terminal || !prior.worktreeId) throw new Error('Original Worker terminal and worktree required');
-    const spec = `Target: ${prior.repoPath}, ${item.goalId}, ${item.id}. Continue the same package owner for contract v${item.version}. Read .apos/goals/${item.goalId}/packages/${item.id}.md; recheck all local acceptance and report fresh evidence. APOS dispatch key: ${input.idempotencyKey}.`;
+    const spec = `Target: ${prior.repoPath}, ${item.goalId}, ${item.id}. Continue the same package owner for contract v${item.version}. Read .apos/goals/${item.goalId}/packages/${item.id}.md; recheck all local acceptance and report fresh evidence. Follow the injected Orca preamble and report worker_done exactly once. APOS dispatch key: ${input.idempotencyKey}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--run', prior.runId]);
     const ref = extractStartedRef(started, prior.repoPath);
     if (ref.runId !== prior.runId) throw new Error('Resumed Worker belongs to an unexpected Run');
@@ -122,7 +122,7 @@ export class OrcaRuntime implements RuntimeAdapter {
 
   async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string): Promise<RuntimeRef> {
     if (!ref.terminal) throw new Error('Orca terminal identity required to resume same owner');
-    const spec = `Target: ${ref.repoPath}, APOS Solo Goal. Continue the same owner from phase ${checkpoint.phase}. Progress: ${checkpoint.progress}. Evidence: ${checkpoint.evidenceRefs.join(', ')}. Keep the approved Goal contract and report verification evidence. APOS dispatch key: ${idempotencyKey}.`;
+    const spec = `Target: ${ref.repoPath}, APOS Solo Goal. Continue the same owner from phase ${checkpoint.phase}. Progress: ${checkpoint.progress}. Evidence: ${checkpoint.evidenceRefs.join(', ')}. Keep the approved Goal contract and report verification evidence. Follow the injected Orca preamble and report worker_done exactly once. APOS dispatch key: ${idempotencyKey}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `path:${ref.repoPath}`, '--run', ref.runId]);
     const next = extractStartedRef(started, ref.repoPath);
     return { ...next, terminal: next.terminal ?? ref.terminal, worktreeId: next.worktreeId ?? ref.worktreeId };

@@ -20,13 +20,13 @@ const b: WorkPackageSpec = {
 };
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const fixture = (risks: string[] = []) => {
+const fixture = (risks: string[] = [], maxAttempts?: number) => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-packages-')); dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
   for (const [type, data] of [
     ['goal-drafted', spec], ['goal-approved', undefined], ['goal-selected', undefined],
-    ['proposal-drafted', { ...proposal, mode: 'multi-wp', risks }]
+    ['proposal-drafted', { ...proposal, mode: 'multi-wp', risks, maxAttempts }]
   ] as const) store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   return { store, dir };
 };
@@ -134,6 +134,19 @@ describe('package scheduling', () => {
     reviews.submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: 'reviewer-agent', result: 'pass', commitRef: 'commit-a', note: 'Checked diff and tests' });
     await service.verify(spec.id, a.id);
     expect(service.ready(spec.id).map(item => item.id)).toEqual([b.id]);
+    store.close();
+  });
+  it('parks a package when its approved attempt budget is exhausted', async () => {
+    const { store, dir } = fixture([], 1);
+    const runtime = new FakeRuntime();
+    const service = new PackageService(store, runtime);
+    service.add(spec.id, a); service.add(spec.id, b); approve(store);
+    await service.dispatchReady(spec.id, dir);
+    service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'fail', command: 'npm test', artifactRef: 'log:a', commitRef: 'commit-a' });
+    new ReviewService(store).submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: 'reviewer-agent', result: 'changes', commitRef: 'commit-a', note: 'Fix validation' });
+    await expect(service.resumeStale(spec.id, a.id)).rejects.toThrow(/budget exhausted/);
+    expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('blocked');
+    expect(runtime.resumes).toEqual([]);
     store.close();
   });
   it('invalidates verified downstream evidence when an upstream contract changes', async () => {

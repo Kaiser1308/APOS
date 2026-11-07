@@ -2,7 +2,7 @@ import { applyEvent, type GoalEvent, type GoalState } from '../domain/transition
 import { parseExecutionProposal, parseGoalSpec } from '../domain/contracts.js';
 import { parseWorkPackage } from '../domain/packages.js';
 import { parseReview } from '../domain/reviews.js';
-import { ProjectHistory, committedGoalEvents } from './project-history.js';
+import { ProjectHistory, committedGoalEvents, withHistoryLock } from './project-history.js';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SqliteStore } from './sqlite.js';
@@ -15,7 +15,7 @@ export interface GoalRepository {
 
 export class ProjectJournal implements GoalRepository {
   private readonly history = new ProjectHistory();
-  constructor(private readonly repoPath: string, private readonly store: SqliteStore) { this.rebuildIndex(); }
+  constructor(private readonly repoPath: string, private readonly store: SqliteStore) { withHistoryLock(this.repoPath, () => this.rebuildIndex()); }
 
   private rebuildIndex(): void {
     const goalsDir = join(this.repoPath, '.apos', 'goals');
@@ -30,6 +30,11 @@ export class ProjectJournal implements GoalRepository {
   }
 
   append(event: GoalEvent): void {
+    withHistoryLock(this.repoPath, () => this.appendLocked(event));
+  }
+
+  private appendLocked(event: GoalEvent): void {
+    this.rebuildIndex();
     if (this.store.hasEvent(event.id)) return;
     applyEvent(this.store.getGoal(event.goalId), event);
     const documents = [];
@@ -61,7 +66,7 @@ export class ProjectJournal implements GoalRepository {
       if (typeof note !== 'string' || !note.trim()) throw new Error('Decision note required');
       documents.push({ path: 'decisions.md', content: `${prior}\n- ${event.at} ${note.trim()}\n` });
     }
-    this.history.recordSync(this.repoPath, event.goalId, event, documents);
+    this.history.recordUnderLock(this.repoPath, event.goalId, event, documents);
     this.store.append(event);
   }
 

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { validatePackageGraph, parsePackageEvidence, parseWorkPackage, type PackageEvidence, type WorkPackageSpec } from '../domain/packages.js';
-import type { GoalEventType } from '../domain/transitions.js';
+import { attemptLimit, type GoalEventType } from '../domain/transitions.js';
 import type { PackageBlocker } from '../domain/transitions.js';
 import { requiresIndependentReview } from '../domain/reviews.js';
 import type { GoalRepository } from '../store/journal.js';
@@ -63,6 +63,10 @@ export class PackageService {
     const item = state?.packages?.[packageId];
     if (item?.status !== 'stale' || !item.runtimeRef) throw new Error('Stale package with prior owner required');
     if (!item.spec.dependencies.every(dep => state?.packages?.[dep]?.status === 'verified')) throw new Error('Package dependencies are not verified');
+    if (state && item.attempts >= attemptLimit(state)) {
+      this.record(goalId, 'package-retry-exhausted', { packageId });
+      throw new Error('Package retry budget exhausted; Lead decision required');
+    }
     const prior = item.runtimeRef as PackageRuntimeRef;
     if (!['completed', 'failed'].includes(await this.runtime.inspectPackage?.(prior) ?? 'unverifiable')) throw new Error('Prior Worker dispatch must be settled');
     if (!this.runtime.resumePackage) throw new Error('Runtime cannot resume package owner');

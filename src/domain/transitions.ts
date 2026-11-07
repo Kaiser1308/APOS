@@ -6,11 +6,11 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
+  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
 export type PackageBlocker = { kind: 'technical' | 'product' | 'external'; note: string };
-export type PackageState = { spec: WorkPackageSpec; status: 'specified' | 'dispatching' | 'resuming' | 'executing' | 'blocked' | 'verified' | 'stale'; evidence: PackageEvidence[]; runtimeRef?: unknown; dispatchIntent?: string; blocker?: PackageBlocker };
+export type PackageState = { spec: WorkPackageSpec; status: 'specified' | 'dispatching' | 'resuming' | 'executing' | 'blocked' | 'verified' | 'stale'; evidence: PackageEvidence[]; attempts: number; runtimeRef?: unknown; dispatchIntent?: string; blocker?: PackageBlocker };
 export type GoalState = {
   spec: GoalSpec;
   status: GoalStatus;
@@ -22,6 +22,7 @@ export type GoalState = {
   checkpoint?: unknown;
   dispatchIntent?: string;
   resumeIntent?: string;
+  soloAttempts?: number;
   runtimeRef?: unknown;
   blocker?: unknown;
   packages?: Record<string, PackageState>;
@@ -33,6 +34,7 @@ export type GoalState = {
 function requireThat(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
 }
+export const attemptLimit = (state: GoalState): number => state.proposal?.maxAttempts ?? 3;
 
 export function applyEvent(state: GoalState | undefined, event: GoalEvent): GoalState {
   requireThat(event.id && event.goalId && !Number.isNaN(Date.parse(event.at)), 'Invalid event identity or timestamp');
@@ -63,7 +65,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const proposal = parseExecutionProposal(event.data);
       requireThat(proposal.goalId === state.spec.id && proposal.goalVersion === state.spec.version, 'Proposal Goal version mismatch');
       requireThat(!state.proposal || proposal.version > state.proposal.version, 'Proposal version must advance');
-      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined, reviews: [] };
+      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined };
     }
     case 'proposal-approved':
       requireThat(state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
@@ -74,7 +76,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const spec = parseWorkPackage(event.data);
       requireThat(spec.goalId === state.spec.id && spec.goalVersion === state.spec.version, 'Package Goal version mismatch');
       requireThat(!state.packages?.[spec.id], `Package ${spec.id} already exists`);
-      return { ...state, packages: { ...state.packages, [spec.id]: { spec, status: 'specified', evidence: [] } } };
+      return { ...state, packages: { ...state.packages, [spec.id]: { spec, status: 'specified', evidence: [], attempts: 0 } } };
     }
     case 'package-revised': {
       requireThat(state.proposal?.mode === 'multi-wp' && state.proposalApprovedVersion === state.proposal.version, 'Approved Multi-WP proposal required');
@@ -114,7 +116,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const data = event.data as { packageId?: string; ref?: unknown };
       const packageState = data && state.packages?.[data.packageId ?? ''];
       requireThat(packageState?.status === 'dispatching' && data.ref, 'Dispatch intent and runtime reference required');
-      return { ...state, status: 'executing', packages: { ...state.packages, [data.packageId!]: { ...packageState, status: 'executing', runtimeRef: data.ref, dispatchIntent: undefined } } };
+      return { ...state, status: 'executing', packages: { ...state.packages, [data.packageId!]: { ...packageState, status: 'executing', runtimeRef: data.ref, dispatchIntent: undefined, attempts: packageState.attempts + 1 } } };
     }
     case 'package-resume-intended': {
       const data = event.data as { packageId?: string; key?: string };
@@ -127,7 +129,14 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const data = event.data as { packageId?: string; ref?: unknown };
       const item = data && state.packages?.[data.packageId ?? ''];
       requireThat(item?.status === 'resuming' && data.ref, 'Resume intent and new runtime reference required');
-      return { ...state, packages: { ...state.packages, [data.packageId!]: { ...item, status: 'executing', runtimeRef: data.ref, dispatchIntent: undefined } } };
+      requireThat(item.attempts < attemptLimit(state), 'Package retry budget exhausted');
+      return { ...state, packages: { ...state.packages, [data.packageId!]: { ...item, status: 'executing', runtimeRef: data.ref, dispatchIntent: undefined, attempts: item.attempts + 1 } } };
+    }
+    case 'package-retry-exhausted': {
+      const data = event.data as { packageId?: string };
+      const item = data && state.packages?.[data.packageId ?? ''];
+      requireThat(item?.status === 'stale' && item.attempts >= attemptLimit(state), 'Exhausted stale package required');
+      return { ...state, packages: { ...state.packages, [data.packageId!]: { ...item, status: 'blocked', blocker: { kind: 'technical', note: 'Retry budget exhausted' } } } };
     }
     case 'package-blocked': {
       const data = event.data as { packageId?: string; blocker?: PackageBlocker };
@@ -163,14 +172,15 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'execution-started':
       requireThat(state.status === 'ready' && state.selected && state.proposal && state.proposalApprovedVersion === state.proposal.version, 'Approved current proposal required');
-      return { ...state, status: 'executing', runtimeRef: event.data, dispatchIntent: undefined };
+      return { ...state, status: 'executing', runtimeRef: event.data, dispatchIntent: undefined, soloAttempts: 1 };
     case 'dispatch-intended':
       requireThat(state.status === 'ready' && !state.dispatchIntent && state.selected && state.proposalApprovedVersion === state.proposal?.version, 'Approved current proposal required');
       requireThat(typeof event.data === 'string' && event.data.length > 0, 'Dispatch key required');
       return { ...state, dispatchIntent: event.data };
     case 'runtime-resumed':
       requireThat(state.status === 'executing' && state.runtimeRef && state.resumeIntent && event.data, 'Existing resume intent required');
-      return { ...state, runtimeRef: event.data, resumeIntent: undefined, evidence: [], reviews: [] };
+      requireThat((state.soloAttempts ?? 1) < attemptLimit(state), 'Solo retry budget exhausted');
+      return { ...state, runtimeRef: event.data, resumeIntent: undefined, evidence: [], reviews: [], soloAttempts: (state.soloAttempts ?? 1) + 1 };
     case 'resume-intended':
       requireThat(state.status === 'executing' && state.runtimeRef && state.checkpoint && !state.resumeIntent && state.proposal?.mode.startsWith('solo'), 'Solo checkpoint and prior owner required');
       requireThat(typeof event.data === 'string' && event.data.length > 0, 'Resume key required');
@@ -228,7 +238,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, status: 'closed' };
     case 'outcome-revised':
       requireThat(state.status === 'verified', 'Technical verification required');
-      return { ...state, status: 'draft', selected: false, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined };
+      return { ...state, status: 'draft', selected: false, approvedGoalVersion: undefined, proposal: undefined, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined };
     case 'outcome-stopped':
       return { ...state, status: 'stopped' };
   }

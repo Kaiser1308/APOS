@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { GoalEventType } from '../domain/transitions.js';
+import { attemptLimit, type GoalEventType } from '../domain/transitions.js';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { GoalRepository } from '../store/journal.js';
 import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
@@ -38,6 +38,10 @@ export class SoloService {
       if (!recovered) throw new Error('Resume outcome unknown; reconcile Orca before retrying');
       this.record(goalId, 'runtime-resumed', recovered);
       return recovered;
+    }
+    if ((state.soloAttempts ?? 1) >= attemptLimit(state)) {
+      this.record(goalId, 'blocked', { kind: 'technical', note: 'Retry budget exhausted' });
+      throw new Error('Solo retry budget exhausted; Lead decision required');
     }
     const observation = await this.runtime.inspect(state.runtimeRef as RuntimeRef);
     if (!['completed', 'failed'].includes(observation.outcome ?? '')) throw new Error('Prior Orca dispatch must settle before Solo resume');

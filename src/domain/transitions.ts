@@ -63,9 +63,10 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'proposal-approved':
       requireThat(state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
+      if (state.proposal.mode === 'multi-wp') validatePackageGraph(state.spec, state.proposal, Object.values(state.packages ?? {}).map(item => item.spec));
       return { ...state, proposalApprovedVersion: state.proposal.version, status: 'ready' };
     case 'package-added': {
-      requireThat(state.status === 'ready' && state.proposal?.mode === 'multi-wp', 'Approved Multi-WP proposal required');
+      requireThat(state.status === 'planned' && state.proposal?.mode === 'multi-wp', 'Draft Multi-WP proposal required before approval');
       const spec = parseWorkPackage(event.data);
       requireThat(spec.goalId === state.spec.id && spec.goalVersion === state.spec.version, 'Package Goal version mismatch');
       requireThat(!state.packages?.[spec.id], `Package ${spec.id} already exists`);

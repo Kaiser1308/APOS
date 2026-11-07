@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from './sqlite.js';
 import { ProjectJournal } from './journal.js';
+import { ProjectHistory } from './project-history.js';
 import { spec } from '../domain/fixtures.test-support.js';
 import { initProject } from '../app/init-project.js';
 
@@ -51,8 +52,20 @@ it('saves each Work Package spec inside its Goal history', async () => {
   const add = (id: string, type: import('../domain/transitions.js').GoalEventType, data?: unknown) => journal.append({ id, goalId: spec.id, type, data, at });
   add('EV-1', 'goal-drafted', spec); add('EV-2', 'goal-approved'); add('EV-3', 'goal-selected');
   add('EV-4', 'proposal-drafted', { id: 'EXEC-001', version: 1, goalId: spec.id, goalVersion: 1, mode: 'multi-wp', approach: 'split outcomes', risks: [], acceptanceMapping: [{ acceptanceId: 'AC-1', verification: 'test' }], verificationStrategy: 'integration' });
-  add('EV-5', 'proposal-approved');
-  add('EV-6', 'package-added', { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' });
+  add('EV-5', 'package-added', { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' });
   expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'packages', 'WP-01.md'), 'utf8')).toContain('QR intake');
+  store.close();
+});
+
+it('rebuilds a missing SQLite index from committed Goal events', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-journal-')); dirs.push(dir);
+  execFileSync('git', ['init', '-q', dir]);
+  await initProject(dir);
+  const event = { id: 'EV-crash', goalId: spec.id, type: 'goal-drafted' as const, data: spec, at: '2026-11-07T00:00:00.000Z' };
+  new ProjectHistory().recordSync(dir, spec.id, event);
+  const store = SqliteStore.open(join(dir, '.apos', 'state.sqlite'));
+  const journal = new ProjectJournal(dir, store);
+  expect(journal.getGoal(spec.id)?.spec.outcome).toBe(spec.outcome);
+  expect(store.hasEvent('EV-crash')).toBe(true);
   store.close();
 });

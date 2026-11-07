@@ -29,5 +29,27 @@ export class SqliteStore {
     return Boolean(this.db.prepare('SELECT 1 FROM events WHERE id = ?').get(id));
   }
 
+  eventIds(goalId: string): string[] {
+    return (this.db.prepare('SELECT id FROM events WHERE goal_id = ? ORDER BY seq').all(goalId) as Array<{ id: string }>).map(row => row.id);
+  }
+
+  replaceGoalEvents(goalId: string, events: GoalEvent[]): void {
+    let state: GoalState | undefined;
+    for (const event of events) {
+      if (event.goalId !== goalId) throw new Error('Event Goal ID mismatch during index rebuild');
+      state = applyEvent(state, event);
+    }
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('DELETE FROM events WHERE goal_id = ?').run(goalId);
+      const insert = this.db.prepare('INSERT INTO events (id, goal_id, payload) VALUES (?, ?, ?)');
+      for (const event of events) insert.run(event.id, goalId, JSON.stringify(event));
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   close(): void { this.db.close(); }
 }

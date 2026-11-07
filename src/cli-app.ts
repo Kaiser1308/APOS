@@ -6,17 +6,24 @@ import { parseExecutionProposal, parseGoalSpec, type Evidence } from './domain/c
 import type { GoalEventType } from './domain/transitions.js';
 import { initProject } from './app/init-project.js';
 import { SoloService } from './app/solo.js';
+import { PackageService, type PackageRuntime } from './app/packages.js';
+import { IntegrationService, type CommitInspector } from './app/integration.js';
 import { VerificationService } from './app/verification.js';
+import { parseWorkPackage } from './domain/packages.js';
 import { OrcaRuntime, type RuntimeAdapter } from './runtime/orca.js';
 import { ProjectJournal } from './store/journal.js';
 import { SqliteStore } from './store/sqlite.js';
 
-export type CliOptions = { runtime?: RuntimeAdapter; write?: (line: string) => void };
+export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; write?: (line: string) => void };
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<void> {
   const program = new Command();
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   const runtime = options.runtime ?? new OrcaRuntime();
+  const packageRuntime = (): PackageRuntime => {
+    if (!runtime.startPackage) throw new Error('Configured runtime cannot start Work Package Workers');
+    return runtime as PackageRuntime;
+  };
   program.name('apos').description('Local AI Project Orchestration System').version('0.1.0').option('--repo <path>', 'managed Git project', process.cwd());
 
   const repo = () => resolve(program.opts<{ repo: string }>().repo);
@@ -25,6 +32,12 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     if (!existsSync(join(path, '.apos', 'project.yaml'))) throw new Error('Run apos init first');
     const store = SqliteStore.open(join(path, '.apos', 'state.sqlite'));
     try { return fn(new ProjectJournal(path, store)); } finally { store.close(); }
+  };
+  const withJournalAsync = async <T>(fn: (journal: ProjectJournal) => Promise<T>): Promise<T> => {
+    const path = repo();
+    if (!existsSync(join(path, '.apos', 'project.yaml'))) throw new Error('Run apos init first');
+    const store = SqliteStore.open(join(path, '.apos', 'state.sqlite'));
+    try { return await fn(new ProjectJournal(path, store)); } finally { store.close(); }
   };
   const event = (goalId: string, type: GoalEventType, data?: unknown) => ({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
 
@@ -62,18 +75,18 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   }));
 
   const execution = program.command('execution');
-  execution.command('approve').argument('<id>').action(async (id: string) => {
-    const path = repo();
-    const store = SqliteStore.open(join(path, '.apos', 'state.sqlite'));
-    try {
-      const journal = new ProjectJournal(path, store);
+  execution.command('approve').argument('<id>').action(async (id: string) => withJournalAsync(async journal => {
       const state = journal.getGoal(id);
-      if (!state?.proposal || state.proposal.mode === 'multi-wp') throw new Error('Solo proposal required for this execution path');
+      if (!state?.proposal) throw new Error('Current proposal required');
       journal.append(event(id, 'proposal-approved'));
-      const ref = await new SoloService(journal, runtime).start(id, path);
-      write(`Dispatched ${id}: ${ref.dispatchId}`);
-    } finally { store.close(); }
-  });
+      if (state.proposal.mode === 'multi-wp') {
+        const refs = await new PackageService(journal, packageRuntime()).dispatchReady(id, repo());
+        write(`Dispatched ${id}: ${refs.map(ref => ref.dispatchId).join(', ')}`);
+      } else {
+        const ref = await new SoloService(journal, runtime).start(id, repo());
+        write(`Dispatched ${id}: ${ref.dispatchId}`);
+      }
+  }));
   execution.command('start').argument('<id>').action(async (id: string) => {
     const path = repo();
     const store = SqliteStore.open(join(path, '.apos', 'state.sqlite'));
@@ -94,6 +107,61 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   execution.command('verify').argument('<id>').action((id: string) => withJournal(journal => {
     const result = new VerificationService(journal).verify(id);
     write(`Verified ${id}: ${result.acceptanceIds.join(', ')}`);
+  }));
+
+  const packages = program.command('package');
+  packages.command('add').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournal(journal => {
+    const spec = parseWorkPackage(JSON.parse(readFileSync(file, 'utf8')));
+    new PackageService(journal, packageRuntime()).add(spec.goalId, spec);
+    write(`Drafted ${spec.id}`);
+  }));
+  packages.command('list').argument('<goalId>').action((goalId: string) => withJournal(journal => {
+    write(JSON.stringify(journal.getGoal(goalId)?.packages ?? {}));
+  }));
+  packages.command('ready').argument('<goalId>').action((goalId: string) => withJournal(journal => {
+    write(JSON.stringify(new PackageService(journal, packageRuntime()).ready(goalId).map(item => item.id)));
+  }));
+  packages.command('dispatch').argument('<goalId>').action((goalId: string) => withJournalAsync(async journal => {
+    const refs = await new PackageService(journal, packageRuntime()).dispatchReady(goalId, repo());
+    write(JSON.stringify(refs));
+  }));
+  packages.command('reconcile').argument('<goalId>').action((goalId: string) => withJournalAsync(async journal => {
+    write(JSON.stringify(await new PackageService(journal, packageRuntime()).reconcile(goalId)));
+  }));
+  packages.command('evidence').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
+    const evidence = new PackageService(journal, packageRuntime()).submitEvidence(goalId, JSON.parse(readFileSync(file, 'utf8')));
+    write(`Recorded ${evidence.packageId} ${evidence.acceptanceId}`);
+  }));
+  packages.command('verify').argument('<goalId>').argument('<packageId>').action((goalId: string, packageId: string) => withJournalAsync(async journal => {
+    const service = new PackageService(journal, packageRuntime());
+    service.verify(goalId, packageId);
+    const refs = await service.dispatchReady(goalId, repo());
+    write(`Verified ${packageId}; dispatched ${refs.map(ref => ref.dispatchId).join(', ') || 'none'}`);
+  }));
+  packages.command('revise').argument('<goalId>').requiredOption('--file <json>').requiredOption('--reason <text>').action((goalId: string, { file, reason }: { file: string; reason: string }) => withJournal(journal => {
+    const spec = new PackageService(journal, packageRuntime()).revise(goalId, JSON.parse(readFileSync(file, 'utf8')), reason);
+    write(`Revised ${spec.id} v${spec.version}`);
+  }));
+  packages.command('block').argument('<goalId>').argument('<packageId>').requiredOption('--kind <kind>').requiredOption('--note <text>').action((goalId: string, packageId: string, { kind, note }: { kind: 'technical' | 'product' | 'external'; note: string }) => withJournal(journal => {
+    new PackageService(journal, packageRuntime()).recordBlocker(goalId, packageId, kind, note);
+    write(`Blocked ${packageId}`);
+  }));
+  packages.command('unblock').argument('<goalId>').argument('<packageId>').requiredOption('--resolution <text>').action((goalId: string, packageId: string, { resolution }: { resolution: string }) => withJournal(journal => {
+    new PackageService(journal, packageRuntime()).unblock(goalId, packageId, resolution);
+    write(`Unblocked ${packageId}`);
+  }));
+  packages.command('resume').argument('<goalId>').argument('<packageId>').action((goalId: string, packageId: string) => withJournalAsync(async journal => {
+    const ref = await new PackageService(journal, packageRuntime()).resumeStale(goalId, packageId);
+    write(`Resumed ${packageId}: ${ref.dispatchId}`);
+  }));
+
+  const integration = program.command('integration');
+  integration.command('prepare').argument('<goalId>').action((goalId: string) => withJournal(journal => {
+    write(JSON.stringify(new IntegrationService(journal, options.inspector).prepare(goalId, repo())));
+  }));
+  integration.command('complete').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
+    new IntegrationService(journal, options.inspector).complete(goalId, repo(), JSON.parse(readFileSync(file, 'utf8')));
+    write(`Integrated and verified ${goalId}`);
   }));
 
   const evidence = program.command('evidence');

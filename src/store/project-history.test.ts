@@ -36,4 +36,14 @@ describe('project history', () => {
     const dir = mkdtempSync(join(tmpdir(), 'apos-nongit-')); dirs.push(dir);
     await expect(new ProjectHistory().record(dir, spec.id, { id: 'EV-1', goalId: spec.id, type: 'goal-drafted', data: spec, at: '2026-11-07T00:00:00.000Z' })).rejects.toThrow(/Git/);
   });
+  it('does not silently commit an uncommitted history tail after an interruption', async () => {
+    const dir = repo();
+    const history = new ProjectHistory();
+    const first = { id: 'EV-1', goalId: spec.id, type: 'goal-drafted' as const, data: spec, at: '2026-11-07T00:00:00.000Z' };
+    await history.record(dir, spec.id, first);
+    const eventFile = join(dir, '.apos', 'goals', spec.id, 'events.jsonl');
+    writeFileSync(eventFile, `${readFileSync(eventFile, 'utf8')}${JSON.stringify({ ...first, id: 'EV-ghost', type: 'goal-approved' })}\n`);
+    await expect(history.record(dir, spec.id, { ...first, id: 'EV-2', type: 'goal-approved' })).rejects.toThrow(/Uncommitted APOS Goal history/);
+    expect(readFileSync(eventFile, 'utf8')).toContain('EV-ghost');
+  });
 });

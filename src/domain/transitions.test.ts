@@ -53,7 +53,6 @@ describe('approval gates', () => {
     let state = applyEvent(start(), event('goal-approved'));
     state = applyEvent(state, event('goal-selected'));
     state = applyEvent(state, event('proposal-drafted', { ...proposal, mode: 'multi-wp' }));
-    state = applyEvent(state, event('proposal-approved'));
     const wp = {
       id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1,
       owner: 'worker-a', outcome: 'QR intake works', scope: ['scanner'], exclusions: [],
@@ -64,5 +63,8 @@ describe('approval gates', () => {
     state = applyEvent(state, event('package-added', wp));
     expect(state.packages?.['WP-01']?.spec.version).toBe(1);
     expect(() => applyEvent(state, event('package-added', wp))).toThrow(/already exists/i);
+    expect(() => applyEvent(state, event('proposal-approved'))).toThrow(/at least two packages/i);
+    state = applyEvent(state, event('package-added', { ...wp, id: 'WP-02', owner: 'worker-b', acceptance: [{ id: 'WP-AC-2', text: 'history works' }] }));
+    expect(applyEvent(state, event('proposal-approved')).status).toBe('ready');
   });
 });

@@ -1,8 +1,8 @@
 import { applyEvent, type GoalEvent, type GoalState } from '../domain/transitions.js';
 import { parseExecutionProposal, parseGoalSpec } from '../domain/contracts.js';
 import { parseWorkPackage } from '../domain/packages.js';
-import { ProjectHistory } from './project-history.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { ProjectHistory, committedGoalEvents } from './project-history.js';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SqliteStore } from './sqlite.js';
 
@@ -14,7 +14,19 @@ export interface GoalRepository {
 
 export class ProjectJournal implements GoalRepository {
   private readonly history = new ProjectHistory();
-  constructor(private readonly repoPath: string, private readonly store: SqliteStore) {}
+  constructor(private readonly repoPath: string, private readonly store: SqliteStore) { this.rebuildIndex(); }
+
+  private rebuildIndex(): void {
+    const goalsDir = join(this.repoPath, '.apos', 'goals');
+    if (!existsSync(goalsDir)) return;
+    for (const entry of readdirSync(goalsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^GOAL-[A-Z0-9-]+$/.test(entry.name)) continue;
+      const eventsPath = join(goalsDir, entry.name, 'events.jsonl');
+      if (!existsSync(eventsPath)) continue;
+      const events = committedGoalEvents(this.repoPath, entry.name);
+      if (JSON.stringify(events.map(item => item.id)) !== JSON.stringify(this.store.eventIds(entry.name))) this.store.replaceGoalEvents(entry.name, events);
+    }
+  }
 
   append(event: GoalEvent): void {
     if (this.store.hasEvent(event.id)) return;

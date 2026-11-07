@@ -18,8 +18,8 @@ const setup = () => {
   let n = 0;
   const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   add('goal-drafted', spec); add('goal-approved'); add('goal-selected');
-  add('proposal-drafted', { ...proposal, mode: 'multi-wp' }); add('proposal-approved');
-  add('package-added', first); add('package-added', second);
+  add('proposal-drafted', { ...proposal, mode: 'multi-wp' });
+  add('package-added', first); add('package-added', second); add('proposal-approved');
   for (const [item, commitRef] of [[first, 'commit-a'], [second, 'commit-b']] as const) {
     add('package-dispatch-intended', { packageId: item.id, key: `key-${item.id}` });
     add('package-started', { packageId: item.id, ref: { runId: 'run-1', taskId: item.id, dispatchId: item.id, owner: 'worker', repoPath: dir } });

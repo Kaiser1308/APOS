@@ -25,10 +25,11 @@ const fixture = () => {
   let n = 0;
   for (const [type, data] of [
     ['goal-drafted', spec], ['goal-approved', undefined], ['goal-selected', undefined],
-    ['proposal-drafted', { ...proposal, mode: 'multi-wp' }], ['proposal-approved', undefined]
+    ['proposal-drafted', { ...proposal, mode: 'multi-wp' }]
   ] as const) store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   return { store, dir };
 };
+const approve = (store: SqliteStore) => store.append({ id: `EV-approve-${Math.random()}`, goalId: spec.id, type: 'proposal-approved', at: '2026-11-07T00:00:00.000Z' });
 class FakeRuntime implements PackageRuntime {
   starts: string[] = [];
   resumes: string[] = [];
@@ -46,11 +47,11 @@ class FakeRuntime implements PackageRuntime {
 }
 
 describe('package scheduling', () => {
-  it('rejects package creation before Human approval of the proposal', () => {
+  it('lets Lead draft packages before approval but refuses dispatch', async () => {
     const { store } = fixture();
-    store.append({ id: 'EV-revise', goalId: spec.id, type: 'proposal-revised', data: { ...proposal, mode: 'multi-wp', version: 2 }, at: '2026-11-07T00:00:00.000Z' });
     const service = new PackageService(store, new FakeRuntime());
-    expect(() => service.add(spec.id, a)).toThrow(/Approved Multi-WP proposal required/);
+    service.add(spec.id, a); service.add(spec.id, b);
+    await expect(service.dispatchReady(spec.id, 'C:/project')).rejects.toThrow(/Approved Multi-WP Goal required/);
     store.close();
   });
   it('dispatches only the dependency-ready package and does not duplicate it', async () => {
@@ -58,6 +59,7 @@ describe('package scheduling', () => {
     const runtime = new FakeRuntime();
     const service = new PackageService(store, runtime);
     service.add(spec.id, a); service.add(spec.id, b);
+    approve(store);
     expect(service.ready(spec.id).map(item => item.id)).toEqual(['WP-01']);
     await service.dispatchReady(spec.id, dir);
     await service.dispatchReady(spec.id, dir);
@@ -70,6 +72,7 @@ describe('package scheduling', () => {
     const runtime = new FakeRuntime();
     const service = new PackageService(store, runtime);
     service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    approve(store);
     expect(service.ready(spec.id).map(item => item.id)).toEqual(['WP-01', 'WP-02']);
     await service.dispatchReady(spec.id, dir);
     expect(runtime.starts).toEqual(['WP-01', 'WP-02']);
@@ -80,6 +83,7 @@ describe('package scheduling', () => {
     const runtime = new FakeRuntime();
     const service = new PackageService(store, runtime);
     service.add(spec.id, a); service.add(spec.id, b);
+    approve(store);
     await service.dispatchReady(spec.id, dir);
     expect(service.ready(spec.id)).toEqual([]);
     service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:test', commitRef: 'abc123' });
@@ -91,6 +95,7 @@ describe('package scheduling', () => {
     const { store, dir } = fixture();
     const service = new PackageService(store, new FakeRuntime());
     service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    approve(store);
     await service.dispatchReady(spec.id, dir);
     const evidence = { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass' as const, command: 'npm test', artifactRef: 'log:test', commitRef: 'abc123' };
     expect(() => service.submitEvidence(spec.id, { ...evidence, owner: 'wrong-owner' })).toThrow(/owner/i);
@@ -108,6 +113,7 @@ describe('package scheduling', () => {
     const runtime = new FakeRuntime();
     const service = new PackageService(store, runtime);
     service.add(spec.id, a); service.add(spec.id, b);
+    approve(store);
     await service.dispatchReady(spec.id, dir);
     service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:a', commitRef: 'abc123' });
     service.verify(spec.id, a.id);
@@ -131,6 +137,7 @@ describe('package scheduling', () => {
     const { store } = fixture();
     const service = new PackageService(store, new FakeRuntime());
     service.add(spec.id, a); service.add(spec.id, b);
+    approve(store);
     expect(() => service.revise(spec.id, { ...a, version: 2, scope: ['new product area'] }, 'Expand scope')).toThrow(/Goal reapproval/i);
     expect(() => service.revise(spec.id, { ...a, version: 2, owner: 'another-worker' }, 'Change owner')).toThrow(/owner/i);
     store.close();
@@ -140,6 +147,7 @@ describe('package scheduling', () => {
     const runtime = new FakeRuntime();
     const service = new PackageService(store, runtime);
     service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    approve(store);
     await service.dispatchReady(spec.id, dir);
     service.recordBlocker(spec.id, a.id, 'external', 'Device service unavailable');
     expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('blocked');
@@ -153,6 +161,7 @@ describe('package scheduling', () => {
     const { store, dir } = fixture();
     const service = new PackageService(store, new FakeRuntime());
     service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    approve(store);
     await service.dispatchReady(spec.id, dir);
     service.recordBlocker(spec.id, a.id, 'product', 'New flow required');
     expect(() => service.unblock(spec.id, a.id, 'Proceed')).toThrow(/Goal reapproval/i);
@@ -163,6 +172,7 @@ describe('package scheduling', () => {
     const runtime = new FakeRuntime();
     const service = new PackageService(store, runtime);
     service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    approve(store);
     await service.dispatchReady(spec.id, dir);
     service.recordBlocker(spec.id, a.id, 'external', 'Offline');
     service.unblock(spec.id, a.id, 'Online');
@@ -178,6 +188,7 @@ describe('package scheduling', () => {
     const runtime = new FakeRuntime();
     const service = new PackageService(store, runtime);
     service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    approve(store);
     store.append({ id: 'EV-intent', goalId: spec.id, type: 'package-dispatch-intended', data: { packageId: a.id, key: 'key-lost' }, at: '2026-11-07T00:00:00.000Z' });
     runtime.recovered.set('key-lost', { runId: 'run-recovered', taskId: 'task-recovered', dispatchId: 'ctx-recovered', owner: 'worker', repoPath: dir });
     await service.reconcile(spec.id);

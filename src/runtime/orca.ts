@@ -57,11 +57,14 @@ export function interpretWorkerShow(shown: Record<string, unknown>): RuntimeObse
 }
 
 export class OrcaRuntime implements RuntimeAdapter {
+  constructor(private readonly execute: (args: string[]) => Record<string, unknown> = runOrca) {}
+
   async startSolo(input: SoloInput): Promise<RuntimeRef> {
-    const run = runOrca(['orchestration', 'run-create', '--objective', `APOS ${input.goalId} proposal v${input.proposalVersion} key ${input.idempotencyKey}`]);
+    this.execute(['repo', 'add', '--path', input.repoPath]);
+    const run = this.execute(['orchestration', 'run-create', '--objective', `APOS ${input.goalId} proposal v${input.proposalVersion} key ${input.idempotencyKey}`]);
     const runId = id(object(run.run).id, 'Run ID');
     const spec = `Target: ${input.repoPath}, ${input.goalId}. Change: implement approved Solo Goal end to end. Constraints: read .apos/goals/${input.goalId}/goal.md and execution.md; preserve scope and user files; do not merge without authorization. Ownership: Lead owns Goal. Observable acceptance: tests and evidence for every Goal acceptance criterion. APOS dispatch key: ${input.idempotencyKey}.`;
-    const started = runOrca(['orchestration', 'worker-start', '--spec', spec, '--worktree', `path:${input.repoPath}`, '--agent', 'claude', '--run', runId]);
+    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', `path:${input.repoPath}`, '--agent', 'claude', '--run', runId]);
     const ref = extractStartedRef(started, input.repoPath);
     if (ref.runId !== runId) throw new Error('Orca worker belongs to an unexpected Run');
     return ref;
@@ -70,25 +73,25 @@ export class OrcaRuntime implements RuntimeAdapter {
   async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint): Promise<RuntimeRef> {
     if (!ref.terminal) throw new Error('Orca terminal identity required to resume same owner');
     const spec = `Continue the same APOS Solo Goal owner from phase ${checkpoint.phase}. Progress: ${checkpoint.progress}. Evidence: ${checkpoint.evidenceRefs.join(', ')}. Keep the approved Goal contract and report verification evidence.`;
-    const started = runOrca(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `path:${ref.repoPath}`, '--run', ref.runId]);
+    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `path:${ref.repoPath}`, '--run', ref.runId]);
     return extractStartedRef(started, ref.repoPath);
   }
 
   async inspect(ref: RuntimeRef): Promise<RuntimeObservation> {
-    const shown = runOrca(['orchestration', 'worker-show', '--dispatch', ref.dispatchId]);
+    const shown = this.execute(['orchestration', 'worker-show', '--dispatch', ref.dispatchId]);
     return { state: interpretWorkerShow(shown), ref };
   }
 
   async recover(key: string): Promise<RuntimeRef | undefined> {
-    const runs = runOrca(['orchestration', 'run-list']);
+    const runs = this.execute(['orchestration', 'run-list']);
     const run = (Array.isArray(runs.runs) ? runs.runs : []).map(object).find(row => typeof row.objective === 'string' && row.objective.endsWith(`key ${key}`));
     if (!run) return undefined;
     const runId = id(run.id, 'Run ID');
-    const tasks = runOrca(['orchestration', 'task-list', '--run', runId]);
+    const tasks = this.execute(['orchestration', 'task-list', '--run', runId]);
     const task = (Array.isArray(tasks.tasks) ? tasks.tasks : []).map(object).find(row => typeof row.spec === 'string' && row.spec.includes(`APOS dispatch key: ${key}.`));
     if (!task) return undefined;
     const taskId = id(task.id, 'Task ID');
-    const detail = runOrca(['orchestration', 'dispatch-show', '--task', taskId]);
+    const detail = this.execute(['orchestration', 'dispatch-show', '--task', taskId]);
     const dispatch = object(detail.dispatch);
     if (!dispatch.id) return undefined;
     const match = /Target: (.*?), (GOAL-[A-Z0-9-]+)\./.exec(String(task.spec));

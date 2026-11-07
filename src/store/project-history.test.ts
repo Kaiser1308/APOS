@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -45,5 +45,15 @@ describe('project history', () => {
     writeFileSync(eventFile, `${readFileSync(eventFile, 'utf8')}${JSON.stringify({ ...first, id: 'EV-ghost', type: 'goal-approved' })}\n`);
     await expect(history.record(dir, spec.id, { ...first, id: 'EV-2', type: 'goal-approved' })).rejects.toThrow(/Uncommitted APOS Goal history/);
     expect(readFileSync(eventFile, 'utf8')).toContain('EV-ghost');
+  });
+  it('recovers a stale lock left by a dead process', async () => {
+    const dir = repo();
+    const lock = join(dir, '.apos', '.history.lock');
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(join(lock, 'owner.json'), JSON.stringify({ pid: 99999999, token: 'dead' }));
+    utimesSync(lock, new Date(0), new Date(0));
+    const event = { id: 'EV-1', goalId: spec.id, type: 'goal-drafted' as const, data: spec, at: '2026-11-07T00:00:00.000Z' };
+    await new ProjectHistory().record(dir, spec.id, event);
+    expect(existsSync(lock)).toBe(false);
   });
 });

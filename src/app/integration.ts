@@ -15,13 +15,16 @@ export interface CommitInspector {
 
 export class GitCommitInspector implements CommitInspector {
   exists(repoPath: string, ref: string): boolean {
+    if (!/^[0-9a-fA-F]{40,64}$/.test(ref)) return false;
     try { execFileSync('git', ['-C', assertGitRoot(repoPath), 'cat-file', '-e', `${ref}^{commit}`], { stdio: 'ignore' }); return true; }
     catch { return false; }
   }
   files(repoPath: string, ref: string): string[] {
+    if (!/^[0-9a-fA-F]{40,64}$/.test(ref)) throw new Error('Full commit hash required');
     return execFileSync('git', ['-C', assertGitRoot(repoPath), 'diff-tree', '--root', '--no-commit-id', '--name-only', '-r', ref], { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean);
   }
   contains(repoPath: string, ancestor: string, descendant: string): boolean {
+    if (![ancestor, descendant].every(ref => /^[0-9a-fA-F]{40,64}$/.test(ref))) return false;
     try { execFileSync('git', ['-C', assertGitRoot(repoPath), 'merge-base', '--is-ancestor', ancestor, descendant], { stdio: 'ignore' }); return true; }
     catch { return false; }
   }

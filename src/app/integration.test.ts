@@ -78,6 +78,7 @@ it('checks commit existence, changed files and ancestry against Git', () => {
   const integrated = git(['rev-parse', 'HEAD']);
   const inspector = new GitCommitInspector();
   expect(inspector.exists(dir, firstCommit)).toBe(true);
+  expect(inspector.exists(dir, '--help')).toBe(false);
   expect(inspector.files(dir, firstCommit)).toEqual(['scanner.txt']);
   expect(inspector.contains(dir, firstCommit, integrated)).toBe(true);
   expect(inspector.contains(dir, integrated, firstCommit)).toBe(false);

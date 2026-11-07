@@ -13,6 +13,7 @@ export class MergeService {
     const state = this.store.getGoal(goalId);
     if (state?.status !== 'verified' || !state.spec.autoMergeAuthorized || state.merge) throw new Error('Verified Goal with unused Human merge authorization required');
     if (!sourceRef?.trim() || !targetBranch?.trim()) throw new Error('Source commit and target branch required');
+    if (!/^[0-9a-fA-F]{40,64}$/.test(sourceRef)) throw new Error('Full source commit hash required');
     if (state.proposal?.mode === 'multi-wp') {
       if (state.integration?.commitRef !== sourceRef) throw new Error('Source must be the verified integration commit');
     } else {

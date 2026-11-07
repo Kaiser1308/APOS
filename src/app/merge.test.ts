@@ -29,7 +29,7 @@ it('merges only an authorized, verified Solo commit backed by acceptance evidenc
   add('evidence-submitted', { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:goal', commitRef: source });
   add('verified');
   const service = new MergeService(store);
-  expect(() => service.merge(spec.id, dir, 'HEAD', target)).toThrow(/evidence/i);
+  expect(() => service.merge(spec.id, dir, '0'.repeat(40), target)).toThrow(/evidence/i);
   const merged = service.merge(spec.id, dir, source, target);
   expect(merged).toBe(git(['rev-parse', 'HEAD']));
   expect(git(['merge-base', '--is-ancestor', source, merged])).toBe('');

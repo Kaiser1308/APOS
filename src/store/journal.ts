@@ -11,6 +11,7 @@ export interface GoalRepository {
   append(event: GoalEvent): void;
   getGoal(id: string): GoalState | undefined;
   listGoals(): GoalState[];
+  events(id: string): GoalEvent[];
 }
 
 export class ProjectJournal implements GoalRepository {
@@ -72,4 +73,5 @@ export class ProjectJournal implements GoalRepository {
 
   getGoal(id: string): GoalState | undefined { return this.store.getGoal(id); }
   listGoals(): GoalState[] { return this.store.listGoals(); }
+  events(id: string): GoalEvent[] { return this.store.events(id); }
 }

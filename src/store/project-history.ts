@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join, relative, resolve } from 'node:path';
 import type { GoalEvent } from '../domain/transitions.js';
 
@@ -32,16 +33,39 @@ export function withHistoryLock<T>(repo: string, action: () => T): T {
   const aposDir = join(repo, '.apos');
   mkdirSync(aposDir, { recursive: true });
   const lock = join(aposDir, '.history.lock');
+  const ownerFile = join(lock, 'owner.json');
+  const token = randomUUID();
   const deadline = Date.now() + 15_000;
   while (true) {
-    try { mkdirSync(lock); break; }
+    try { mkdirSync(lock); writeFileSync(ownerFile, JSON.stringify({ pid: process.pid, token, createdAt: Date.now() })); break; }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      try {
+        const age = Date.now() - statSync(lock).mtimeMs;
+        if (age > 2_000) {
+          const owner = existsSync(ownerFile) ? JSON.parse(readFileSync(ownerFile, 'utf8')) as { pid?: number } : {};
+          let alive = true;
+          if (typeof owner.pid === 'number') {
+            try { process.kill(owner.pid, 0); }
+            catch (reason) { alive = (reason as NodeJS.ErrnoException).code !== 'ESRCH'; }
+          } else alive = false;
+          if (!alive) {
+            if (existsSync(ownerFile)) unlinkSync(ownerFile);
+            rmdirSync(lock);
+            continue;
+          }
+        }
+      } catch { /* Another process changed the lock; wait and retry. */ }
       if (Date.now() >= deadline) throw new Error(`APOS history lock is busy: ${lock}`);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
     }
   }
-  try { return action(); } finally { rmdirSync(lock); }
+  try { return action(); } finally {
+    const owner = JSON.parse(readFileSync(ownerFile, 'utf8')) as { token?: string };
+    if (owner.token !== token) throw new Error('APOS history lock ownership changed');
+    unlinkSync(ownerFile);
+    rmdirSync(lock);
+  }
 }
 
 export class ProjectHistory {

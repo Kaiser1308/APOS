@@ -68,6 +68,8 @@ If the approved proposal names risks or the Goal permits automatic merge, APOS r
 
 `apos controller tick` is a mechanical recovery pass: it reconciles uncertain Orca dispatches, starts dependency-ready packages, and resumes stale package owners whose prior dispatch has settled. It reports unresolved attempts without claiming completion. Run it after a CLI interruption or from a local scheduler; it never polls with an LLM.
 
+`apos metrics show GOAL-001` summarizes attempts, blockers, requested changes, package count and cycle time from the project event log. It does not estimate token usage or cost without Orca telemetry.
+
 Execution Proposals may set `maxAttempts` from 1 to 10 (default 3). APOS parks a Solo Goal or package when its budget is exhausted and records a blocker for Lead/Human decision; the controller does not retry it indefinitely.
 
 Evidence JSON has `acceptanceId`, `result` (`pass` or `fail`), `command`, and `artifactRef`. APOS requires the latest evidence for every acceptance criterion to pass before technical verification. Human outcome closure is a separate command. Automatic code merge is not performed by this Solo CLI slice, even if a Goal records merge authorization.

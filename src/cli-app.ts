@@ -12,6 +12,7 @@ import { ControllerService } from './app/controller.js';
 import { MergeService } from './app/merge.js';
 import { ReviewService } from './app/review.js';
 import { assertExecutionSettled } from './app/replan.js';
+import { MetricsService } from './app/metrics.js';
 import { VerificationService } from './app/verification.js';
 import { parseWorkPackage } from './domain/packages.js';
 import { OrcaRuntime, type RuntimeAdapter } from './runtime/orca.js';
@@ -205,6 +206,8 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     const result = new ReviewService(journal).submit(goalId, JSON.parse(readFileSync(file, 'utf8')));
     write(`Reviewed ${result.subject}${result.packageId ? ` ${result.packageId}` : ''}: ${result.result}`);
   }));
+  const metrics = program.command('metrics');
+  metrics.command('show').argument('<goalId>').action((goalId: string) => withJournal(journal => write(JSON.stringify(new MetricsService(journal).show(goalId)))));
 
   const evidence = program.command('evidence');
   evidence.command('add').argument('<id>').requiredOption('--file <json>').action((id: string, { file }: { file: string }) => withJournal(journal => {

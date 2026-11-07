@@ -33,6 +33,10 @@ export class SqliteStore {
     return (this.db.prepare('SELECT id FROM events WHERE goal_id = ? ORDER BY seq').all(goalId) as Array<{ id: string }>).map(row => row.id);
   }
 
+  events(goalId: string): GoalEvent[] {
+    return (this.db.prepare('SELECT payload FROM events WHERE goal_id = ? ORDER BY seq').all(goalId) as Array<{ payload: string }>).map(row => JSON.parse(row.payload) as GoalEvent);
+  }
+
   replaceGoalEvents(goalId: string, events: GoalEvent[]): void {
     let state: GoalState | undefined;
     for (const event of events) {

@@ -32,10 +32,18 @@ export class SoloService {
 
   async resume(goalId: string): Promise<RuntimeRef> {
     const state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'executing' || state.proposal?.mode !== 'solo-phased' || !state.runtimeRef || !state.checkpoint) throw new Error('Phased checkpoint and active owner required');
+    if (!state || state.status !== 'executing' || !state.proposal?.mode.startsWith('solo') || !state.runtimeRef || !state.checkpoint) throw new Error('Solo checkpoint and active owner required');
+    if (state.resumeIntent) {
+      const recovered = await this.runtime.recover?.(state.resumeIntent, (state.runtimeRef as RuntimeRef).runId);
+      if (!recovered) throw new Error('Resume outcome unknown; reconcile Orca before retrying');
+      this.record(goalId, 'runtime-resumed', recovered);
+      return recovered;
+    }
     const observation = await this.runtime.inspect(state.runtimeRef as RuntimeRef);
-    if (observation.state !== 'settled') throw new Error('Prior Orca dispatch must be settled before phased resume');
-    const next = await this.runtime.resumeSolo(state.runtimeRef as RuntimeRef, state.checkpoint as PhaseCheckpoint);
+    if (!['completed', 'failed'].includes(observation.outcome ?? '')) throw new Error('Prior Orca dispatch must settle before Solo resume');
+    const key = randomUUID();
+    this.record(goalId, 'resume-intended', key);
+    const next = await this.runtime.resumeSolo(state.runtimeRef as RuntimeRef, state.checkpoint as PhaseCheckpoint, key);
     this.record(goalId, 'runtime-resumed', next);
     return next;
   }
@@ -43,7 +51,14 @@ export class SoloService {
   async reconcile(goalId: string): Promise<'live' | 'settled' | 'unverifiable'> {
     const state = this.store.getGoal(goalId);
     if (!state?.runtimeRef) return 'unverifiable';
-    const observation = await this.runtime.inspect(state.runtimeRef as RuntimeRef);
+    let ref = state.runtimeRef as RuntimeRef;
+    if (state.resumeIntent) {
+      const recovered = await this.runtime.recover?.(state.resumeIntent, ref.runId);
+      if (!recovered) return 'unverifiable';
+      this.record(goalId, 'runtime-resumed', recovered);
+      ref = recovered;
+    }
+    const observation = await this.runtime.inspect(ref);
     return observation.state;
   }
 

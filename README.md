@@ -28,6 +28,9 @@ apos lead propose --file execution.json
 apos execution approve GOAL-001
 apos execution status GOAL-001
 apos execution reconcile GOAL-001
+apos execution checkpoint GOAL-001 --file phase.json
+apos execution resume GOAL-001
+apos execution retry GOAL-001 --reason "Fix QR edge case"
 apos evidence add GOAL-001 --file evidence.json
 apos execution verify GOAL-001
 apos outcome close GOAL-001

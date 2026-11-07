@@ -24,8 +24,11 @@ class FakeRuntime implements RuntimeAdapter {
   resumes = 0;
   state: 'live' | 'settled' = 'live';
   outcome?: 'completed' | 'failed';
+  failResume = false;
+  recovered?: RuntimeRef;
   async startSolo(): Promise<RuntimeRef> { this.starts++; return ref; }
-  async resumeSolo(): Promise<RuntimeRef> { this.resumes++; return ref; }
+  async resumeSolo(): Promise<RuntimeRef> { this.resumes++; if (this.failResume) throw new Error('Orca response lost'); return ref; }
+  async recover() { return this.recovered; }
   async inspect() { return { state: this.state, outcome: this.outcome, ref }; }
 }
 
@@ -58,7 +61,7 @@ describe('Solo dispatch', () => {
     const service = new SoloService(store, runtime);
     await service.start(spec.id, dir);
     add('checkpointed', { phase: 'phase-1', progress: 'done', evidenceRefs: ['commit:abc'] });
-    runtime.state = 'settled';
+    runtime.state = 'settled'; runtime.outcome = 'completed';
     await service.resume(spec.id);
     expect(runtime.resumes).toBe(1);
     expect(store.getGoal(spec.id)?.runtimeRef).toEqual(ref);
@@ -71,7 +74,7 @@ describe('Solo dispatch', () => {
     const service = new SoloService(store, runtime);
     await service.start(spec.id, dir);
     add('checkpointed', { phase: 'phase-1', progress: 'done', evidenceRefs: [] });
-    await expect(service.resume(spec.id)).rejects.toThrow(/settled/);
+    await expect(service.resume(spec.id)).rejects.toThrow(/settle/);
     expect(runtime.resumes).toBe(0);
     store.close();
   });
@@ -87,6 +90,35 @@ describe('Solo dispatch', () => {
     await expect(service.verify(spec.id)).rejects.toThrow(/complete successfully/);
     runtime.outcome = 'completed';
     expect((await service.verify(spec.id)).passed).toBe(true);
+    store.close();
+  });
+  it('recovers a lost phased resume response without starting another attempt', async () => {
+    const { store, add, dir } = fixture();
+    add('goal-approved'); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
+    const runtime = new FakeRuntime();
+    const service = new SoloService(store, runtime);
+    await service.start(spec.id, dir);
+    add('checkpointed', { phase: 'phase-1', progress: 'done', evidenceRefs: [] });
+    runtime.state = 'settled'; runtime.outcome = 'completed'; runtime.failResume = true;
+    await expect(service.resume(spec.id)).rejects.toThrow(/response lost/);
+    expect(store.getGoal(spec.id)?.resumeIntent).toBeTruthy();
+    runtime.recovered = { ...ref, dispatchId: 'dispatch-recovered' };
+    expect((await service.resume(spec.id)).dispatchId).toBe('dispatch-recovered');
+    expect(runtime.resumes).toBe(1);
+    store.close();
+  });
+  it('reuses a failed Solo Direct owner and invalidates prior evidence for the repair attempt', async () => {
+    const { store, add, dir } = fixture();
+    add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    const runtime = new FakeRuntime();
+    const service = new SoloService(store, runtime);
+    await service.start(spec.id, dir);
+    add('evidence-submitted', { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'old-log' });
+    add('checkpointed', { phase: 'repair', progress: 'Fix failed QR edge case', evidenceRefs: [] });
+    runtime.state = 'settled'; runtime.outcome = 'failed';
+    await service.resume(spec.id);
+    expect(runtime.resumes).toBe(1);
+    expect(store.getGoal(spec.id)?.evidence).toEqual([]);
     store.close();
   });
 });

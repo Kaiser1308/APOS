@@ -5,7 +5,7 @@ import { parseReview, type ReviewRecord } from './reviews.js';
 export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
-  | 'dispatch-intended' | 'execution-started' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
+  | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -21,6 +21,7 @@ export type GoalState = {
   evidence: unknown[];
   checkpoint?: unknown;
   dispatchIntent?: string;
+  resumeIntent?: string;
   runtimeRef?: unknown;
   blocker?: unknown;
   packages?: Record<string, PackageState>;
@@ -168,8 +169,12 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(typeof event.data === 'string' && event.data.length > 0, 'Dispatch key required');
       return { ...state, dispatchIntent: event.data };
     case 'runtime-resumed':
-      requireThat(state.status === 'executing' && state.runtimeRef, 'Existing execution required');
-      return { ...state, runtimeRef: event.data };
+      requireThat(state.status === 'executing' && state.runtimeRef && state.resumeIntent && event.data, 'Existing resume intent required');
+      return { ...state, runtimeRef: event.data, resumeIntent: undefined, evidence: [], reviews: [] };
+    case 'resume-intended':
+      requireThat(state.status === 'executing' && state.runtimeRef && state.checkpoint && !state.resumeIntent && state.proposal?.mode.startsWith('solo'), 'Solo checkpoint and prior owner required');
+      requireThat(typeof event.data === 'string' && event.data.length > 0, 'Resume key required');
+      return { ...state, resumeIntent: event.data };
     case 'checkpointed':
       requireThat(state.status === 'executing', 'Execution required');
       return { ...state, checkpoint: event.data };

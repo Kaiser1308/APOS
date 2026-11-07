@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { parseExecutionProposal, parseGoalSpec, type Evidence } from './domain/contracts.js';
+import { parseExecutionProposal, parseGoalSpec, type Evidence, type PhaseCheckpoint } from './domain/contracts.js';
 import type { GoalEventType } from './domain/transitions.js';
 import { initProject } from './app/init-project.js';
 import { SoloService } from './app/solo.js';
@@ -96,6 +96,22 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     try { write((await new SoloService(new ProjectJournal(path, store), runtime).start(id, path)).dispatchId); }
     finally { store.close(); }
   });
+  execution.command('checkpoint').argument('<id>').requiredOption('--file <json>').action((id: string, { file }: { file: string }) => withJournal(journal => {
+    const checkpoint = JSON.parse(readFileSync(file, 'utf8')) as PhaseCheckpoint;
+    if (typeof checkpoint.phase !== 'string' || !checkpoint.phase.trim() || typeof checkpoint.progress !== 'string' || !checkpoint.progress.trim() || !Array.isArray(checkpoint.evidenceRefs) || !checkpoint.evidenceRefs.every(item => typeof item === 'string')) throw new Error('Phase checkpoint requires phase, progress and evidenceRefs');
+    journal.append(event(id, 'checkpointed', checkpoint));
+    write(`Checkpointed ${id}: ${checkpoint.phase}`);
+  }));
+  execution.command('resume').argument('<id>').action((id: string) => withJournalAsync(async journal => {
+    const ref = await new SoloService(journal, runtime).resume(id);
+    write(`Resumed ${id}: ${ref.dispatchId}`);
+  }));
+  execution.command('retry').argument('<id>').requiredOption('--reason <text>').action((id: string, { reason }: { reason: string }) => withJournalAsync(async journal => {
+    if (!reason.trim()) throw new Error('Retry reason required');
+    if (!journal.getGoal(id)?.resumeIntent) journal.append(event(id, 'checkpointed', { phase: 'repair', progress: reason, evidenceRefs: [] }));
+    const ref = await new SoloService(journal, runtime).resume(id);
+    write(`Retried ${id}: ${ref.dispatchId}`);
+  }));
   execution.command('status').argument('<id>').action((id: string) => withJournal(journal => {
     const state = journal.getGoal(id);
     if (!state) throw new Error(`Unknown Goal: ${id}`);

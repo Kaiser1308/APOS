@@ -66,6 +66,17 @@ it('resumes a revised package in its original terminal and worktree', async () =
   expect(ref).toMatchObject({ owner: 'worker', dispatchId: 'ctx_2', worktreeId: 'repo_1::C:/worktree' });
 });
 
+it('recovers a phased Solo resume from its known Run without scanning for a new Run', async () => {
+  const calls: string[][] = [];
+  const runtime = new OrcaRuntime(args => {
+    calls.push(args);
+    if (args[1] === 'task-list') return { tasks: [{ id: 'task_2', spec: 'Target: C:/project, APOS Solo Goal. APOS dispatch key: resume-key.' }] };
+    return { dispatch: { id: 'ctx_2', assignee_handle: 'term_1' } };
+  });
+  expect(await runtime.recover('resume-key', 'run_1')).toMatchObject({ runId: 'run_1', dispatchId: 'ctx_2', terminal: 'term_1' });
+  expect(calls.some(args => args[1] === 'run-list')).toBe(false);
+});
+
 it('treats a live terminal with a settled dispatch as settled work', () => {
   const shown = { dispatch: { status: 'completed' }, observation: { status: 'live' }, projection: { liveness: { verdict: 'live' } } };
   expect(interpretWorkerShow(shown)).toBe('settled');

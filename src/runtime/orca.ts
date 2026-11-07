@@ -8,9 +8,9 @@ export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; o
 export type SoloInput = { repoPath: string; goalId: string; proposalVersion: number; checkpoint?: PhaseCheckpoint; idempotencyKey: string };
 export interface RuntimeAdapter {
   startSolo(input: SoloInput): Promise<RuntimeRef>;
-  resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint): Promise<RuntimeRef>;
+  resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string): Promise<RuntimeRef>;
   inspect(ref: RuntimeRef): Promise<RuntimeObservation>;
-  recover?(key: string): Promise<RuntimeRef | undefined>;
+  recover?(key: string, runId?: string): Promise<RuntimeRef | undefined>;
 }
 
 export function parseOrcaResult(json: string): Record<string, unknown> {
@@ -120,11 +120,12 @@ export class OrcaRuntime implements RuntimeAdapter {
     return { ...ref, owner: 'worker', worktreeId: ref.worktreeId ?? prior.worktreeId };
   }
 
-  async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint): Promise<RuntimeRef> {
+  async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string): Promise<RuntimeRef> {
     if (!ref.terminal) throw new Error('Orca terminal identity required to resume same owner');
-    const spec = `Continue the same APOS Solo Goal owner from phase ${checkpoint.phase}. Progress: ${checkpoint.progress}. Evidence: ${checkpoint.evidenceRefs.join(', ')}. Keep the approved Goal contract and report verification evidence.`;
+    const spec = `Target: ${ref.repoPath}, APOS Solo Goal. Continue the same owner from phase ${checkpoint.phase}. Progress: ${checkpoint.progress}. Evidence: ${checkpoint.evidenceRefs.join(', ')}. Keep the approved Goal contract and report verification evidence. APOS dispatch key: ${idempotencyKey}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `path:${ref.repoPath}`, '--run', ref.runId]);
-    return extractStartedRef(started, ref.repoPath);
+    const next = extractStartedRef(started, ref.repoPath);
+    return { ...next, terminal: next.terminal ?? ref.terminal, worktreeId: next.worktreeId ?? ref.worktreeId };
   }
 
   async inspect(ref: RuntimeRef): Promise<RuntimeObservation> {
@@ -133,8 +134,8 @@ export class OrcaRuntime implements RuntimeAdapter {
     return { state: interpretWorkerShow(shown), ...(status === 'completed' || status === 'failed' ? { outcome: status } : {}), ref };
   }
 
-  async recover(key: string): Promise<RuntimeRef | undefined> {
-    const run = this.findRun(key);
+  async recover(key: string, knownRunId?: string): Promise<RuntimeRef | undefined> {
+    const run = knownRunId ? { id: knownRunId } : this.findRun(key);
     if (!run) return undefined;
     const runId = id(run.id, 'Run ID');
     const tasks = this.execute(['orchestration', 'task-list', '--run', runId]);
@@ -144,7 +145,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     const detail = this.execute(['orchestration', 'dispatch-show', '--task', taskId]);
     const dispatch = object(detail.dispatch);
     if (!dispatch.id) return undefined;
-    const match = /Target: (.*?), (GOAL-[A-Z0-9-]+)\./.exec(String(task.spec));
+    const match = /Target: (.*?), (?:GOAL-[A-Z0-9-]+\.|APOS Solo Goal\.)/.exec(String(task.spec));
     if (!match) throw new Error('Orca task has no APOS repo path');
     return { runId, taskId, dispatchId: id(dispatch.id, 'Dispatch ID'), owner: 'lead', repoPath: match[1], terminal: typeof dispatch.assignee_handle === 'string' ? dispatch.assignee_handle : undefined };
   }

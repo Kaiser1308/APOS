@@ -39,4 +39,16 @@ it('requires separate Goal approval, selection and Proposal approval before auto
   expect(starts).toBe(1);
   await invoke('execution', 'status', spec.id);
   expect(output.at(-1)).toContain('executing');
+  await invoke('execution', 'reconcile', spec.id);
+  expect(output.at(-1)).toContain('live');
+  await invoke('decision', 'record', spec.id, '--note', 'Use existing auth flow');
+  await invoke('blocker', 'report', spec.id, '--kind', 'external', '--note', 'Test service unavailable');
+  await invoke('blocker', 'resolve', spec.id, '--note', 'Test service restored');
+  const evidenceFile = join(dir, 'evidence-input.json');
+  writeFileSync(evidenceFile, JSON.stringify({ acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'commit:abc' }));
+  await invoke('evidence', 'add', spec.id, '--file', evidenceFile);
+  await invoke('execution', 'verify', spec.id);
+  await invoke('outcome', 'close', spec.id);
+  await invoke('execution', 'status', spec.id);
+  expect(output.at(-1)).toContain('closed');
 });

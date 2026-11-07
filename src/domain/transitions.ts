@@ -3,7 +3,7 @@ import { parseExecutionProposal, parseGoalSpec, type ExecutionProposal, type Goa
 export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
-  | 'dispatch-intended' | 'execution-started' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'evidence-submitted'
+  | 'dispatch-intended' | 'execution-started' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -18,6 +18,7 @@ export type GoalState = {
   checkpoint?: unknown;
   dispatchIntent?: string;
   runtimeRef?: unknown;
+  blocker?: unknown;
 };
 
 function requireThat(ok: unknown, message: string): asserts ok {
@@ -73,7 +74,14 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, checkpoint: event.data };
     case 'blocked':
       requireThat(state.status === 'executing', 'Execution required');
-      return { ...state, status: 'blocked' };
+      requireThat(event.data && typeof event.data === 'object', 'Blocker details required');
+      return { ...state, status: 'blocked', blocker: event.data };
+    case 'unblocked':
+      requireThat(state.status === 'blocked', 'Blocked Goal required');
+      return { ...state, status: 'executing', blocker: undefined };
+    case 'decision-logged':
+      requireThat(event.data && typeof event.data === 'object', 'Decision details required');
+      return state;
     case 'evidence-submitted':
       requireThat(state.status === 'executing', 'Execution required');
       return { ...state, evidence: [...state.evidence, event.data] };

@@ -85,6 +85,12 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     if (!state) throw new Error(`Unknown Goal: ${id}`);
     write(JSON.stringify({ goalId: id, status: state.status, proposalVersion: state.proposal?.version, runtimeRef: state.runtimeRef }));
   }));
+  execution.command('reconcile').argument('<id>').action(async (id: string) => {
+    const path = repo();
+    const store = SqliteStore.open(join(path, '.apos', 'state.sqlite'));
+    try { write(`${id}: ${await new SoloService(new ProjectJournal(path, store), runtime).reconcile(id)}`); }
+    finally { store.close(); }
+  });
   execution.command('verify').argument('<id>').action((id: string) => withJournal(journal => {
     const result = new VerificationService(journal).verify(id);
     write(`Verified ${id}: ${result.acceptanceIds.join(', ')}`);
@@ -96,6 +102,24 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(`Recorded evidence for ${id}`);
   }));
   evidence.command('show').argument('<id>').action((id: string) => withJournal(journal => write(JSON.stringify(journal.getGoal(id)?.evidence ?? []))));
+  const decision = program.command('decision');
+  decision.command('record').argument('<id>').requiredOption('--note <text>').action((id: string, { note }: { note: string }) => withJournal(journal => {
+    if (!note.trim()) throw new Error('Decision note required');
+    journal.append(event(id, 'decision-logged', { note }));
+    write(`Recorded decision for ${id}`);
+  }));
+  const blocker = program.command('blocker');
+  blocker.command('report').argument('<id>').requiredOption('--kind <kind>').requiredOption('--note <text>').action((id: string, { kind, note }: { kind: string; note: string }) => withJournal(journal => {
+    if (!['technical', 'product', 'external'].includes(kind) || !note.trim()) throw new Error('Valid blocker kind and note required');
+    journal.append(event(id, 'blocked', { kind, note }));
+    write(`Blocked ${id}`);
+  }));
+  blocker.command('resolve').argument('<id>').requiredOption('--note <text>').action((id: string, { note }: { note: string }) => withJournal(journal => {
+    if (!note.trim()) throw new Error('Resolution note required');
+    journal.append(event(id, 'decision-logged', { note }));
+    journal.append(event(id, 'unblocked'));
+    write(`Unblocked ${id}`);
+  }));
   const outcome = program.command('outcome');
   for (const decision of ['close', 'revise', 'stop'] as const) {
     outcome.command(decision).argument('<id>').action((id: string) => withJournal(journal => {

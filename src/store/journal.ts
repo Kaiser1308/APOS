@@ -1,6 +1,8 @@
 import { applyEvent, type GoalEvent, type GoalState } from '../domain/transitions.js';
 import { parseExecutionProposal, parseGoalSpec } from '../domain/contracts.js';
 import { ProjectHistory } from './project-history.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { SqliteStore } from './sqlite.js';
 
 export interface GoalRepository {
@@ -24,6 +26,13 @@ export class ProjectJournal implements GoalRepository {
     if (event.type === 'proposal-drafted' || event.type === 'proposal-revised') {
       const proposal = parseExecutionProposal(event.data);
       documents.push({ path: 'execution.md', content: `# ${proposal.id}: ${proposal.mode}\n\n${proposal.approach}\n\n\`\`\`json\n${JSON.stringify(proposal, null, 2)}\n\`\`\`\n` });
+    }
+    if (event.type === 'decision-logged') {
+      const path = join(this.repoPath, '.apos', 'goals', event.goalId, 'decisions.md');
+      const prior = existsSync(path) ? readFileSync(path, 'utf8') : `# Decisions for ${event.goalId}\n`;
+      const note = (event.data as { note?: unknown }).note;
+      if (typeof note !== 'string' || !note.trim()) throw new Error('Decision note required');
+      documents.push({ path: 'decisions.md', content: `${prior}\n- ${event.at} ${note.trim()}\n` });
     }
     this.history.recordSync(this.repoPath, event.goalId, event, documents);
     this.store.append(event);

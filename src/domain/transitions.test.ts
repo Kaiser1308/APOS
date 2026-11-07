@@ -36,4 +36,17 @@ describe('approval gates', () => {
     state = applyEvent(state, event('outcome-accepted'));
     expect(() => applyEvent(state, event('execution-started'))).toThrow();
   });
+  it('records a blocker and requires an explicit unblock event to resume', () => {
+    let state = applyEvent(start(), event('goal-approved'));
+    state = applyEvent(state, event('goal-selected'));
+    state = applyEvent(state, event('proposal-drafted', proposal));
+    state = applyEvent(state, event('proposal-approved'));
+    state = applyEvent(state, event('execution-started'));
+    state = applyEvent(state, event('blocked', { kind: 'external', note: 'API unavailable' }));
+    expect(state.status).toBe('blocked');
+    expect(() => applyEvent(state, event('verified'))).toThrow();
+    state = applyEvent(state, event('decision-logged', { note: 'API restored' }));
+    expect(state.status).toBe('blocked');
+    expect(applyEvent(state, event('unblocked')).status).toBe('executing');
+  });
 });

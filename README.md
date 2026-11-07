@@ -73,3 +73,9 @@ If the approved proposal names risks or the Goal permits automatic merge, APOS r
 Execution Proposals may set `maxAttempts` from 1 to 10 (default 3). APOS parks a Solo Goal or package when its budget is exhausted and records a blocker for Lead/Human decision; the controller does not retry it indefinitely.
 
 Evidence JSON has `acceptanceId`, `result` (`pass` or `fail`), `command`, and `artifactRef`. APOS requires the latest evidence for every acceptance criterion to pass before technical verification. Human outcome closure is a separate command. Solo and Multi-WP integration may use `integration merge` only when the Goal records explicit merge authorization and the merge gates pass.
+
+## Local validation (2026-11-08)
+
+- `npx vitest run --maxWorkers 2`: 84 tests passed; `npm run build` passed; `npm audit --audit-level=high`: 0 vulnerabilities.
+- Real Orca + Claude Code Solo Goal `GOAL-SOLO-SMOKE`: approval, auto-dispatch, committed implementation and report, inbox settlement, acceptance, Goal closure, terminal release.
+- Real Orca + Claude Code Multi-WP Goal `GOAL-SMOKE`: two independent workers in one Run and separate worktrees, committed reports, package acceptance, integration on a disposable branch, Goal closure, both terminals released. No APOS branch was merged into `main`.

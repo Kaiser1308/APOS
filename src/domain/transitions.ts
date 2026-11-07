@@ -1,11 +1,12 @@
 import { parseExecutionProposal, parseGoalSpec, type ExecutionProposal, type GoalSpec } from './contracts.js';
 import { parsePackageEvidence, parseWorkPackage, validatePackageGraph, type PackageEvidence, type WorkPackageSpec } from './packages.js';
+import { parseReview, type ReviewRecord } from './reviews.js';
 
 export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
+  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
 export type PackageBlocker = { kind: 'technical' | 'product' | 'external'; note: string };
@@ -25,6 +26,7 @@ export type GoalState = {
   packages?: Record<string, PackageState>;
   integration?: { commitRef: string; conflictResolution?: string; regression: { result: 'pass'; command: string; artifactRef: string } };
   merge?: { sourceRef: string; targetBranch: string; mergeCommit: string };
+  reviews: ReviewRecord[];
 };
 
 function requireThat(ok: unknown, message: string): asserts ok {
@@ -37,7 +39,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     requireThat(!state, 'Goal already exists');
     const spec = parseGoalSpec(event.data);
     requireThat(spec.id === event.goalId, 'Event Goal ID mismatch');
-    return { spec, status: 'draft', selected: false, evidence: [], packages: {} };
+    return { spec, status: 'draft', selected: false, evidence: [], packages: {}, reviews: [] };
   }
   requireThat(state, 'Goal does not exist');
   requireThat(state.spec.id === event.goalId, 'Event Goal ID mismatch');
@@ -52,7 +54,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'goal-revised': {
       const spec = parseGoalSpec(event.data);
       requireThat(spec.id === state.spec.id && spec.version > state.spec.version, 'Goal revision must advance version');
-      return { spec, status: 'draft', selected: false, evidence: [], packages: {} };
+      return { spec, status: 'draft', selected: false, evidence: [], packages: {}, reviews: [] };
     }
     case 'proposal-drafted':
     case 'proposal-revised': {
@@ -60,7 +62,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const proposal = parseExecutionProposal(event.data);
       requireThat(proposal.goalId === state.spec.id && proposal.goalVersion === state.spec.version, 'Proposal Goal version mismatch');
       requireThat(!state.proposal || proposal.version > state.proposal.version, 'Proposal version must advance');
-      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined };
+      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined, reviews: [] };
     }
     case 'proposal-approved':
       requireThat(state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
@@ -98,7 +100,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         const item = packages[packageId];
         packages[packageId] = { ...item, status: item.runtimeRef ? 'stale' : 'specified', evidence: [] };
       }
-      return { ...state, packages, integration: undefined, evidence: [] };
+      return { ...state, packages, integration: undefined, evidence: [], reviews: state.reviews.filter(review => review.subject === 'package' && !affected.has(review.packageId ?? '')) };
     }
     case 'package-dispatch-intended': {
       requireThat(state.status === 'ready' || state.status === 'executing', 'Approved Multi-WP Goal required');
@@ -139,7 +141,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(item?.status === 'blocked' && item.blocker, 'Blocked package required');
       requireThat(item.blocker.kind !== 'product', 'Goal reapproval required for product blocker');
       requireThat(typeof data.resolution === 'string' && data.resolution.trim(), 'Blocker resolution required');
-      return { ...state, packages: { ...state.packages, [data.packageId!]: { ...item, status: 'stale', blocker: undefined, evidence: [] } } };
+      return { ...state, packages: { ...state.packages, [data.packageId!]: { ...item, status: 'stale', blocker: undefined, evidence: [] } }, reviews: state.reviews.filter(review => review.packageId !== data.packageId) };
     }
     case 'package-verified': {
       const data = event.data as { packageId?: string };
@@ -184,6 +186,21 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'evidence-submitted':
       requireThat(state.status === 'executing', 'Execution required');
       return { ...state, evidence: [...state.evidence, event.data] };
+    case 'review-submitted': {
+      requireThat(state.status === 'executing', 'Executing Goal required for review');
+      const review = parseReview(event.data);
+      if (review.subject === 'package') {
+        const item = state.packages?.[review.packageId!];
+        requireThat(item?.status === 'executing' && item.spec.version === review.packageVersion, 'Executing current package required for review');
+        requireThat(review.reviewer !== item.spec.owner, 'Reviewer must differ from package owner');
+        requireThat(item.evidence.some(evidence => evidence.commitRef === review.commitRef), 'Review commit must match package evidence');
+        const packages = review.result === 'changes' ? { ...state.packages, [review.packageId!]: { ...item, status: 'stale' as const, evidence: [] } } : state.packages;
+        return { ...state, packages, reviews: [...state.reviews, review] };
+      }
+      requireThat(state.proposal?.mode !== 'multi-wp' || Object.values(state.packages ?? {}).every(item => item.status === 'verified'), 'All packages must be verified before Goal review');
+      requireThat(review.reviewer !== 'lead', 'Goal reviewer must differ from Lead owner');
+      return { ...state, reviews: [...state.reviews, review] };
+    }
     case 'integration-completed': {
       requireThat(state.status === 'executing' && state.proposal?.mode === 'multi-wp', 'Executing Multi-WP Goal required');
       requireThat(Object.values(state.packages ?? {}).length >= 2 && Object.values(state.packages ?? {}).every(item => item.status === 'verified'), 'All packages must be verified');
@@ -206,7 +223,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, status: 'closed' };
     case 'outcome-revised':
       requireThat(state.status === 'verified', 'Technical verification required');
-      return { ...state, status: 'draft', selected: false, proposalApprovedVersion: undefined };
+      return { ...state, status: 'draft', selected: false, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined };
     case 'outcome-stopped':
       return { ...state, status: 'stopped' };
   }

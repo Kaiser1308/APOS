@@ -6,6 +6,7 @@ import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal } from '../domain/fixtures.test-support.js';
 import { PackageService, type PackageRuntime } from './packages.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
+import { ReviewService } from './review.js';
 
 const a: WorkPackageSpec = {
   id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a',
@@ -19,13 +20,13 @@ const b: WorkPackageSpec = {
 };
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const fixture = () => {
+const fixture = (risks: string[] = []) => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-packages-')); dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
   for (const [type, data] of [
     ['goal-drafted', spec], ['goal-approved', undefined], ['goal-selected', undefined],
-    ['proposal-drafted', { ...proposal, mode: 'multi-wp' }]
+    ['proposal-drafted', { ...proposal, mode: 'multi-wp', risks }]
   ] as const) store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   return { store, dir };
 };
@@ -119,6 +120,20 @@ describe('package scheduling', () => {
     service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:a', commitRef: 'abc123' });
     await expect(service.verify(spec.id, a.id)).rejects.toThrow(/Orca Worker must complete/);
     expect(service.ready(spec.id)).toEqual([]);
+    store.close();
+  });
+  it('requires a different reviewer for a risky package before releasing dependents', async () => {
+    const { store, dir } = fixture(['Auth regression']);
+    const service = new PackageService(store, new FakeRuntime());
+    service.add(spec.id, a); service.add(spec.id, b); approve(store);
+    await service.dispatchReady(spec.id, dir);
+    service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:a', commitRef: 'commit-a' });
+    await expect(service.verify(spec.id, a.id)).rejects.toThrow(/independent package review/i);
+    const reviews = new ReviewService(store);
+    expect(() => reviews.submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: a.owner, result: 'pass', commitRef: 'commit-a', note: 'Self review' })).toThrow(/Reviewer must differ/);
+    reviews.submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: 'reviewer-agent', result: 'pass', commitRef: 'commit-a', note: 'Checked diff and tests' });
+    await service.verify(spec.id, a.id);
+    expect(service.ready(spec.id).map(item => item.id)).toEqual([b.id]);
     store.close();
   });
   it('invalidates verified downstream evidence when an upstream contract changes', async () => {

@@ -7,18 +7,19 @@ import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal } from '../domain/fixtures.test-support.js';
 import { GitCommitInspector, IntegrationService, type CommitInspector } from './integration.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
+import { ReviewService } from './review.js';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 const first: WorkPackageSpec = { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' };
 const second: WorkPackageSpec = { ...first, id: 'WP-02', owner: 'worker-b', outcome: 'History view', scope: ['history'], acceptance: [{ id: 'WP-AC-2', text: 'view history' }] };
-const setup = () => {
+const setup = (risks: string[] = []) => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-integration-')); dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
   const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   add('goal-drafted', spec); add('goal-approved'); add('goal-selected');
-  add('proposal-drafted', { ...proposal, mode: 'multi-wp' });
+  add('proposal-drafted', { ...proposal, mode: 'multi-wp', risks });
   add('package-added', first); add('package-added', second); add('proposal-approved');
   for (const [item, commitRef] of [[first, 'commit-a'], [second, 'commit-b']] as const) {
     add('package-dispatch-intended', { packageId: item.id, key: `key-${item.id}` });
@@ -80,4 +81,16 @@ it('checks commit existence, changed files and ancestry against Git', () => {
   expect(inspector.files(dir, firstCommit)).toEqual(['scanner.txt']);
   expect(inspector.contains(dir, firstCommit, integrated)).toBe(true);
   expect(inspector.contains(dir, integrated, firstCommit)).toBe(false);
+});
+
+it('requires independent Goal review for a risky integration before recording completion', () => {
+  const { store, dir, add } = setup(['Authentication regression']);
+  add('package-verified', { packageId: first.id }); add('package-verified', { packageId: second.id });
+  const service = new IntegrationService(store, inspector);
+  expect(() => service.complete(spec.id, dir, evidence)).toThrow(/independent Goal review/i);
+  expect(store.getGoal(spec.id)?.integration).toBeUndefined();
+  new ReviewService(store).submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', result: 'pass', commitRef: 'integration', note: 'Checked integrated auth flow' });
+  service.complete(spec.id, dir, evidence);
+  expect(store.getGoal(spec.id)?.status).toBe('verified');
+  store.close();
 });

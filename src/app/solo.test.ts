@@ -23,9 +23,10 @@ class FakeRuntime implements RuntimeAdapter {
   starts = 0;
   resumes = 0;
   state: 'live' | 'settled' = 'live';
+  outcome?: 'completed' | 'failed';
   async startSolo(): Promise<RuntimeRef> { this.starts++; return ref; }
   async resumeSolo(): Promise<RuntimeRef> { this.resumes++; return ref; }
-  async inspect() { return { state: this.state, ref }; }
+  async inspect() { return { state: this.state, outcome: this.outcome, ref }; }
 }
 
 describe('Solo dispatch', () => {
@@ -72,6 +73,20 @@ describe('Solo dispatch', () => {
     add('checkpointed', { phase: 'phase-1', progress: 'done', evidenceRefs: [] });
     await expect(service.resume(spec.id)).rejects.toThrow(/settled/);
     expect(runtime.resumes).toBe(0);
+    store.close();
+  });
+  it('does not verify Solo evidence until Orca reports successful completion', async () => {
+    const { store, add, dir } = fixture();
+    add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    const runtime = new FakeRuntime();
+    const service = new SoloService(store, runtime);
+    await service.start(spec.id, dir);
+    add('evidence-submitted', { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:test' });
+    await expect(service.verify(spec.id)).rejects.toThrow(/complete successfully/);
+    runtime.state = 'settled'; runtime.outcome = 'failed';
+    await expect(service.verify(spec.id)).rejects.toThrow(/complete successfully/);
+    runtime.outcome = 'completed';
+    expect((await service.verify(spec.id)).passed).toBe(true);
     store.close();
   });
 });

@@ -4,7 +4,7 @@ import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntimeRef } from '../app/packages.js';
 
 export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string; worktreeId?: string };
-export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; ref: RuntimeRef };
+export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; outcome?: 'completed' | 'failed'; ref: RuntimeRef };
 export type SoloInput = { repoPath: string; goalId: string; proposalVersion: number; checkpoint?: PhaseCheckpoint; idempotencyKey: string };
 export interface RuntimeAdapter {
   startSolo(input: SoloInput): Promise<RuntimeRef>;
@@ -129,7 +129,8 @@ export class OrcaRuntime implements RuntimeAdapter {
 
   async inspect(ref: RuntimeRef): Promise<RuntimeObservation> {
     const shown = this.execute(['orchestration', 'worker-show', '--dispatch', ref.dispatchId]);
-    return { state: interpretWorkerShow(shown), ref };
+    const status = object(shown.dispatch).status;
+    return { state: interpretWorkerShow(shown), ...(status === 'completed' || status === 'failed' ? { outcome: status } : {}), ref };
   }
 
   async recover(key: string): Promise<RuntimeRef | undefined> {

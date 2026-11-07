@@ -15,7 +15,7 @@ export async function initProject(repoPath: string): Promise<void> {
   if (!existsSync(ignore)) writeFileSync(ignore, 'state.sqlite*\n', 'utf8');
   const files = [config, ignore];
   const packageRoot = fileURLToPath(new URL('../../', import.meta.url));
-  for (const role of ['pm', 'lead', 'worker']) {
+  for (const role of ['pm', 'lead', 'worker', 'reviewer']) {
     const source = join(packageRoot, 'skills', role, 'SKILL.md');
     const targetDir = join(repo, '.claude', 'skills', `apos-${role}`);
     mkdirSync(targetDir, { recursive: true });

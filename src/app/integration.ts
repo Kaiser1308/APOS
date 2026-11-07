@@ -5,6 +5,7 @@ import type { Evidence } from '../domain/contracts.js';
 import type { GoalRepository } from '../store/journal.js';
 import { assertGitRoot } from '../store/project-history.js';
 import { VerificationService } from './verification.js';
+import { requiresIndependentReview } from '../domain/reviews.js';
 
 export interface CommitInspector {
   exists(repoPath: string, ref: string): boolean;
@@ -67,6 +68,10 @@ export class IntegrationService {
     for (const commit of prepared.commits) if (!this.inspector.contains(repoPath, commit, input.commitRef)) throw new Error(`Package commit not integrated: ${commit}`);
     if (input.regression?.result !== 'pass' || !input.regression.command?.trim() || !input.regression.artifactRef?.trim()) throw new Error('Passing regression evidence required');
     const state = this.store.getGoal(goalId)!;
+    if (requiresIndependentReview(state)) {
+      const review = [...state.reviews].reverse().find(item => item.subject === 'goal');
+      if (review?.result !== 'pass' || review.commitRef !== input.commitRef) throw new Error('Passing independent Goal review of integration commit required');
+    }
     const latest = new Map(input.acceptance.map(item => [item.acceptanceId, item]));
     if (!state.spec.acceptance.every(item => latest.get(item.id)?.result === 'pass' && latest.get(item.id)?.command?.trim() && latest.get(item.id)?.artifactRef?.trim())) throw new Error('Passing Goal acceptance evidence required');
     this.store.append({ id: randomUUID(), goalId, type: 'integration-completed', data: { commitRef: input.commitRef, conflictResolution: input.conflictResolution, regression: input.regression }, at: new Date().toISOString() });

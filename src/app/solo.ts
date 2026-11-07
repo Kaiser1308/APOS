@@ -3,6 +3,7 @@ import type { GoalEventType } from '../domain/transitions.js';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { GoalRepository } from '../store/journal.js';
 import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
+import { VerificationService, type VerificationResult } from './verification.js';
 
 export class SoloService {
   constructor(private readonly store: GoalRepository, private readonly runtime: RuntimeAdapter) {}
@@ -44,5 +45,13 @@ export class SoloService {
     if (!state?.runtimeRef) return 'unverifiable';
     const observation = await this.runtime.inspect(state.runtimeRef as RuntimeRef);
     return observation.state;
+  }
+
+  async verify(goalId: string): Promise<VerificationResult> {
+    const state = this.store.getGoal(goalId);
+    if (state?.status !== 'executing' || !state.proposal?.mode.startsWith('solo') || !state.runtimeRef) throw new Error('Executing Solo Goal required');
+    const observation = await this.runtime.inspect(state.runtimeRef as RuntimeRef);
+    if (observation.outcome !== 'completed') throw new Error('Orca Solo dispatch must complete successfully before verification');
+    return new VerificationService(this.store).verify(goalId);
   }
 }

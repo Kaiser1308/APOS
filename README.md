@@ -13,7 +13,7 @@ npm run build
 node dist/cli.js --repo C:\path\to\project init
 ```
 
-`init` creates `.apos/` and installs APOS PM, Lead, and Worker entrypoint skills under the project's `.claude/skills/`. Existing skill files are preserved. APOS writes `state.sqlite` locally and excludes it from Git; important events, decisions, specs, and evidence references are committed under `.apos/goals/`.
+`init` creates `.apos/` and installs APOS PM, Lead, Worker, and Reviewer entrypoint skills under the project's `.claude/skills/`. Existing skill files are preserved. APOS writes `state.sqlite` locally and excludes it from Git; important events, decisions, specs, and evidence references are committed under `.apos/goals/`.
 
 ## Solo Goal flow
 
@@ -56,6 +56,8 @@ apos outcome close GOAL-001
 `execution approve` dispatches the first dependency-ready wave automatically. Each Worker gets an Orca worktree. If an Orca response is unknown, `package reconcile` looks up the original Run, Task, and Dispatch; it does not start a duplicate Worker. `package verify` automatically dispatches newly ready dependents; `package dispatch` remains available after an interruption.
 
 Package evidence includes `packageId`, `packageVersion`, `owner`, `acceptanceId`, `result`, `command`, `artifactRef`, and `commitRef`. Lead can use `package revise GOAL-001 --file revised.json --reason "..."`; affected downstream evidence becomes stale. Use `package block`, `package unblock`, and `package resume` to continue a parked Worker in its original terminal and worktree. Product blockers require a revised Goal approval.
+
+If the approved proposal names risks or the Goal permits automatic merge, APOS requires an independent review of each package and the Goal before verification. Record reviews with `apos review submit GOAL-001 --file review.json`. A package review names `subject: "package"`, `packageId`, `packageVersion`, a reviewer different from the owner, `result`, exact `commitRef`, and a note. A Goal review uses `subject: "goal"` and the delivery commit. `changes` sends a package back to its owner with stale evidence; `controller tick` can resume it after the prior Orca dispatch settles.
 
 `integration prepare` checks that all packages are verified, source commits exist, and files do not overlap unnoticed. `integration complete` requires an integration commit containing every package commit, passing Goal acceptance evidence, passing regression evidence, and a conflict resolution note when files overlap. It records technical verification; Human outcome closure remains separate. APOS merges only through `integration merge GOAL-001 --source <commit> --target <branch>`, and only when that Goal has `autoMergeAuthorized: true`, technical verification passed, the source matches delivery evidence, the target branch is checked out, and the worktree is clean.
 

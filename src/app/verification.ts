@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Evidence, GoalId } from '../domain/contracts.js';
 import type { GoalEventType } from '../domain/transitions.js';
 import type { GoalRepository } from '../store/journal.js';
+import { requiresIndependentReview } from '../domain/reviews.js';
 
 export type VerificationResult = { passed: true; acceptanceIds: string[] };
 
@@ -30,6 +31,11 @@ export class VerificationService {
     }
     const missing = state.spec.acceptance.filter(item => latest.get(item.id)?.result !== 'pass').map(item => item.id);
     if (missing.length) throw new Error(`Acceptance evidence missing or failing: ${missing.join(', ')}`);
+    if (requiresIndependentReview(state)) {
+      const review = [...state.reviews].reverse().find(item => item.subject === 'goal');
+      const commitRef = state.proposal?.mode === 'multi-wp' ? state.integration?.commitRef : latest.get(state.spec.acceptance[0].id)?.commitRef;
+      if (!commitRef || review?.result !== 'pass' || review.commitRef !== commitRef) throw new Error('Passing independent Goal review of delivery commit required');
+    }
     this.record(goalId, 'verified', { acceptanceIds: state.spec.acceptance.map(item => item.id) });
     return { passed: true, acceptanceIds: state.spec.acceptance.map(item => item.id) };
   }

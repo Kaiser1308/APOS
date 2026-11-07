@@ -1,6 +1,7 @@
 import { applyEvent, type GoalEvent, type GoalState } from '../domain/transitions.js';
 import { parseExecutionProposal, parseGoalSpec } from '../domain/contracts.js';
 import { parseWorkPackage } from '../domain/packages.js';
+import { parseReview } from '../domain/reviews.js';
 import { ProjectHistory, committedGoalEvents } from './project-history.js';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,6 +47,12 @@ export class ProjectJournal implements GoalRepository {
     }
     if (event.type === 'integration-completed') {
       documents.push({ path: 'integration.md', content: `# ${event.goalId}: integration\n\n\`\`\`json\n${JSON.stringify(event.data, null, 2)}\n\`\`\`\n` });
+    }
+    if (event.type === 'review-submitted') {
+      const review = parseReview(event.data);
+      const path = join(this.repoPath, '.apos', 'goals', event.goalId, 'reviews.md');
+      const prior = existsSync(path) ? readFileSync(path, 'utf8') : `# Reviews for ${event.goalId}\n`;
+      documents.push({ path: 'reviews.md', content: `${prior}\n- ${event.at} ${review.subject}${review.packageId ? ` ${review.packageId} v${review.packageVersion}` : ''}: **${review.result}** by ${review.reviewer} on ${review.commitRef} — ${review.note}\n` });
     }
     if (event.type === 'decision-logged') {
       const path = join(this.repoPath, '.apos', 'goals', event.goalId, 'decisions.md');

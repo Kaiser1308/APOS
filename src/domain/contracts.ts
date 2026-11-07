@@ -35,7 +35,7 @@ export type SpecVersion = number;
 export type GoalSpec = z.infer<typeof goalSchema>;
 export type ExecutionProposal = z.infer<typeof proposalSchema>;
 export type PhaseCheckpoint = { phase: string; progress: string; evidenceRefs: string[] };
-export type Evidence = { acceptanceId: string; result: 'pass' | 'fail'; command: string; artifactRef: string };
+export type Evidence = { acceptanceId: string; result: 'pass' | 'fail'; command: string; artifactRef: string; commitRef?: string };
 
 export function parseGoalSpec(value: unknown): GoalSpec { return goalSchema.parse(value); }
 export function parseExecutionProposal(value: unknown): ExecutionProposal { return proposalSchema.parse(value); }

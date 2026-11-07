@@ -8,6 +8,8 @@ import { initProject } from './app/init-project.js';
 import { SoloService } from './app/solo.js';
 import { PackageService, type PackageRuntime } from './app/packages.js';
 import { IntegrationService, type CommitInspector } from './app/integration.js';
+import { ControllerService } from './app/controller.js';
+import { MergeService } from './app/merge.js';
 import { VerificationService } from './app/verification.js';
 import { parseWorkPackage } from './domain/packages.js';
 import { OrcaRuntime, type RuntimeAdapter } from './runtime/orca.js';
@@ -162,6 +164,14 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   integration.command('complete').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
     new IntegrationService(journal, options.inspector).complete(goalId, repo(), JSON.parse(readFileSync(file, 'utf8')));
     write(`Integrated and verified ${goalId}`);
+  }));
+  integration.command('merge').argument('<goalId>').requiredOption('--source <commit>').requiredOption('--target <branch>').action((goalId: string, { source, target }: { source: string; target: string }) => withJournal(journal => {
+    write(`Merged ${goalId}: ${new MergeService(journal).merge(goalId, repo(), source, target)}`);
+  }));
+
+  const controller = program.command('controller');
+  controller.command('tick').action(() => withJournalAsync(async journal => {
+    write(JSON.stringify(await new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime).tick(repo())));
   }));
 
   const evidence = program.command('evidence');

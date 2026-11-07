@@ -5,7 +5,7 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
+  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
 export type PackageBlocker = { kind: 'technical' | 'product' | 'external'; note: string };
@@ -24,6 +24,7 @@ export type GoalState = {
   blocker?: unknown;
   packages?: Record<string, PackageState>;
   integration?: { commitRef: string; conflictResolution?: string; regression: { result: 'pass'; command: string; artifactRef: string } };
+  merge?: { sourceRef: string; targetBranch: string; mergeCommit: string };
 };
 
 function requireThat(ok: unknown, message: string): asserts ok {
@@ -194,6 +195,12 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.status === 'executing', 'Execution required');
       requireThat(state.proposal?.mode !== 'multi-wp' || state.integration, 'Integrated Multi-WP evidence required');
       return { ...state, status: 'verified' };
+    case 'merge-completed': {
+      requireThat(state.status === 'verified' && state.spec.autoMergeAuthorized && !state.merge, 'Verified Goal with unused merge authorization required');
+      const data = event.data as GoalState['merge'];
+      requireThat(data?.sourceRef && data.targetBranch && data.mergeCommit, 'Merge details required');
+      return { ...state, merge: data };
+    }
     case 'outcome-accepted':
       requireThat(state.status === 'verified', 'Technical verification required');
       return { ...state, status: 'closed' };

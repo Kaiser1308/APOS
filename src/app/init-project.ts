@@ -25,7 +25,7 @@ export async function initProject(repoPath: string): Promise<void> {
   const paths = files.map(path => relative(repo, path));
   const status = execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', ...paths], { encoding: 'utf8' });
   if (status.trim()) {
-    execFileSync('git', ['-C', repo, 'add', '--', ...paths]);
-    execFileSync('git', ['-C', repo, '-c', 'user.name=APOS', '-c', 'user.email=apos@local.invalid', 'commit', '--only', '-m', 'apos: initialize managed project', '--', ...paths]);
+    execFileSync('git', ['-C', repo, '-c', 'core.autocrlf=false', 'add', '--', ...paths]);
+    execFileSync('git', ['-C', repo, '-c', 'core.autocrlf=false', '-c', 'user.name=APOS', '-c', 'user.email=apos@local.invalid', 'commit', '--only', '-m', 'apos: initialize managed project', '--', ...paths]);
   }
 }

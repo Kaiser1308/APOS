@@ -58,7 +58,7 @@ apos integration complete GOAL-001 --file integration-evidence.json
 apos outcome close GOAL-001
 ```
 
-`execution approve` dispatches the first dependency-ready wave automatically. Each Worker gets an Orca worktree. If an Orca response is unknown, `package reconcile` looks up the original Run, Task, and Dispatch; it does not start a duplicate Worker. `package verify` automatically dispatches newly ready dependents; `package dispatch` remains available after an interruption.
+`execution approve` dispatches the first dependency-ready wave automatically. Packages for one Goal share one Orca Run, while each Worker gets its own Task, Dispatch, and worktree. If an Orca response is unknown, `package reconcile` looks up the original Run, Task, and Dispatch; it does not start a duplicate Worker. `package verify` automatically dispatches newly ready dependents; `package dispatch` remains available after an interruption.
 
 Package evidence includes `packageId`, `packageVersion`, `owner`, `acceptanceId`, `result`, `command`, `artifactRef`, and `commitRef`. Lead can use `package revise GOAL-001 --file revised.json --reason "..."`; affected downstream evidence becomes stale. Use `package block`, `package unblock`, and `package resume` to continue a parked Worker in its original terminal and worktree. Product blockers require a revised Goal approval.
 

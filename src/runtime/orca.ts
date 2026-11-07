@@ -62,21 +62,40 @@ export function interpretWorkerShow(shown: Record<string, unknown>): RuntimeObse
 
 export class OrcaRuntime implements RuntimeAdapter {
   constructor(private readonly execute: (args: string[]) => Record<string, unknown> = runOrca) {}
+  private readonly packageRuns = new Map<string, Promise<string>>();
 
-  private findRun(key: string): Record<string, unknown> | undefined {
+  private listRuns(): Record<string, unknown>[] {
+    const runs: Record<string, unknown>[] = [];
     let cursor: string | undefined;
     const seen = new Set<string>();
     do {
       const args = ['orchestration', 'run-list'];
       if (cursor) args.push('--cursor', cursor);
       const page = this.execute(args);
-      const run = (Array.isArray(page.runs) ? page.runs : []).map(object).find(row => typeof row.objective === 'string' && row.objective.endsWith(`key ${key}`));
-      if (run) return run;
+      runs.push(...(Array.isArray(page.runs) ? page.runs : []).map(object));
       cursor = typeof page.nextCursor === 'string' && page.nextCursor ? page.nextCursor : undefined;
       if (cursor && seen.has(cursor)) throw new Error('Orca Run pagination repeated its cursor');
       if (cursor) seen.add(cursor);
     } while (cursor);
-    return undefined;
+    return runs;
+  }
+
+  private packageRun(repoPath: string, goalId: string, goalVersion: number): Promise<string> {
+    const objective = `APOS package Run ${repoPath} ${goalId} goal v${goalVersion}`;
+    let pending = this.packageRuns.get(objective);
+    if (!pending) {
+      pending = Promise.resolve().then(() => {
+        const existing = this.listRuns().find(row => row.objective === objective);
+        if (existing) return id(existing.id, 'Run ID');
+        return id(object(this.execute(['orchestration', 'run-create', '--objective', objective]).run).id, 'Run ID');
+      });
+      this.packageRuns.set(objective, pending);
+    }
+    return pending;
+  }
+
+  private findRun(key: string): Record<string, unknown> | undefined {
+    return this.listRuns().find(row => typeof row.objective === 'string' && row.objective.endsWith(`key ${key}`));
   }
 
   async startSolo(input: SoloInput): Promise<RuntimeRef> {
@@ -93,8 +112,7 @@ export class OrcaRuntime implements RuntimeAdapter {
   async startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string }): Promise<PackageRuntimeRef> {
     const item = input.package;
     this.execute(['repo', 'add', '--path', input.repoPath]);
-    const run = this.execute(['orchestration', 'run-create', '--objective', `APOS ${item.goalId} ${item.id} v${item.version} key ${input.idempotencyKey}`]);
-    const runId = id(object(run.run).id, 'Run ID');
+    const runId = await this.packageRun(input.repoPath, item.goalId, item.goalVersion);
     const spec = `Target: ${input.repoPath}, ${item.goalId}, ${item.id}. Change: deliver ${item.outcome}. Constraints: read .apos/goals/${item.goalId}/goal.md, execution.md and packages/${item.id}.md; stay within scope; preserve other users' files; do not merge. Ownership: ${item.owner} owns this Work Package end to end. Observable acceptance: meet every local acceptance criterion, test, self-review, and report commit, diff and evidence. Write a concise committed report at .apos/goals/${item.goalId}/evidence/${item.id}-v${item.version}.md with commits, tests, decisions and Orca Run/Task/Dispatch IDs; include its path in worker_done. Follow the injected Orca preamble; report worker_done exactly once with explicit succeeded or failed outcome, then idle. APOS dispatch key: ${input.idempotencyKey}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', 'HEAD', '--name', `apos-${item.goalId.toLowerCase()}-${item.id.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, '--agent', 'claude', '--run', runId]);
     const ref = extractStartedRef(started, input.repoPath);
@@ -151,12 +169,16 @@ export class OrcaRuntime implements RuntimeAdapter {
   }
 
   async recoverPackage(key: string, knownRunId?: string): Promise<PackageRuntimeRef | undefined> {
-    const run = knownRunId ? { id: knownRunId } : this.findRun(key);
-    if (!run) return undefined;
-    const runId = id(run.id, 'Run ID');
-    const tasks = this.execute(['orchestration', 'task-list', '--run', runId]);
-    const task = (Array.isArray(tasks.tasks) ? tasks.tasks : []).map(object).find(row => typeof row.spec === 'string' && row.spec.includes(`APOS dispatch key: ${key}.`));
-    if (!task) return undefined;
+    let runId: string | undefined;
+    let task: Record<string, unknown> | undefined;
+    const candidates = knownRunId ? [{ id: knownRunId }] : this.listRuns().filter(row => typeof row.objective === 'string' && (row.objective.includes('APOS package Run ') || row.objective.endsWith(`key ${key}`)));
+    for (const candidate of candidates) {
+      const candidateId = id(candidate.id, 'Run ID');
+      const tasks = this.execute(['orchestration', 'task-list', '--run', candidateId]);
+      task = (Array.isArray(tasks.tasks) ? tasks.tasks : []).map(object).find(row => typeof row.spec === 'string' && row.spec.includes(`APOS dispatch key: ${key}.`));
+      if (task) { runId = candidateId; break; }
+    }
+    if (!task || !runId) return undefined;
     const taskId = id(task.id, 'Task ID');
     const detail = this.execute(['orchestration', 'dispatch-show', '--task', taskId]);
     const dispatch = object(detail.dispatch);

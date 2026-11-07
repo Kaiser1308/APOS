@@ -3,7 +3,7 @@ import { parseExecutionProposal, parseGoalSpec, type ExecutionProposal, type Goa
 export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
-  | 'execution-started' | 'checkpointed' | 'blocked' | 'evidence-submitted'
+  | 'dispatch-intended' | 'execution-started' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'evidence-submitted'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -16,6 +16,8 @@ export type GoalState = {
   proposalApprovedVersion?: number;
   evidence: unknown[];
   checkpoint?: unknown;
+  dispatchIntent?: string;
+  runtimeRef?: unknown;
 };
 
 function requireThat(ok: unknown, message: string): asserts ok {
@@ -58,7 +60,14 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, proposalApprovedVersion: state.proposal.version, status: 'ready' };
     case 'execution-started':
       requireThat(state.status === 'ready' && state.selected && state.proposal && state.proposalApprovedVersion === state.proposal.version, 'Approved current proposal required');
-      return { ...state, status: 'executing' };
+      return { ...state, status: 'executing', runtimeRef: event.data, dispatchIntent: undefined };
+    case 'dispatch-intended':
+      requireThat(state.status === 'ready' && !state.dispatchIntent && state.selected && state.proposalApprovedVersion === state.proposal?.version, 'Approved current proposal required');
+      requireThat(typeof event.data === 'string' && event.data.length > 0, 'Dispatch key required');
+      return { ...state, dispatchIntent: event.data };
+    case 'runtime-resumed':
+      requireThat(state.status === 'executing' && state.runtimeRef, 'Existing execution required');
+      return { ...state, runtimeRef: event.data };
     case 'checkpointed':
       requireThat(state.status === 'executing', 'Execution required');
       return { ...state, checkpoint: event.data };

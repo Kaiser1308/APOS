@@ -61,3 +61,27 @@ it('records a settled Solo Dispatch once while leaving acceptance to Lead', asyn
   expect(store.getGoal(spec.id)?.status).toBe('executing');
   store.close();
 });
+
+it('processes a settled worker_done, retains its owner, then acknowledges the Orca Delivery', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-controller-inbox-')); dirs.push(dir);
+  const store = SqliteStore.open(join(dir, 'state.sqlite'));
+  let n = 0;
+  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `INBOX-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+  add('goal-drafted', spec); add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+  const ref = { runId: 'run-1', taskId: 'task-1', dispatchId: 'ctx-1', owner: 'lead' as const, repoPath: dir };
+  add('dispatch-intended', 'key-1'); add('execution-started', ref);
+  const actions: string[] = [];
+  const runtime: RuntimeAdapter & PackageRuntime = {
+    async startSolo() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
+    async inspect() { return { state: 'settled', outcome: 'completed', ref }; },
+    async startPackage() { throw new Error('No package expected'); },
+    async checkRun() { actions.push('check'); return { deliveryId: 'delivery-1', messages: [{ id: 'msg-1', type: 'worker_done', payload: { dispatchId: 'ctx-1' } }] }; },
+    async retainWorker() { actions.push('retain'); },
+    async ackRun() { actions.push('ack'); }
+  };
+  const tick = (await new ControllerService(store, runtime).tick(dir))[0];
+  expect(tick.errors).toEqual([]);
+  expect(actions).toEqual(['check', 'retain', 'ack']);
+  expect(store.getGoal(spec.id)?.settlements).toEqual({ 'ctx-1': 'completed' });
+  store.close();
+});

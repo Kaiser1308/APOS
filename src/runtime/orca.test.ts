@@ -137,3 +137,18 @@ describe('Orca worker-start receipt', () => {
     });
   });
 });
+
+it('binds to the Goal Run and acknowledges the exact Orca Delivery', async () => {
+  const calls: string[][] = [];
+  const runtime = new OrcaRuntime(args => {
+    calls.push(args);
+    if (args[1] === 'run-use') return { run: { id: 'run_1' } };
+    if (args.includes('--ack')) return { acknowledged: 'delivery_1', messages: [] };
+    return { deliveryId: 'delivery_1', messages: [{ id: 'msg_1', type: 'status', body: 'ready' }] };
+  });
+  const delivery = await runtime.checkRun('run_1');
+  expect(delivery).toEqual({ deliveryId: 'delivery_1', messages: [{ id: 'msg_1', type: 'status', body: 'ready' }] });
+  await runtime.ackRun('run_1', delivery.deliveryId!);
+  expect(calls.filter(args => args[1] === 'run-use')).toHaveLength(2);
+  expect(calls.at(-1)).toEqual(['orchestration', 'check', '--run', 'run_1', '--ack', 'delivery_1']);
+});

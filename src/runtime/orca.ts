@@ -5,12 +5,17 @@ import type { PackageRuntimeRef } from '../app/packages.js';
 
 export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string; worktreeId?: string };
 export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; outcome?: 'completed' | 'failed'; ref: RuntimeRef };
+export type OrcaMessage = { id: string; type: string; subject?: string; body?: string; payload?: unknown; dispatch_id?: string; dispatchId?: string };
+export type OrcaDelivery = { deliveryId?: string; messages: OrcaMessage[] };
 export type SoloInput = { repoPath: string; goalId: string; proposalVersion: number; checkpoint?: PhaseCheckpoint; idempotencyKey: string };
 export interface RuntimeAdapter {
   startSolo(input: SoloInput): Promise<RuntimeRef>;
   resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string): Promise<RuntimeRef>;
   inspect(ref: RuntimeRef): Promise<RuntimeObservation>;
   recover?(key: string, runId?: string): Promise<RuntimeRef | undefined>;
+  checkRun?(runId: string): Promise<OrcaDelivery>;
+  ackRun?(runId: string, deliveryId: string): Promise<void>;
+  retainWorker?(dispatchId: string): Promise<void>;
 }
 
 export function parseOrcaResult(json: string): Record<string, unknown> {
@@ -153,6 +158,30 @@ export class OrcaRuntime implements RuntimeAdapter {
     const shown = this.execute(['orchestration', 'worker-show', '--dispatch', ref.dispatchId]);
     const status = object(shown.dispatch).status;
     return { state: interpretWorkerShow(shown), ...(status === 'completed' || status === 'failed' ? { outcome: status } : {}), ref };
+  }
+
+  async checkRun(runId: string): Promise<OrcaDelivery> {
+    this.execute(['orchestration', 'run-use', '--id', runId]);
+    const result = this.execute(['orchestration', 'check', '--run', runId]);
+    return {
+      deliveryId: typeof result.deliveryId === 'string' ? result.deliveryId : undefined,
+      messages: Array.isArray(result.messages) ? result.messages.map(value => object(value) as OrcaMessage) : []
+    };
+  }
+
+  async ackRun(runId: string, deliveryId: string): Promise<void> {
+    this.execute(['orchestration', 'run-use', '--id', runId]);
+    const result = this.execute(['orchestration', 'check', '--run', runId, '--ack', deliveryId]);
+    if (result.acknowledged !== deliveryId) throw new Error('Orca did not acknowledge the expected Delivery');
+  }
+
+  async retainWorker(dispatchId: string): Promise<void> {
+    const shown = this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]);
+    const status = object(shown.dispatch).status;
+    if (status !== 'completed' && status !== 'failed') throw new Error('Orca Worker must settle before retention');
+    const resource = object(shown.terminalResource);
+    if (resource.releaseState === 'retained' || resource.ownershipState === 'retained') return;
+    this.execute(['orchestration', 'worker-retain', '--dispatch', dispatchId]);
   }
 
   async recover(key: string, knownRunId?: string): Promise<RuntimeRef | undefined> {

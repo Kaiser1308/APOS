@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { parseExecutionProposal, parseGoalSpec, type Evidence, type PhaseCheckpoint } from './domain/contracts.js';
 import type { GoalEventType } from './domain/transitions.js';
 import { initProject } from './app/init-project.js';
@@ -202,6 +203,29 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   controller.command('tick').action(() => withJournalAsync(async journal => {
     write(JSON.stringify(await new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime).tick(repo())));
   }));
+  controller.command('watch').option('--interval-ms <n>', 'mechanical controller interval', '15000').action(async ({ intervalMs }: { intervalMs: string }) => {
+    const interval = Number(intervalMs);
+    if (!Number.isInteger(interval) || interval < 1000 || interval > 300000) throw new Error('Watch interval must be 1000 to 300000 ms');
+    let stopped = false;
+    const abort = new AbortController();
+    const stop = () => { stopped = true; abort.abort(); };
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+    try {
+      while (!stopped) {
+        const ticks = await withJournalAsync(async journal => new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime).tick(repo()));
+        const changed = ticks.filter(item => item.dispatched.length || item.recovered.length || item.resumed.length || item.settled.length || item.inboxPending.length || item.errors.length);
+        if (changed.length) write(JSON.stringify(changed));
+        if (!stopped) {
+          try { await sleep(interval, undefined, { signal: abort.signal }); }
+          catch (error) { if (!stopped) throw error; }
+        }
+      }
+    } finally {
+      process.removeListener('SIGINT', stop);
+      process.removeListener('SIGTERM', stop);
+    }
+  });
   const review = program.command('review');
   review.command('submit').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
     const result = new ReviewService(journal).submit(goalId, JSON.parse(readFileSync(file, 'utf8')));

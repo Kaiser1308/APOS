@@ -37,4 +37,3 @@ describe('approval gates', () => {
     expect(() => applyEvent(state, event('execution-started'))).toThrow();
   });
 });
-

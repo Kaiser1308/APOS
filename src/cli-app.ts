@@ -263,7 +263,12 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   }));
   const outcome = program.command('outcome');
   for (const decision of ['close', 'revise', 'stop'] as const) {
-    outcome.command(decision).argument('<id>').action((id: string) => withJournal(journal => {
+    outcome.command(decision).argument('<id>').action((id: string) => withJournalAsync(async journal => {
+      if (decision === 'close' && runtime.releaseWorker) {
+        const state = journal.getGoal(id);
+        if (state?.status !== 'verified') throw new Error('Verified Goal required before closing');
+        for (const dispatchId of Object.keys(state.settlements ?? {})) await runtime.releaseWorker(dispatchId);
+      }
       new VerificationService(journal).recordOutcome(id, decision);
       write(`${decision} ${id}`);
     }));

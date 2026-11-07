@@ -21,11 +21,13 @@ it('requires separate Goal approval, selection and Proposal approval before auto
   writeFileSync(proposalFile, JSON.stringify(proposal));
   let starts = 0;
   let soloDone = false;
+  const released: string[] = [];
   const ref: RuntimeRef = { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir };
   const runtime: RuntimeAdapter = {
     async startSolo() { starts++; return ref; },
     async resumeSolo() { return ref; },
-    async inspect() { return soloDone ? { state: 'settled', outcome: 'completed', ref } : { state: 'live', ref }; }
+    async inspect() { return soloDone ? { state: 'settled', outcome: 'completed', ref } : { state: 'live', ref }; },
+    async releaseWorker(dispatchId) { released.push(dispatchId); }
   };
   const output: string[] = [];
   const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, write: line => output.push(line) });
@@ -51,8 +53,10 @@ it('requires separate Goal approval, selection and Proposal approval before auto
   writeFileSync(evidenceFile, JSON.stringify({ acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'commit:abc' }));
   await invoke('evidence', 'add', spec.id, '--file', evidenceFile);
   soloDone = true;
+  await invoke('controller', 'tick');
   await invoke('execution', 'verify', spec.id);
   await invoke('outcome', 'close', spec.id);
+  expect(released).toEqual(['ctx_1']);
   await invoke('execution', 'status', spec.id);
   expect(output.at(-1)).toContain('closed');
 }, 30_000);

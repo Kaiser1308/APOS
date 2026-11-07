@@ -16,6 +16,7 @@ export interface RuntimeAdapter {
   checkRun?(runId: string): Promise<OrcaDelivery>;
   ackRun?(runId: string, deliveryId: string): Promise<void>;
   retainWorker?(dispatchId: string): Promise<void>;
+  releaseWorker?(dispatchId: string): Promise<void>;
 }
 
 export function parseOrcaResult(json: string): Record<string, unknown> {
@@ -182,6 +183,13 @@ export class OrcaRuntime implements RuntimeAdapter {
     const resource = object(shown.terminalResource);
     if (resource.releaseState === 'retained' || resource.ownershipState === 'retained') return;
     this.execute(['orchestration', 'worker-retain', '--dispatch', dispatchId]);
+  }
+
+  async releaseWorker(dispatchId: string): Promise<void> {
+    const shown = this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]);
+    const status = object(shown.dispatch).status;
+    if (status !== 'completed' && status !== 'failed') throw new Error('Orca Worker must settle before release');
+    this.execute(['orchestration', 'worker-release', '--dispatch', dispatchId]);
   }
 
   async recover(key: string, knownRunId?: string): Promise<RuntimeRef | undefined> {

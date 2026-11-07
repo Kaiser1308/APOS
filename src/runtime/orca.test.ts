@@ -152,3 +152,18 @@ it('binds to the Goal Run and acknowledges the exact Orca Delivery', async () =>
   expect(calls.filter(args => args[1] === 'run-use')).toHaveLength(2);
   expect(calls.at(-1)).toEqual(['orchestration', 'check', '--run', 'run_1', '--ack', 'delivery_1']);
 });
+
+it('releases a terminal only after Orca reports a settled Dispatch', async () => {
+  const calls: string[][] = [];
+  let status = 'dispatched';
+  const runtime = new OrcaRuntime(args => {
+    calls.push(args);
+    if (args[1] === 'worker-show') return { dispatch: { status } };
+    return { releaseState: 'released' };
+  });
+  await expect(runtime.releaseWorker('ctx_1')).rejects.toThrow(/settle/);
+  expect(calls.some(args => args[1] === 'worker-release')).toBe(false);
+  status = 'completed';
+  await runtime.releaseWorker('ctx_1');
+  expect(calls.at(-1)).toEqual(['orchestration', 'worker-release', '--dispatch', 'ctx_1']);
+});

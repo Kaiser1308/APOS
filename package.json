@@ -1,0 +1,21 @@
+{
+  "name": "apos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "apos": "./dist/cli.js" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "commander": "14.0.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.9.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  }
+}

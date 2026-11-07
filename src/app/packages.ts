@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { validatePackageGraph, parseWorkPackage, type WorkPackageSpec } from '../domain/packages.js';
+import { validatePackageGraph, parsePackageEvidence, parseWorkPackage, type PackageEvidence, type WorkPackageSpec } from '../domain/packages.js';
 import type { GoalEventType } from '../domain/transitions.js';
+import type { PackageBlocker } from '../domain/transitions.js';
 import type { GoalRepository } from '../store/journal.js';
 
-export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string; terminal?: string };
+export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string; terminal?: string; worktreeId?: string };
 export interface PackageRuntime {
   startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string }): Promise<PackageRuntimeRef>;
-  recoverPackage?(key: string): Promise<PackageRuntimeRef | undefined>;
+  inspectPackage?(ref: PackageRuntimeRef): Promise<'live' | 'settled' | 'unverifiable'>;
+  resumePackage?(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string }): Promise<PackageRuntimeRef>;
+  recoverPackage?(key: string, runId?: string): Promise<PackageRuntimeRef | undefined>;
 }
 
 export class PackageService {
@@ -20,6 +23,45 @@ export class PackageService {
     const spec = parseWorkPackage(value);
     this.record(goalId, 'package-added', spec);
     return spec;
+  }
+
+  revise(goalId: string, value: unknown, reason: string): WorkPackageSpec {
+    const spec = parseWorkPackage(value);
+    this.record(goalId, 'package-revised', { spec, reason });
+    return spec;
+  }
+
+  submitEvidence(goalId: string, value: unknown): PackageEvidence {
+    const evidence = parsePackageEvidence(value);
+    this.record(goalId, 'package-evidence-submitted', evidence);
+    return evidence;
+  }
+
+  verify(goalId: string, packageId: string): void {
+    this.record(goalId, 'package-verified', { packageId });
+  }
+
+  recordBlocker(goalId: string, packageId: string, kind: PackageBlocker['kind'], note: string): void {
+    this.record(goalId, 'package-blocked', { packageId, blocker: { kind, note } });
+  }
+
+  unblock(goalId: string, packageId: string, resolution: string): void {
+    this.record(goalId, 'package-unblocked', { packageId, resolution });
+  }
+
+  async resumeStale(goalId: string, packageId: string): Promise<PackageRuntimeRef> {
+    const state = this.store.getGoal(goalId);
+    const item = state?.packages?.[packageId];
+    if (item?.status !== 'stale' || !item.runtimeRef) throw new Error('Stale package with prior owner required');
+    if (!item.spec.dependencies.every(dep => state?.packages?.[dep]?.status === 'verified')) throw new Error('Package dependencies are not verified');
+    const prior = item.runtimeRef as PackageRuntimeRef;
+    if (await this.runtime.inspectPackage?.(prior) !== 'settled') throw new Error('Prior Worker dispatch must be settled');
+    if (!this.runtime.resumePackage) throw new Error('Runtime cannot resume package owner');
+    const key = randomUUID();
+    this.record(goalId, 'package-resume-intended', { packageId, key });
+    const ref = await this.runtime.resumePackage({ package: item.spec, prior, idempotencyKey: key });
+    this.record(goalId, 'package-resumed', { packageId, ref });
+    return ref;
   }
 
   ready(goalId: string): WorkPackageSpec[] {
@@ -52,10 +94,10 @@ export class PackageService {
     if (!state?.proposal || state.proposal.mode !== 'multi-wp') throw new Error('Multi-WP Goal required');
     const results: { packageId: string; state: 'recovered' | 'unknown' }[] = [];
     for (const [packageId, item] of Object.entries(state.packages ?? {})) {
-      if (item.status !== 'dispatching' || !item.dispatchIntent) continue;
-      const ref = await this.runtime.recoverPackage?.(item.dispatchIntent);
+      if (!['dispatching', 'resuming'].includes(item.status) || !item.dispatchIntent) continue;
+      const ref = await this.runtime.recoverPackage?.(item.dispatchIntent, (item.runtimeRef as PackageRuntimeRef | undefined)?.runId);
       if (ref) {
-        this.record(goalId, 'package-started', { packageId, ref });
+        this.record(goalId, item.status === 'resuming' ? 'package-resumed' : 'package-started', { packageId, ref });
         results.push({ packageId, state: 'recovered' });
       } else results.push({ packageId, state: 'unknown' });
     }

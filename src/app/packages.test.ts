@@ -31,12 +31,18 @@ const fixture = () => {
 };
 class FakeRuntime implements PackageRuntime {
   starts: string[] = [];
+  resumes: string[] = [];
   recovered = new Map<string, Awaited<ReturnType<PackageRuntime['startPackage']>>>();
   async startPackage(input: { package: WorkPackageSpec; repoPath: string }) {
     this.starts.push(input.package.id);
     return { runId: 'run_1', taskId: `task_${input.package.id}`, dispatchId: `ctx_${input.package.id}`, owner: 'worker' as const, repoPath: input.repoPath };
   }
   async recoverPackage(key: string) { return this.recovered.get(key); }
+  async inspectPackage() { return 'settled' as const; }
+  async resumePackage(input: { package: WorkPackageSpec; prior: Awaited<ReturnType<PackageRuntime['startPackage']>> }) {
+    this.resumes.push(input.package.id);
+    return { ...input.prior, dispatchId: `ctx-resumed-${input.package.id}` };
+  }
 }
 
 describe('package scheduling', () => {
@@ -76,8 +82,95 @@ describe('package scheduling', () => {
     service.add(spec.id, a); service.add(spec.id, b);
     await service.dispatchReady(spec.id, dir);
     expect(service.ready(spec.id)).toEqual([]);
-    store.append({ id: 'EV-verify', goalId: spec.id, type: 'package-verified', data: { packageId: a.id }, at: '2026-11-07T00:00:00.000Z' });
+    service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:test', commitRef: 'abc123' });
+    service.verify(spec.id, a.id);
     expect(service.ready(spec.id).map(item => item.id)).toEqual(['WP-02']);
+    store.close();
+  });
+  it('requires current-owner passing evidence for every local criterion', async () => {
+    const { store, dir } = fixture();
+    const service = new PackageService(store, new FakeRuntime());
+    service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    await service.dispatchReady(spec.id, dir);
+    const evidence = { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass' as const, command: 'npm test', artifactRef: 'log:test', commitRef: 'abc123' };
+    expect(() => service.submitEvidence(spec.id, { ...evidence, owner: 'wrong-owner' })).toThrow(/owner/i);
+    expect(() => service.submitEvidence(spec.id, { ...evidence, packageVersion: 2 })).toThrow(/version/i);
+    expect(() => service.verify(spec.id, a.id)).toThrow(/evidence/i);
+    service.submitEvidence(spec.id, { ...evidence, result: 'fail' });
+    expect(() => service.verify(spec.id, a.id)).toThrow(/evidence/i);
+    service.submitEvidence(spec.id, evidence);
+    service.verify(spec.id, a.id);
+    expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('verified');
+    store.close();
+  });
+  it('invalidates verified downstream evidence when an upstream contract changes', async () => {
+    const { store, dir } = fixture();
+    const runtime = new FakeRuntime();
+    const service = new PackageService(store, runtime);
+    service.add(spec.id, a); service.add(spec.id, b);
+    await service.dispatchReady(spec.id, dir);
+    service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:a', commitRef: 'abc123' });
+    service.verify(spec.id, a.id);
+    await service.dispatchReady(spec.id, dir);
+    service.submitEvidence(spec.id, { packageId: b.id, packageVersion: 1, owner: b.owner, acceptanceId: 'WP-AC-2', result: 'pass', command: 'npm test', artifactRef: 'log:b', commitRef: 'def456' });
+    service.verify(spec.id, b.id);
+    service.revise(spec.id, { ...a, version: 2, interfaces: ['checkIn(token, device) -> result'] }, 'Contract now includes device');
+    const packages = store.getGoal(spec.id)?.packages;
+    expect(packages?.[a.id]?.status).toBe('stale');
+    expect(packages?.[b.id]?.status).toBe('stale');
+    expect(packages?.[a.id]?.evidence).toEqual([]);
+    expect(packages?.[b.id]?.evidence).toEqual([]);
+    expect(() => service.verify(spec.id, b.id)).toThrow();
+    await service.resumeStale(spec.id, a.id);
+    expect(runtime.resumes).toEqual(['WP-01']);
+    expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('executing');
+    await expect(service.resumeStale(spec.id, b.id)).rejects.toThrow(/dependencies/i);
+    store.close();
+  });
+  it('rejects a package revision that changes the approved product scope or owner', () => {
+    const { store } = fixture();
+    const service = new PackageService(store, new FakeRuntime());
+    service.add(spec.id, a); service.add(spec.id, b);
+    expect(() => service.revise(spec.id, { ...a, version: 2, scope: ['new product area'] }, 'Expand scope')).toThrow(/Goal reapproval/i);
+    expect(() => service.revise(spec.id, { ...a, version: 2, owner: 'another-worker' }, 'Change owner')).toThrow(/owner/i);
+    store.close();
+  });
+  it('parks an external blocker and resumes the same owner after a recorded resolution', async () => {
+    const { store, dir } = fixture();
+    const runtime = new FakeRuntime();
+    const service = new PackageService(store, runtime);
+    service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    await service.dispatchReady(spec.id, dir);
+    service.recordBlocker(spec.id, a.id, 'external', 'Device service unavailable');
+    expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('blocked');
+    service.unblock(spec.id, a.id, 'Device service restored');
+    expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('stale');
+    await service.resumeStale(spec.id, a.id);
+    expect(runtime.resumes).toEqual(['WP-01']);
+    store.close();
+  });
+  it('keeps a product blocker parked for Goal reapproval', async () => {
+    const { store, dir } = fixture();
+    const service = new PackageService(store, new FakeRuntime());
+    service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    await service.dispatchReady(spec.id, dir);
+    service.recordBlocker(spec.id, a.id, 'product', 'New flow required');
+    expect(() => service.unblock(spec.id, a.id, 'Proceed')).toThrow(/Goal reapproval/i);
+    store.close();
+  });
+  it('recovers a lost resume response without creating another dispatch', async () => {
+    const { store, dir } = fixture();
+    const runtime = new FakeRuntime();
+    const service = new PackageService(store, runtime);
+    service.add(spec.id, a); service.add(spec.id, { ...b, dependencies: [] });
+    await service.dispatchReady(spec.id, dir);
+    service.recordBlocker(spec.id, a.id, 'external', 'Offline');
+    service.unblock(spec.id, a.id, 'Online');
+    store.append({ id: 'EV-resume-intent', goalId: spec.id, type: 'package-resume-intended', data: { packageId: a.id, key: 'resume-lost' }, at: '2026-11-07T00:00:00.000Z' });
+    runtime.recovered.set('resume-lost', { runId: 'run_1', taskId: 'task_2', dispatchId: 'ctx_2', owner: 'worker', repoPath: dir });
+    expect(await service.reconcile(spec.id)).toEqual([{ packageId: a.id, state: 'recovered' }]);
+    expect(store.getGoal(spec.id)?.packages?.[a.id]?.runtimeRef).toMatchObject({ dispatchId: 'ctx_2' });
+    expect(runtime.resumes).toEqual([]);
     store.close();
   });
   it('recovers an unknown dispatch instead of starting a second worker', async () => {

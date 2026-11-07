@@ -51,6 +51,20 @@ it('finds a package dispatch on an older Orca Run page', async () => {
   expect(calls[1]).toEqual(['orchestration', 'run-list', '--cursor', 'older']);
 });
 
+it('resumes a revised package in its original terminal and worktree', async () => {
+  const calls: string[][] = [];
+  const runtime = new OrcaRuntime(args => {
+    calls.push(args);
+    return { runId: 'run_1', taskId: 'task_2', dispatchId: 'ctx_2', effects: [{ kind: 'worktree', id: 'repo_1::C:/worktree' }] };
+  });
+  const ref = await runtime.resumePackage({ package: {
+    id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 2, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token, device)'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies'
+  }, prior: { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'worker', repoPath: 'C:/project', terminal: 'term_1', worktreeId: 'repo_1::C:/worktree' }, idempotencyKey: 'key-2' });
+  expect(calls[0]).toContain('term_1');
+  expect(calls[0]).toContain('id:repo_1::C:/worktree');
+  expect(ref).toMatchObject({ owner: 'worker', dispatchId: 'ctx_2', worktreeId: 'repo_1::C:/worktree' });
+});
+
 it('treats a live terminal with a settled dispatch as settled work', () => {
   const shown = { dispatch: { status: 'completed' }, observation: { status: 'live' }, projection: { liveness: { verdict: 'live' } } };
   expect(interpretWorkerShow(shown)).toBe('settled');

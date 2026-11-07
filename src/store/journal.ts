@@ -28,8 +28,8 @@ export class ProjectJournal implements GoalRepository {
       const proposal = parseExecutionProposal(event.data);
       documents.push({ path: 'execution.md', content: `# ${proposal.id}: ${proposal.mode}\n\n${proposal.approach}\n\n\`\`\`json\n${JSON.stringify(proposal, null, 2)}\n\`\`\`\n` });
     }
-    if (event.type === 'package-added') {
-      const spec = parseWorkPackage(event.data);
+    if (event.type === 'package-added' || event.type === 'package-revised') {
+      const spec = parseWorkPackage(event.type === 'package-added' ? event.data : (event.data as { spec: unknown }).spec);
       documents.push({ path: `packages/${spec.id}.md`, content: `# ${spec.id}: ${spec.outcome}\n\n\`\`\`json\n${JSON.stringify(spec, null, 2)}\n\`\`\`\n` });
     }
     if (event.type === 'decision-logged') {

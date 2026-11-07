@@ -19,6 +19,18 @@ const packageSchema = z.object({
 });
 
 export type WorkPackageSpec = z.infer<typeof packageSchema>;
+export const packageEvidenceSchema = z.object({
+  packageId: z.string().regex(/^WP-[A-Z0-9-]+$/),
+  packageVersion: z.number().int().positive(),
+  owner: text,
+  acceptanceId: id,
+  result: z.enum(['pass', 'fail']),
+  command: text,
+  artifactRef: text,
+  commitRef: text
+});
+export type PackageEvidence = z.infer<typeof packageEvidenceSchema>;
+export function parsePackageEvidence(value: unknown): PackageEvidence { return packageEvidenceSchema.parse(value); }
 export function parseWorkPackage(value: unknown): WorkPackageSpec { return packageSchema.parse(value); }
 
 export function validatePackageGraph(goal: GoalSpec, proposal: ExecutionProposal, input: unknown[]): WorkPackageSpec[] {

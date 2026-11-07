@@ -3,7 +3,7 @@ import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntimeRef } from '../app/packages.js';
 
-export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string };
+export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string; worktreeId?: string };
 export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; ref: RuntimeRef };
 export type SoloInput = { repoPath: string; goalId: string; proposalVersion: number; checkpoint?: PhaseCheckpoint; idempotencyKey: string };
 export interface RuntimeAdapter {
@@ -44,10 +44,12 @@ function id(value: unknown, label: string): string {
 export function extractStartedRef(started: Record<string, unknown>, repoPath: string): RuntimeRef {
   const effects = Array.isArray(started.effects) ? started.effects.map(object) : [];
   const terminal = effects.find(effect => effect.kind === 'terminal' && effect.role === 'agent');
+  const worktree = effects.find(effect => effect.kind === 'worktree');
   return {
     runId: id(started.runId, 'Run ID'), taskId: id(started.taskId, 'Task ID'),
     dispatchId: id(started.dispatchId, 'Dispatch ID'), owner: 'lead', repoPath,
-    terminal: typeof terminal?.id === 'string' ? terminal.id : undefined
+    terminal: typeof terminal?.id === 'string' ? terminal.id : undefined,
+    ...(typeof worktree?.id === 'string' ? { worktreeId: worktree.id } : {})
   };
 }
 
@@ -100,6 +102,21 @@ export class OrcaRuntime implements RuntimeAdapter {
     return { ...ref, owner: 'worker' };
   }
 
+  async inspectPackage(ref: PackageRuntimeRef): Promise<RuntimeObservation['state']> {
+    const shown = this.execute(['orchestration', 'worker-show', '--dispatch', ref.dispatchId]);
+    return interpretWorkerShow(shown);
+  }
+
+  async resumePackage(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string }): Promise<PackageRuntimeRef> {
+    const { prior, package: item } = input;
+    if (!prior.terminal || !prior.worktreeId) throw new Error('Original Worker terminal and worktree required');
+    const spec = `Target: ${prior.repoPath}, ${item.goalId}, ${item.id}. Continue the same package owner for contract v${item.version}. Read .apos/goals/${item.goalId}/packages/${item.id}.md; recheck all local acceptance and report fresh evidence. APOS dispatch key: ${input.idempotencyKey}.`;
+    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--run', prior.runId]);
+    const ref = extractStartedRef(started, prior.repoPath);
+    if (ref.runId !== prior.runId) throw new Error('Resumed Worker belongs to an unexpected Run');
+    return { ...ref, owner: 'worker', worktreeId: ref.worktreeId ?? prior.worktreeId };
+  }
+
   async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint): Promise<RuntimeRef> {
     if (!ref.terminal) throw new Error('Orca terminal identity required to resume same owner');
     const spec = `Continue the same APOS Solo Goal owner from phase ${checkpoint.phase}. Progress: ${checkpoint.progress}. Evidence: ${checkpoint.evidenceRefs.join(', ')}. Keep the approved Goal contract and report verification evidence.`;
@@ -128,8 +145,8 @@ export class OrcaRuntime implements RuntimeAdapter {
     return { runId, taskId, dispatchId: id(dispatch.id, 'Dispatch ID'), owner: 'lead', repoPath: match[1], terminal: typeof dispatch.assignee_handle === 'string' ? dispatch.assignee_handle : undefined };
   }
 
-  async recoverPackage(key: string): Promise<PackageRuntimeRef | undefined> {
-    const run = this.findRun(key);
+  async recoverPackage(key: string, knownRunId?: string): Promise<PackageRuntimeRef | undefined> {
+    const run = knownRunId ? { id: knownRunId } : this.findRun(key);
     if (!run) return undefined;
     const runId = id(run.id, 'Run ID');
     const tasks = this.execute(['orchestration', 'task-list', '--run', runId]);
@@ -141,6 +158,9 @@ export class OrcaRuntime implements RuntimeAdapter {
     if (!dispatch.id) return undefined;
     const match = /Target: (.*?), (GOAL-[A-Z0-9-]+), (WP-[A-Z0-9-]+)\./.exec(String(task.spec));
     if (!match) throw new Error('Orca task has no APOS package target');
-    return { runId, taskId, dispatchId: id(dispatch.id, 'Dispatch ID'), owner: 'worker', repoPath: match[1], terminal: typeof dispatch.assignee_handle === 'string' ? dispatch.assignee_handle : undefined };
+    const dispatchId = id(dispatch.id, 'Dispatch ID');
+    const shown = this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]);
+    const worker = object(shown.worker);
+    return { runId, taskId, dispatchId, owner: 'worker', repoPath: match[1], terminal: typeof dispatch.assignee_handle === 'string' ? dispatch.assignee_handle : undefined, worktreeId: typeof worker.worktreeId === 'string' ? worker.worktreeId : undefined };
   }
 }

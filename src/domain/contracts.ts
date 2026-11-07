@@ -26,7 +26,7 @@ const proposalSchema = z.object({
   mode: z.enum(['solo-direct', 'solo-phased', 'multi-wp']),
   approach: namedText,
   risks: z.array(namedText),
-  acceptanceMapping: z.array(z.object({ acceptanceId: id, verification: namedText })).min(1),
+  acceptanceMapping: z.array(z.object({ acceptanceId: id, verification: namedText, level: z.literal('goal').optional() })).min(1),
   verificationStrategy: namedText
 });
 

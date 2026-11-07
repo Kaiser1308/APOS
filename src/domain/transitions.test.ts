@@ -49,4 +49,20 @@ describe('approval gates', () => {
     expect(state.status).toBe('blocked');
     expect(applyEvent(state, event('unblocked')).status).toBe('executing');
   });
+  it('holds Multi-WP packages as versioned Goal-owned state', () => {
+    let state = applyEvent(start(), event('goal-approved'));
+    state = applyEvent(state, event('goal-selected'));
+    state = applyEvent(state, event('proposal-drafted', { ...proposal, mode: 'multi-wp' }));
+    state = applyEvent(state, event('proposal-approved'));
+    const wp = {
+      id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1,
+      owner: 'worker-a', outcome: 'QR intake works', scope: ['scanner'], exclusions: [],
+      dependencies: [], interfaces: ['checkIn(token) -> result'],
+      acceptance: [{ id: 'WP-AC-1', text: 'valid token checks in', goalAcceptanceId: 'AC-1' }],
+      integration: 'Lead runs check-in flow'
+    };
+    state = applyEvent(state, event('package-added', wp));
+    expect(state.packages?.['WP-01']?.spec.version).toBe(1);
+    expect(() => applyEvent(state, event('package-added', wp))).toThrow(/already exists/i);
+  });
 });

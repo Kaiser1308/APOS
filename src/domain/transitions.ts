@@ -1,12 +1,14 @@
 import { parseExecutionProposal, parseGoalSpec, type ExecutionProposal, type GoalSpec } from './contracts.js';
+import { parseWorkPackage, type WorkPackageSpec } from './packages.js';
 
 export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped';
+  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'package-added';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
+export type PackageState = { spec: WorkPackageSpec; status: 'specified' | 'ready' | 'executing' | 'blocked' | 'verified'; evidence: unknown[]; runtimeRef?: unknown };
 export type GoalState = {
   spec: GoalSpec;
   status: GoalStatus;
@@ -19,6 +21,7 @@ export type GoalState = {
   dispatchIntent?: string;
   runtimeRef?: unknown;
   blocker?: unknown;
+  packages?: Record<string, PackageState>;
 };
 
 function requireThat(ok: unknown, message: string): asserts ok {
@@ -31,7 +34,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     requireThat(!state, 'Goal already exists');
     const spec = parseGoalSpec(event.data);
     requireThat(spec.id === event.goalId, 'Event Goal ID mismatch');
-    return { spec, status: 'draft', selected: false, evidence: [] };
+    return { spec, status: 'draft', selected: false, evidence: [], packages: {} };
   }
   requireThat(state, 'Goal does not exist');
   requireThat(state.spec.id === event.goalId, 'Event Goal ID mismatch');
@@ -46,7 +49,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'goal-revised': {
       const spec = parseGoalSpec(event.data);
       requireThat(spec.id === state.spec.id && spec.version > state.spec.version, 'Goal revision must advance version');
-      return { spec, status: 'draft', selected: false, evidence: [] };
+      return { spec, status: 'draft', selected: false, evidence: [], packages: {} };
     }
     case 'proposal-drafted':
     case 'proposal-revised': {
@@ -54,11 +57,18 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const proposal = parseExecutionProposal(event.data);
       requireThat(proposal.goalId === state.spec.id && proposal.goalVersion === state.spec.version, 'Proposal Goal version mismatch');
       requireThat(!state.proposal || proposal.version > state.proposal.version, 'Proposal version must advance');
-      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [] };
+      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {} };
     }
     case 'proposal-approved':
       requireThat(state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
       return { ...state, proposalApprovedVersion: state.proposal.version, status: 'ready' };
+    case 'package-added': {
+      requireThat(state.status === 'ready' && state.proposal?.mode === 'multi-wp', 'Approved Multi-WP proposal required');
+      const spec = parseWorkPackage(event.data);
+      requireThat(spec.goalId === state.spec.id && spec.goalVersion === state.spec.version, 'Package Goal version mismatch');
+      requireThat(!state.packages?.[spec.id], `Package ${spec.id} already exists`);
+      return { ...state, packages: { ...state.packages, [spec.id]: { spec, status: 'specified', evidence: [] } } };
+    }
     case 'execution-started':
       requireThat(state.status === 'ready' && state.selected && state.proposal && state.proposalApprovedVersion === state.proposal.version, 'Approved current proposal required');
       return { ...state, status: 'executing', runtimeRef: event.data, dispatchIntent: undefined };

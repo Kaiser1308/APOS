@@ -113,6 +113,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     const item = input.package;
     this.execute(['repo', 'add', '--path', input.repoPath]);
     const runId = await this.packageRun(input.repoPath, item.goalId, item.goalVersion);
+    this.execute(['orchestration', 'run-use', '--id', runId]);
     const spec = `Target: ${input.repoPath}, ${item.goalId}, ${item.id}. Change: deliver ${item.outcome}. Constraints: read .apos/goals/${item.goalId}/goal.md, execution.md and packages/${item.id}.md; stay within scope; preserve other users' files; do not merge. Ownership: ${item.owner} owns this Work Package end to end. Observable acceptance: meet every local acceptance criterion, test, self-review, and report commit, diff and evidence. Write a concise committed report at .apos/goals/${item.goalId}/evidence/${item.id}-v${item.version}.md with commits, tests, decisions and Orca Run/Task/Dispatch IDs; include its path in worker_done. Follow the injected Orca preamble; report worker_done exactly once with explicit succeeded or failed outcome, then idle. APOS dispatch key: ${input.idempotencyKey}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', 'HEAD', '--name', `apos-${item.goalId.toLowerCase()}-${item.id.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, '--agent', 'claude', '--run', runId]);
     const ref = extractStartedRef(started, input.repoPath);
@@ -131,6 +132,7 @@ export class OrcaRuntime implements RuntimeAdapter {
   async resumePackage(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string }): Promise<PackageRuntimeRef> {
     const { prior, package: item } = input;
     if (!prior.terminal || !prior.worktreeId) throw new Error('Original Worker terminal and worktree required');
+    this.execute(['orchestration', 'run-use', '--id', prior.runId]);
     const spec = `Target: ${prior.repoPath}, ${item.goalId}, ${item.id}. Continue the same package owner for contract v${item.version}. Read .apos/goals/${item.goalId}/packages/${item.id}.md; recheck all local acceptance and report fresh evidence. Follow the injected Orca preamble and report worker_done exactly once. APOS dispatch key: ${input.idempotencyKey}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--run', prior.runId]);
     const ref = extractStartedRef(started, prior.repoPath);
@@ -140,6 +142,7 @@ export class OrcaRuntime implements RuntimeAdapter {
 
   async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string): Promise<RuntimeRef> {
     if (!ref.terminal) throw new Error('Orca terminal identity required to resume same owner');
+    this.execute(['orchestration', 'run-use', '--id', ref.runId]);
     const spec = `Target: ${ref.repoPath}, APOS Solo Goal. Continue the same owner from phase ${checkpoint.phase}. Progress: ${checkpoint.progress}. Evidence: ${checkpoint.evidenceRefs.join(', ')}. Keep the approved Goal contract and report verification evidence. Follow the injected Orca preamble and report worker_done exactly once. APOS dispatch key: ${idempotencyKey}.`;
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `path:${ref.repoPath}`, '--run', ref.runId]);
     const next = extractStartedRef(started, ref.repoPath);

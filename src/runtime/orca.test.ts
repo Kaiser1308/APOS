@@ -57,6 +57,20 @@ it('shares one Orca Run across independent packages in a dispatch wave', async (
   expect(refs.map(ref => ref.runId)).toEqual(['run_shared', 'run_shared']);
 });
 
+it('rebinds an existing Goal Run before dispatching its next package wave', async () => {
+  const calls: string[][] = [];
+  const runtime = new OrcaRuntime(args => {
+    calls.push(args);
+    if (args[0] === 'repo') return { repo: {} };
+    if (args[1] === 'run-list') return { runs: [{ id: 'run_shared', objective: 'APOS package Run C:/project GOAL-001 goal v1' }] };
+    if (args[1] === 'run-use') return { run: { id: 'run_shared' } };
+    return { runId: 'run_shared', taskId: 'task_2', dispatchId: 'ctx_2', effects: [] };
+  });
+  await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-2', package: { id: 'WP-02', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-b', outcome: 'History', scope: ['history'], exclusions: [], dependencies: [], interfaces: ['history()'], acceptance: [{ id: 'WP-AC-2', text: 'history' }], integration: 'Lead verifies' } });
+  expect(calls.find(args => args[1] === 'run-use')).toEqual(['orchestration', 'run-use', '--id', 'run_shared']);
+  expect(calls.some(args => args[1] === 'run-create')).toBe(false);
+});
+
 it('finds a package dispatch on an older Orca Run page', async () => {
   const calls: string[][] = [];
   const runtime = new OrcaRuntime(args => {
@@ -89,8 +103,9 @@ it('resumes a revised package in its original terminal and worktree', async () =
   const ref = await runtime.resumePackage({ package: {
     id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 2, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token, device)'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies'
   }, prior: { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'worker', repoPath: 'C:/project', terminal: 'term_1', worktreeId: 'repo_1::C:/worktree' }, idempotencyKey: 'key-2' });
-  expect(calls[0]).toContain('term_1');
-  expect(calls[0]).toContain('id:repo_1::C:/worktree');
+  const start = calls.find(args => args[1] === 'worker-start')!;
+  expect(start).toContain('term_1');
+  expect(start).toContain('id:repo_1::C:/worktree');
   expect(ref).toMatchObject({ owner: 'worker', dispatchId: 'ctx_2', worktreeId: 'repo_1::C:/worktree' });
 });
 

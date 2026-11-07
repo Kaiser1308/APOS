@@ -12,7 +12,7 @@ export class ControllerService {
   private async consumeInbox(goalId: string, result: ControllerTick): Promise<void> {
     if (!this.runtime.checkRun || !this.runtime.ackRun || !this.runtime.retainWorker) return;
     const state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'executing') return;
+    if (!state || !['executing', 'blocked'].includes(state.status)) return;
     const refs = [state.runtimeRef, ...Object.values(state.packages ?? {}).map(item => item.runtimeRef)].filter(Boolean) as (RuntimeRef | PackageRuntimeRef)[];
     const runId = refs[0]?.runId;
     if (!runId) return;
@@ -46,8 +46,14 @@ export class ControllerService {
     const results: ControllerTick[] = [];
     for (const snapshot of this.store.listGoals()) {
       const goalId = snapshot.spec.id;
-      if (!snapshot.proposal || !['ready', 'executing'].includes(snapshot.status)) continue;
+      if (!snapshot.proposal || !['ready', 'executing', 'blocked'].includes(snapshot.status)) continue;
       const result: ControllerTick = { goalId, dispatched: [], recovered: [], unresolved: [], resumed: [], settled: [], inboxPending: [], errors: [] };
+      if (snapshot.status === 'blocked') {
+        try { await this.consumeInbox(goalId, result); }
+        catch (error) { result.errors.push(`inbox: ${error instanceof Error ? error.message : String(error)}`); }
+        results.push(result);
+        continue;
+      }
       if (snapshot.proposal.mode === 'multi-wp') {
         const service = new PackageService(this.store, this.runtime);
         try {

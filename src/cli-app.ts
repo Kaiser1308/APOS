@@ -212,10 +212,13 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
     try {
+      let lastReport = '';
       while (!stopped) {
         const ticks = await withJournalAsync(async journal => new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime).tick(repo()));
         const changed = ticks.filter(item => item.dispatched.length || item.recovered.length || item.resumed.length || item.settled.length || item.inboxPending.length || item.errors.length);
-        if (changed.length) write(JSON.stringify(changed));
+        const report = JSON.stringify(changed);
+        if (changed.length && report !== lastReport) write(report);
+        lastReport = report;
         if (!stopped) {
           try { await sleep(interval, undefined, { signal: abort.signal }); }
           catch (error) { if (!stopped) throw error; }

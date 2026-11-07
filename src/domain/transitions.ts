@@ -76,7 +76,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       if (state.proposal.mode === 'multi-wp') validatePackageGraph(state.spec, state.proposal, Object.values(state.packages ?? {}).map(item => item.spec));
       return { ...state, proposalApprovedVersion: state.proposal.version, status: 'ready' };
     case 'worker-settled': {
-      requireThat(state.status === 'executing', 'Executing Goal required for worker settlement');
+      requireThat(state.status === 'executing' || state.status === 'blocked', 'Active Goal required for worker settlement');
       const data = event.data as { dispatchId?: unknown; outcome?: unknown };
       requireThat(typeof data?.dispatchId === 'string' && (data.outcome === 'completed' || data.outcome === 'failed'), 'Worker settlement requires Dispatch ID and outcome');
       const refs = [state.runtimeRef, ...Object.values(state.packages ?? {}).map(item => item.runtimeRef)] as { dispatchId?: string }[];

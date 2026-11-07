@@ -32,6 +32,9 @@ export class ProjectJournal implements GoalRepository {
       const spec = parseWorkPackage(event.type === 'package-added' ? event.data : (event.data as { spec: unknown }).spec);
       documents.push({ path: `packages/${spec.id}.md`, content: `# ${spec.id}: ${spec.outcome}\n\n\`\`\`json\n${JSON.stringify(spec, null, 2)}\n\`\`\`\n` });
     }
+    if (event.type === 'integration-completed') {
+      documents.push({ path: 'integration.md', content: `# ${event.goalId}: integration\n\n\`\`\`json\n${JSON.stringify(event.data, null, 2)}\n\`\`\`\n` });
+    }
     if (event.type === 'decision-logged') {
       const path = join(this.repoPath, '.apos', 'goals', event.goalId, 'decisions.md');
       const prior = existsSync(path) ? readFileSync(path, 'utf8') : `# Decisions for ${event.goalId}\n`;

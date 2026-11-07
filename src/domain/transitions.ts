@@ -5,7 +5,7 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
+  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
 export type PackageBlocker = { kind: 'technical' | 'product' | 'external'; note: string };
@@ -23,6 +23,7 @@ export type GoalState = {
   runtimeRef?: unknown;
   blocker?: unknown;
   packages?: Record<string, PackageState>;
+  integration?: { commitRef: string; conflictResolution?: string; regression: { result: 'pass'; command: string; artifactRef: string } };
 };
 
 function requireThat(ok: unknown, message: string): asserts ok {
@@ -58,7 +59,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const proposal = parseExecutionProposal(event.data);
       requireThat(proposal.goalId === state.spec.id && proposal.goalVersion === state.spec.version, 'Proposal Goal version mismatch');
       requireThat(!state.proposal || proposal.version > state.proposal.version, 'Proposal version must advance');
-      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {} };
+      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined };
     }
     case 'proposal-approved':
       requireThat(state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
@@ -95,7 +96,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         const item = packages[packageId];
         packages[packageId] = { ...item, status: item.runtimeRef ? 'stale' : 'specified', evidence: [] };
       }
-      return { ...state, packages };
+      return { ...state, packages, integration: undefined, evidence: [] };
     }
     case 'package-dispatch-intended': {
       requireThat(state.status === 'ready' || state.status === 'executing', 'Approved Multi-WP Goal required');
@@ -181,8 +182,16 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'evidence-submitted':
       requireThat(state.status === 'executing', 'Execution required');
       return { ...state, evidence: [...state.evidence, event.data] };
+    case 'integration-completed': {
+      requireThat(state.status === 'executing' && state.proposal?.mode === 'multi-wp', 'Executing Multi-WP Goal required');
+      requireThat(Object.values(state.packages ?? {}).length >= 2 && Object.values(state.packages ?? {}).every(item => item.status === 'verified'), 'All packages must be verified');
+      const data = event.data as GoalState['integration'];
+      requireThat(data && typeof data.commitRef === 'string' && data.commitRef.trim() && data.regression?.result === 'pass' && data.regression.command?.trim() && data.regression.artifactRef?.trim(), 'Passing integration evidence required');
+      return { ...state, integration: data };
+    }
     case 'verified':
       requireThat(state.status === 'executing', 'Execution required');
+      requireThat(state.proposal?.mode !== 'multi-wp' || state.integration, 'Integrated Multi-WP evidence required');
       return { ...state, status: 'verified' };
     case 'outcome-accepted':
       requireThat(state.status === 'verified', 'Technical verification required');

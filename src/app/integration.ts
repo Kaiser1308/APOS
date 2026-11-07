@@ -1,0 +1,77 @@
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { validatePackageGraph } from '../domain/packages.js';
+import type { Evidence } from '../domain/contracts.js';
+import type { GoalRepository } from '../store/journal.js';
+import { assertGitRoot } from '../store/project-history.js';
+import { VerificationService } from './verification.js';
+
+export interface CommitInspector {
+  exists(repoPath: string, ref: string): boolean;
+  files(repoPath: string, ref: string): string[];
+  contains(repoPath: string, ancestor: string, descendant: string): boolean;
+}
+
+export class GitCommitInspector implements CommitInspector {
+  exists(repoPath: string, ref: string): boolean {
+    try { execFileSync('git', ['-C', assertGitRoot(repoPath), 'cat-file', '-e', `${ref}^{commit}`], { stdio: 'ignore' }); return true; }
+    catch { return false; }
+  }
+  files(repoPath: string, ref: string): string[] {
+    return execFileSync('git', ['-C', assertGitRoot(repoPath), 'diff-tree', '--root', '--no-commit-id', '--name-only', '-r', ref], { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean);
+  }
+  contains(repoPath: string, ancestor: string, descendant: string): boolean {
+    try { execFileSync('git', ['-C', assertGitRoot(repoPath), 'merge-base', '--is-ancestor', ancestor, descendant], { stdio: 'ignore' }); return true; }
+    catch { return false; }
+  }
+}
+
+export type IntegrationInput = {
+  commitRef: string;
+  acceptance: Evidence[];
+  regression: { result: 'pass' | 'fail'; command: string; artifactRef: string };
+  conflictResolution?: string;
+};
+
+export class IntegrationService {
+  constructor(private readonly store: GoalRepository, private readonly inspector: CommitInspector = new GitCommitInspector()) {}
+
+  prepare(goalId: string, repoPath: string): { commits: string[]; conflicts: string[] } {
+    const state = this.store.getGoal(goalId);
+    if (!state?.proposal || state.proposal.mode !== 'multi-wp' || state.status !== 'executing') throw new Error('Executing Multi-WP Goal required');
+    const packages = Object.values(state.packages ?? {});
+    validatePackageGraph(state.spec, state.proposal, packages.map(item => item.spec));
+    if (!packages.every(item => item.status === 'verified')) throw new Error('All packages must be verified before integration');
+    const owners = new Map<string, Set<string>>();
+    const commits = new Set<string>();
+    for (const item of packages) {
+      const latest = new Map(item.evidence.map(evidence => [evidence.acceptanceId, evidence]));
+      for (const criterion of item.spec.acceptance) {
+        const evidence = latest.get(criterion.id);
+        if (!evidence || evidence.result !== 'pass' || evidence.packageVersion !== item.spec.version || evidence.owner !== item.spec.owner) throw new Error(`Stale or missing package evidence: ${item.spec.id}`);
+        commits.add(evidence.commitRef);
+        if (!this.inspector.exists(repoPath, evidence.commitRef)) throw new Error(`Package commit missing: ${evidence.commitRef}`);
+        for (const file of this.inspector.files(repoPath, evidence.commitRef)) {
+          if (!owners.has(file)) owners.set(file, new Set());
+          owners.get(file)!.add(item.spec.id);
+        }
+      }
+    }
+    return { commits: [...commits], conflicts: [...owners].filter(([, packageIds]) => packageIds.size > 1).map(([file]) => file).sort() };
+  }
+
+  complete(goalId: string, repoPath: string, input: IntegrationInput): void {
+    const prepared = this.prepare(goalId, repoPath);
+    if (prepared.conflicts.length && !input.conflictResolution?.trim()) throw new Error(`Conflict resolution required: ${prepared.conflicts.join(', ')}`);
+    if (!input.commitRef?.trim() || !this.inspector.exists(repoPath, input.commitRef)) throw new Error('Integration commit missing');
+    for (const commit of prepared.commits) if (!this.inspector.contains(repoPath, commit, input.commitRef)) throw new Error(`Package commit not integrated: ${commit}`);
+    if (input.regression?.result !== 'pass' || !input.regression.command?.trim() || !input.regression.artifactRef?.trim()) throw new Error('Passing regression evidence required');
+    const state = this.store.getGoal(goalId)!;
+    const latest = new Map(input.acceptance.map(item => [item.acceptanceId, item]));
+    if (!state.spec.acceptance.every(item => latest.get(item.id)?.result === 'pass' && latest.get(item.id)?.command?.trim() && latest.get(item.id)?.artifactRef?.trim())) throw new Error('Passing Goal acceptance evidence required');
+    this.store.append({ id: randomUUID(), goalId, type: 'integration-completed', data: { commitRef: input.commitRef, conflictResolution: input.conflictResolution, regression: input.regression }, at: new Date().toISOString() });
+    const verification = new VerificationService(this.store);
+    for (const item of input.acceptance) verification.submitEvidence(goalId, item);
+    verification.verify(goalId);
+  }
+}

@@ -30,11 +30,34 @@ it('releases dependency-ready Workers after a restart without duplicate dispatch
   const packages = new PackageService(store, runtime);
   packages.add(spec.id, a); packages.add(spec.id, b); add('proposal-approved');
   const controller = new ControllerService(store, runtime);
-  expect((await controller.tick(dir))[0].dispatched).toEqual(['WP-01']);
+  const first = (await controller.tick(dir))[0];
+  expect(first.dispatched).toEqual(['WP-01']);
+  expect(first.settled).toEqual(['WP-01:completed']);
+  expect(store.getGoal(spec.id)?.settlements).toEqual({ 'WP-01': 'completed' });
   expect((await controller.tick(dir))[0].dispatched).toEqual([]);
   packages.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:a', commitRef: 'abc' });
   await packages.verify(spec.id, a.id);
   expect((await controller.tick(dir))[0].dispatched).toEqual(['WP-02']);
   expect(starts).toEqual(['WP-01', 'WP-02']);
+  store.close();
+});
+
+it('records a settled Solo Dispatch once while leaving acceptance to Lead', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-controller-solo-')); dirs.push(dir);
+  const store = SqliteStore.open(join(dir, 'state.sqlite'));
+  let n = 0;
+  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `SOLO-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+  add('goal-drafted', spec); add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+  const runtime: RuntimeAdapter & PackageRuntime = {
+    async startSolo({ repoPath }) { return { runId: 'run-1', taskId: 'task-1', dispatchId: 'ctx-1', owner: 'lead', repoPath }; },
+    async resumeSolo() { throw new Error('No resume expected'); },
+    async inspect(ref) { return { state: 'settled', outcome: 'completed', ref }; },
+    async startPackage() { throw new Error('No package expected'); }
+  };
+  const controller = new ControllerService(store, runtime);
+  expect((await controller.tick(dir))[0].dispatched).toEqual(['ctx-1']);
+  expect((await controller.tick(dir))[0].settled).toEqual(['solo:completed']);
+  expect((await controller.tick(dir))[0].settled).toEqual([]);
+  expect(store.getGoal(spec.id)?.status).toBe('executing');
   store.close();
 });

@@ -6,6 +6,7 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
+  | 'worker-settled'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -29,6 +30,7 @@ export type GoalState = {
   integration?: { commitRef: string; conflictResolution?: string; regression: { result: 'pass'; command: string; artifactRef: string } };
   merge?: { sourceRef: string; targetBranch: string; mergeCommit: string };
   reviews: ReviewRecord[];
+  settlements?: Record<string, 'completed' | 'failed'>;
 };
 
 function requireThat(ok: unknown, message: string): asserts ok {
@@ -65,7 +67,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const proposal = parseExecutionProposal(event.data);
       requireThat(proposal.goalId === state.spec.id && proposal.goalVersion === state.spec.version, 'Proposal Goal version mismatch');
       requireThat(!state.proposal || proposal.version > state.proposal.version, 'Proposal version must advance');
-      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined };
+      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined, reviews: [], settlements: {}, merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined };
     }
     case 'proposal-approved':
       requireThat(state.status === 'planned' && state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
@@ -73,6 +75,15 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.proposal.acceptanceMapping.every(mapping => state.spec.acceptance.some(item => item.id === mapping.acceptanceId)), 'Proposal maps an unknown Goal acceptance criterion');
       if (state.proposal.mode === 'multi-wp') validatePackageGraph(state.spec, state.proposal, Object.values(state.packages ?? {}).map(item => item.spec));
       return { ...state, proposalApprovedVersion: state.proposal.version, status: 'ready' };
+    case 'worker-settled': {
+      requireThat(state.status === 'executing', 'Executing Goal required for worker settlement');
+      const data = event.data as { dispatchId?: unknown; outcome?: unknown };
+      requireThat(typeof data?.dispatchId === 'string' && (data.outcome === 'completed' || data.outcome === 'failed'), 'Worker settlement requires Dispatch ID and outcome');
+      const refs = [state.runtimeRef, ...Object.values(state.packages ?? {}).map(item => item.runtimeRef)] as { dispatchId?: string }[];
+      requireThat(refs.some(ref => ref?.dispatchId === data.dispatchId), 'Worker settlement Dispatch does not belong to this Goal');
+      requireThat(!state.settlements?.[data.dispatchId], 'Worker settlement already recorded');
+      return { ...state, settlements: { ...state.settlements, [data.dispatchId]: data.outcome } };
+    }
     case 'package-added': {
       requireThat(state.status === 'planned' && state.proposal?.mode === 'multi-wp', 'Draft Multi-WP proposal required before approval');
       const spec = parseWorkPackage(event.data);

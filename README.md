@@ -66,7 +66,7 @@ If the approved proposal names risks or the Goal permits automatic merge, APOS r
 
 `integration prepare` checks that all packages are verified, source commits exist, and files do not overlap unnoticed. `integration complete` requires an integration commit containing every package commit, passing Goal acceptance evidence, passing regression evidence, and a conflict resolution note when files overlap. It records technical verification; Human outcome closure remains separate. APOS merges only through `integration merge GOAL-001 --source <commit> --target <branch>`, and only when that Goal has `autoMergeAuthorized: true`, technical verification passed, the source matches delivery evidence, the target branch is checked out, and the worktree is clean.
 
-`apos controller tick` is a mechanical recovery pass: it reconciles uncertain Orca dispatches, starts dependency-ready packages, and resumes stale package owners whose prior dispatch has settled. It reports unresolved attempts without claiming completion. Run it after a CLI interruption or from a local scheduler; it never polls with an LLM.
+`apos controller tick` is a mechanical recovery pass: it reconciles uncertain Orca dispatches, starts dependency-ready packages, records authoritative Orca Dispatch settlement, and resumes stale package owners whose prior dispatch has settled. Settlement remains distinct from acceptance and Goal closure. It reports unresolved attempts without claiming completion. Run it after a CLI interruption or from a local scheduler; it never polls with an LLM.
 
 `apos metrics show GOAL-001` summarizes attempts, blockers, requested changes, package count and cycle time from the project event log. It does not estimate token usage or cost without Orca telemetry.
 

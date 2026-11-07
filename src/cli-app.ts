@@ -13,6 +13,7 @@ import { MergeService } from './app/merge.js';
 import { ReviewService } from './app/review.js';
 import { assertExecutionSettled } from './app/replan.js';
 import { MetricsService } from './app/metrics.js';
+import { GoalRegistryService } from './app/registry.js';
 import { VerificationService } from './app/verification.js';
 import { parseWorkPackage } from './domain/packages.js';
 import { OrcaRuntime, type RuntimeAdapter } from './runtime/orca.js';
@@ -58,10 +59,10 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     for (const state of journal.listGoals()) write(`${state.spec.id}\t${state.status}\t${state.spec.outcome}`);
   }));
   goal.command('approve').argument('<id>').action((id: string) => withJournal(journal => {
-    journal.append(event(id, 'goal-approved')); write(`Approved ${id}`);
+    new GoalRegistryService(journal).approve(id); write(`Approved ${id}`);
   }));
   goal.command('select').argument('<id>').action((id: string) => withJournal(journal => {
-    journal.append(event(id, 'goal-selected')); write(`Selected ${id}`);
+    new GoalRegistryService(journal).select(id); write(`Selected ${id}`);
   }));
   goal.command('revise').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournalAsync(async journal => {
     const revised = parseGoalSpec(JSON.parse(readFileSync(file, 'utf8')));
@@ -74,7 +75,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   const lead = program.command('lead');
   lead.command('recommend').action(() => withJournal(journal => {
-    const candidate = journal.listGoals().filter(state => state.status === 'approved' && state.spec.dependencies.every(id => journal.getGoal(id)?.status === 'closed')).sort((a, b) => a.spec.priority - b.spec.priority)[0];
+    const candidate = new GoalRegistryService(journal).recommend();
     write(candidate ? `${candidate.spec.id}: ${candidate.spec.outcome}` : 'No eligible Goal');
   }));
   lead.command('propose').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournalAsync(async journal => {

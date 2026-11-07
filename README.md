@@ -72,4 +72,4 @@ If the approved proposal names risks or the Goal permits automatic merge, APOS r
 
 Execution Proposals may set `maxAttempts` from 1 to 10 (default 3). APOS parks a Solo Goal or package when its budget is exhausted and records a blocker for Lead/Human decision; the controller does not retry it indefinitely.
 
-Evidence JSON has `acceptanceId`, `result` (`pass` or `fail`), `command`, and `artifactRef`. APOS requires the latest evidence for every acceptance criterion to pass before technical verification. Human outcome closure is a separate command. Automatic code merge is not performed by this Solo CLI slice, even if a Goal records merge authorization.
+Evidence JSON has `acceptanceId`, `result` (`pass` or `fail`), `command`, and `artifactRef`. APOS requires the latest evidence for every acceptance criterion to pass before technical verification. Human outcome closure is a separate command. Solo and Multi-WP integration may use `integration merge` only when the Goal records explicit merge authorization and the merge gates pass.

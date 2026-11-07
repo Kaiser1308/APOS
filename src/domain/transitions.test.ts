@@ -10,6 +10,12 @@ describe('approval gates', () => {
     const approved = applyEvent(start(), event('goal-approved'));
     expect(() => applyEvent(approved, event('execution-started'))).toThrow();
   });
+  it('rejects proposal approval when a Goal criterion is not mapped', () => {
+    let state = applyEvent(start(), event('goal-approved'));
+    state = applyEvent(state, event('goal-selected'));
+    state = applyEvent(state, event('proposal-drafted', { ...proposal, acceptanceMapping: [{ acceptanceId: 'OTHER', verification: 'test' }] }));
+    expect(() => applyEvent(state, event('proposal-approved'))).toThrow(/verification mapping/);
+  });
   it('permits execution only after selection and current proposal approval', () => {
     let state = applyEvent(start(), event('goal-approved'));
     state = applyEvent(state, event('goal-selected'));

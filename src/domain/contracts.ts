@@ -19,6 +19,8 @@ const goalSchema = z.object({
     if (seen.has(item.id)) ctx.addIssue({ code: 'custom', path: ['acceptance'], message: `Duplicate acceptance ID: ${item.id}` });
     seen.add(item.id);
   }
+  if (goal.dependencies.includes(goal.id)) ctx.addIssue({ code: 'custom', path: ['dependencies'], message: 'Goal cannot depend on itself' });
+  if (new Set(goal.dependencies).size !== goal.dependencies.length) ctx.addIssue({ code: 'custom', path: ['dependencies'], message: 'Duplicate Goal dependency' });
 });
 
 const proposalSchema = z.object({

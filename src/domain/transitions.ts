@@ -68,7 +68,9 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined };
     }
     case 'proposal-approved':
-      requireThat(state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
+      requireThat(state.status === 'planned' && state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
+      requireThat(state.spec.acceptance.every(item => state.proposal!.acceptanceMapping.some(mapping => mapping.acceptanceId === item.id)), 'Every Goal acceptance criterion needs a verification mapping');
+      requireThat(state.proposal.acceptanceMapping.every(mapping => state.spec.acceptance.some(item => item.id === mapping.acceptanceId)), 'Proposal maps an unknown Goal acceptance criterion');
       if (state.proposal.mode === 'multi-wp') validatePackageGraph(state.spec, state.proposal, Object.values(state.packages ?? {}).map(item => item.spec));
       return { ...state, proposalApprovedVersion: state.proposal.version, status: 'ready' };
     case 'package-added': {

@@ -7,7 +7,7 @@ import type { GoalRepository } from '../store/journal.js';
 export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string; terminal?: string; worktreeId?: string };
 export interface PackageRuntime {
   startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string }): Promise<PackageRuntimeRef>;
-  inspectPackage?(ref: PackageRuntimeRef): Promise<'live' | 'settled' | 'unverifiable'>;
+  inspectPackage?(ref: PackageRuntimeRef): Promise<'completed' | 'failed' | 'live' | 'unverifiable'>;
   resumePackage?(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string }): Promise<PackageRuntimeRef>;
   recoverPackage?(key: string, runId?: string): Promise<PackageRuntimeRef | undefined>;
 }
@@ -37,7 +37,10 @@ export class PackageService {
     return evidence;
   }
 
-  verify(goalId: string, packageId: string): void {
+  async verify(goalId: string, packageId: string): Promise<void> {
+    const item = this.store.getGoal(goalId)?.packages?.[packageId];
+    if (item?.status !== 'executing' || !item.runtimeRef) throw new Error('Executing package and Orca dispatch required');
+    if (await this.runtime.inspectPackage?.(item.runtimeRef as PackageRuntimeRef) !== 'completed') throw new Error('Orca Worker must complete before package verification');
     this.record(goalId, 'package-verified', { packageId });
   }
 
@@ -55,7 +58,7 @@ export class PackageService {
     if (item?.status !== 'stale' || !item.runtimeRef) throw new Error('Stale package with prior owner required');
     if (!item.spec.dependencies.every(dep => state?.packages?.[dep]?.status === 'verified')) throw new Error('Package dependencies are not verified');
     const prior = item.runtimeRef as PackageRuntimeRef;
-    if (await this.runtime.inspectPackage?.(prior) !== 'settled') throw new Error('Prior Worker dispatch must be settled');
+    if (!['completed', 'failed'].includes(await this.runtime.inspectPackage?.(prior) ?? 'unverifiable')) throw new Error('Prior Worker dispatch must be settled');
     if (!this.runtime.resumePackage) throw new Error('Runtime cannot resume package owner');
     const key = randomUUID();
     this.record(goalId, 'package-resume-intended', { packageId, key });

@@ -134,7 +134,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   }));
   packages.command('verify').argument('<goalId>').argument('<packageId>').action((goalId: string, packageId: string) => withJournalAsync(async journal => {
     const service = new PackageService(journal, packageRuntime());
-    service.verify(goalId, packageId);
+    await service.verify(goalId, packageId);
     const refs = await service.dispatchReady(goalId, repo());
     write(`Verified ${packageId}; dispatched ${refs.map(ref => ref.dispatchId).join(', ') || 'none'}`);
   }));

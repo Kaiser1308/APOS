@@ -96,15 +96,18 @@ export class OrcaRuntime implements RuntimeAdapter {
     const run = this.execute(['orchestration', 'run-create', '--objective', `APOS ${item.goalId} ${item.id} v${item.version} key ${input.idempotencyKey}`]);
     const runId = id(object(run.run).id, 'Run ID');
     const spec = `Target: ${input.repoPath}, ${item.goalId}, ${item.id}. Change: deliver ${item.outcome}. Constraints: read .apos/goals/${item.goalId}/goal.md, execution.md and packages/${item.id}.md; stay within scope; preserve other users' files; do not merge. Ownership: ${item.owner} owns this Work Package end to end. Observable acceptance: meet every local acceptance criterion, test, self-review, and report commit, diff and evidence. APOS dispatch key: ${input.idempotencyKey}.`;
-    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--name', `apos-${item.goalId.toLowerCase()}-${item.id.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, '--agent', 'claude', '--run', runId]);
+    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', 'HEAD', '--name', `apos-${item.goalId.toLowerCase()}-${item.id.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, '--agent', 'claude', '--run', runId]);
     const ref = extractStartedRef(started, input.repoPath);
     if (ref.runId !== runId) throw new Error('Orca Worker belongs to an unexpected Run');
     return { ...ref, owner: 'worker' };
   }
 
-  async inspectPackage(ref: PackageRuntimeRef): Promise<RuntimeObservation['state']> {
+  async inspectPackage(ref: PackageRuntimeRef): Promise<'completed' | 'failed' | 'live' | 'unverifiable'> {
     const shown = this.execute(['orchestration', 'worker-show', '--dispatch', ref.dispatchId]);
-    return interpretWorkerShow(shown);
+    const status = object(shown.dispatch).status;
+    if (status === 'completed' || status === 'failed') return status;
+    const state = interpretWorkerShow(shown);
+    return state === 'live' ? 'live' : 'unverifiable';
   }
 
   async resumePackage(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string }): Promise<PackageRuntimeRef> {

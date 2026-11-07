@@ -33,13 +33,14 @@ const approve = (store: SqliteStore) => store.append({ id: `EV-approve-${Math.ra
 class FakeRuntime implements PackageRuntime {
   starts: string[] = [];
   resumes: string[] = [];
+  inspectState: 'completed' | 'failed' | 'live' | 'unverifiable' = 'completed';
   recovered = new Map<string, Awaited<ReturnType<PackageRuntime['startPackage']>>>();
   async startPackage(input: { package: WorkPackageSpec; repoPath: string }) {
     this.starts.push(input.package.id);
     return { runId: 'run_1', taskId: `task_${input.package.id}`, dispatchId: `ctx_${input.package.id}`, owner: 'worker' as const, repoPath: input.repoPath };
   }
   async recoverPackage(key: string) { return this.recovered.get(key); }
-  async inspectPackage() { return 'settled' as const; }
+  async inspectPackage() { return this.inspectState; }
   async resumePackage(input: { package: WorkPackageSpec; prior: Awaited<ReturnType<PackageRuntime['startPackage']>> }) {
     this.resumes.push(input.package.id);
     return { ...input.prior, dispatchId: `ctx-resumed-${input.package.id}` };
@@ -87,7 +88,7 @@ describe('package scheduling', () => {
     await service.dispatchReady(spec.id, dir);
     expect(service.ready(spec.id)).toEqual([]);
     service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:test', commitRef: 'abc123' });
-    service.verify(spec.id, a.id);
+    await service.verify(spec.id, a.id);
     expect(service.ready(spec.id).map(item => item.id)).toEqual(['WP-02']);
     store.close();
   });
@@ -100,12 +101,24 @@ describe('package scheduling', () => {
     const evidence = { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass' as const, command: 'npm test', artifactRef: 'log:test', commitRef: 'abc123' };
     expect(() => service.submitEvidence(spec.id, { ...evidence, owner: 'wrong-owner' })).toThrow(/owner/i);
     expect(() => service.submitEvidence(spec.id, { ...evidence, packageVersion: 2 })).toThrow(/version/i);
-    expect(() => service.verify(spec.id, a.id)).toThrow(/evidence/i);
+    await expect(service.verify(spec.id, a.id)).rejects.toThrow(/evidence/i);
     service.submitEvidence(spec.id, { ...evidence, result: 'fail' });
-    expect(() => service.verify(spec.id, a.id)).toThrow(/evidence/i);
+    await expect(service.verify(spec.id, a.id)).rejects.toThrow(/evidence/i);
     service.submitEvidence(spec.id, evidence);
-    service.verify(spec.id, a.id);
+    await service.verify(spec.id, a.id);
     expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('verified');
+    store.close();
+  });
+  it('does not verify a package while its Orca Worker is still live', async () => {
+    const { store, dir } = fixture();
+    const runtime = new FakeRuntime();
+    runtime.inspectState = 'live';
+    const service = new PackageService(store, runtime);
+    service.add(spec.id, a); service.add(spec.id, b); approve(store);
+    await service.dispatchReady(spec.id, dir);
+    service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:a', commitRef: 'abc123' });
+    await expect(service.verify(spec.id, a.id)).rejects.toThrow(/Orca Worker must complete/);
+    expect(service.ready(spec.id)).toEqual([]);
     store.close();
   });
   it('invalidates verified downstream evidence when an upstream contract changes', async () => {
@@ -116,17 +129,17 @@ describe('package scheduling', () => {
     approve(store);
     await service.dispatchReady(spec.id, dir);
     service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:a', commitRef: 'abc123' });
-    service.verify(spec.id, a.id);
+    await service.verify(spec.id, a.id);
     await service.dispatchReady(spec.id, dir);
     service.submitEvidence(spec.id, { packageId: b.id, packageVersion: 1, owner: b.owner, acceptanceId: 'WP-AC-2', result: 'pass', command: 'npm test', artifactRef: 'log:b', commitRef: 'def456' });
-    service.verify(spec.id, b.id);
+    await service.verify(spec.id, b.id);
     service.revise(spec.id, { ...a, version: 2, interfaces: ['checkIn(token, device) -> result'] }, 'Contract now includes device');
     const packages = store.getGoal(spec.id)?.packages;
     expect(packages?.[a.id]?.status).toBe('stale');
     expect(packages?.[b.id]?.status).toBe('stale');
     expect(packages?.[a.id]?.evidence).toEqual([]);
     expect(packages?.[b.id]?.evidence).toEqual([]);
-    expect(() => service.verify(spec.id, b.id)).toThrow();
+    await expect(service.verify(spec.id, b.id)).rejects.toThrow();
     await service.resumeStale(spec.id, a.id);
     expect(runtime.resumes).toEqual(['WP-01']);
     expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('executing');

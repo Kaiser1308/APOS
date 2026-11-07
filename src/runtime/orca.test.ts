@@ -35,6 +35,7 @@ it('starts a package Worker in a dedicated Orca worktree', async () => {
   expect(calls[0]).toEqual(['repo', 'add', '--path', 'C:/project']);
   expect(calls[2]).toContain('new-top-level');
   expect(calls[2]).toContain('path:C:/project');
+  expect(calls[2]).toContain('HEAD');
   expect(ref.owner).toBe('worker');
 });
 

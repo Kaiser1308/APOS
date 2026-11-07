@@ -38,7 +38,7 @@ it('does not commit an event that fails the approval gate', async () => {
   const invalid = { id: 'EV-2', goalId: spec.id, type: 'goal-approved' as const, at: '2026-11-07T00:00:00.000Z' };
   expect(() => journal.append(invalid)).toThrow(/Goal does not exist/);
   expect(journal.getGoal(spec.id)).toBeUndefined();
-  expect(() => execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { stdio: 'pipe' })).toThrow();
+  expect(execFileSync('git', ['-C', dir, 'show', '--pretty=format:', '--name-only', 'HEAD'], { encoding: 'utf8' })).not.toContain('events.jsonl');
   store.close();
 });
 

@@ -7,6 +7,7 @@ import { runCli } from './cli.js';
 import { spec, proposal } from './domain/fixtures.test-support.js';
 import type { RuntimeAdapter, RuntimeRef } from './runtime/orca.js';
 import type { WorkPackageSpec } from './domain/packages.js';
+import type { PackageRuntime } from './app/packages.js';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
@@ -62,10 +63,11 @@ it('runs an approved two-package Goal through dependency release, integration an
   const a: WorkPackageSpec = { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' };
   const b: WorkPackageSpec = { ...a, id: 'WP-02', owner: 'worker-b', outcome: 'History', scope: ['history'], dependencies: ['WP-01'], acceptance: [{ id: 'WP-AC-2', text: 'history works' }] };
   const starts: string[] = [];
-  const runtime: RuntimeAdapter & { startPackage: (input: { package: WorkPackageSpec; repoPath: string }) => Promise<{ runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string }> } = {
+  const runtime: RuntimeAdapter & PackageRuntime = {
     async startSolo() { throw new Error('Solo must not start'); },
     async resumeSolo() { throw new Error('Solo must not resume'); },
     async inspect(ref) { return { state: 'settled', ref }; },
+    async inspectPackage() { return 'completed'; },
     async startPackage({ package: item, repoPath }) { starts.push(item.id); return { runId: 'run_1', taskId: item.id, dispatchId: item.id, owner: 'worker', repoPath }; }
   };
   const output: string[] = [];

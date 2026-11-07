@@ -17,4 +17,8 @@ it('initializes a managed Git project twice without losing the first state', asy
   expect(existsSync(join(dir, '.claude', 'skills', 'apos-pm', 'SKILL.md'))).toBe(true);
   expect(existsSync(join(dir, '.claude', 'skills', 'apos-lead', 'SKILL.md'))).toBe(true);
   expect(existsSync(join(dir, '.claude', 'skills', 'apos-worker', 'SKILL.md'))).toBe(true);
+  const committed = execFileSync('git', ['-C', dir, 'ls-tree', '-r', '--name-only', 'HEAD'], { encoding: 'utf8' });
+  expect(committed).toContain('.apos/project.yaml');
+  expect(committed).toContain('.claude/skills/apos-worker/SKILL.md');
+  expect(execFileSync('git', ['-C', dir, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('1');
 });

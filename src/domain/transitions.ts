@@ -5,10 +5,10 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'package-added';
+  | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'package-added' | 'package-dispatch-intended' | 'package-started' | 'package-verified';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
-export type PackageState = { spec: WorkPackageSpec; status: 'specified' | 'ready' | 'executing' | 'blocked' | 'verified'; evidence: unknown[]; runtimeRef?: unknown };
+export type PackageState = { spec: WorkPackageSpec; status: 'specified' | 'dispatching' | 'executing' | 'blocked' | 'verified'; evidence: unknown[]; runtimeRef?: unknown; dispatchIntent?: string };
 export type GoalState = {
   spec: GoalSpec;
   status: GoalStatus;
@@ -68,6 +68,25 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(spec.goalId === state.spec.id && spec.goalVersion === state.spec.version, 'Package Goal version mismatch');
       requireThat(!state.packages?.[spec.id], `Package ${spec.id} already exists`);
       return { ...state, packages: { ...state.packages, [spec.id]: { spec, status: 'specified', evidence: [] } } };
+    }
+    case 'package-dispatch-intended': {
+      requireThat(state.status === 'ready' || state.status === 'executing', 'Approved Multi-WP Goal required');
+      const data = event.data as { packageId?: string; key?: string };
+      const packageState = data && state.packages?.[data.packageId ?? ''];
+      requireThat(packageState?.status === 'specified' && data.key, 'Specified package and dispatch key required');
+      return { ...state, packages: { ...state.packages, [data.packageId!]: { ...packageState, status: 'dispatching', dispatchIntent: data.key } } };
+    }
+    case 'package-started': {
+      const data = event.data as { packageId?: string; ref?: unknown };
+      const packageState = data && state.packages?.[data.packageId ?? ''];
+      requireThat(packageState?.status === 'dispatching' && data.ref, 'Dispatch intent and runtime reference required');
+      return { ...state, status: 'executing', packages: { ...state.packages, [data.packageId!]: { ...packageState, status: 'executing', runtimeRef: data.ref, dispatchIntent: undefined } } };
+    }
+    case 'package-verified': {
+      const data = event.data as { packageId?: string };
+      const packageState = data && state.packages?.[data.packageId ?? ''];
+      requireThat(packageState?.status === 'executing', 'Executing package required');
+      return { ...state, packages: { ...state.packages, [data.packageId!]: { ...packageState, status: 'verified' } } };
     }
     case 'execution-started':
       requireThat(state.status === 'ready' && state.selected && state.proposal && state.proposalApprovedVersion === state.proposal.version, 'Approved current proposal required');

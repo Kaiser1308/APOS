@@ -21,6 +21,36 @@ it('registers an unmanaged project before starting its Solo Lead', async () => {
   expect(ref.dispatchId).toBe('ctx_1');
 });
 
+it('starts a package Worker in a dedicated Orca worktree', async () => {
+  const calls: string[][] = [];
+  const runtime = new OrcaRuntime(args => {
+    calls.push(args);
+    if (args[0] === 'repo') return { repo: { id: 'repo_1' } };
+    if (args[1] === 'run-create') return { run: { id: 'run_1' } };
+    return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', effects: [] };
+  });
+  const ref = await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-1', package: {
+    id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies'
+  } });
+  expect(calls[0]).toEqual(['repo', 'add', '--path', 'C:/project']);
+  expect(calls[2]).toContain('new-top-level');
+  expect(calls[2]).toContain('path:C:/project');
+  expect(ref.owner).toBe('worker');
+});
+
+it('finds a package dispatch on an older Orca Run page', async () => {
+  const calls: string[][] = [];
+  const runtime = new OrcaRuntime(args => {
+    calls.push(args);
+    if (args[1] === 'run-list' && !args.includes('--cursor')) return { runs: [], nextCursor: 'older' };
+    if (args[1] === 'run-list') return { runs: [{ id: 'run_1', objective: 'APOS GOAL-001 WP-01 v1 key lost-key' }] };
+    if (args[1] === 'task-list') return { tasks: [{ id: 'task_1', spec: 'Target: C:/project, GOAL-001, WP-01. APOS dispatch key: lost-key.' }] };
+    return { dispatch: { id: 'ctx_1', assignee_handle: 'term_1' } };
+  });
+  expect(await runtime.recoverPackage('lost-key')).toMatchObject({ runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'worker', terminal: 'term_1' });
+  expect(calls[1]).toEqual(['orchestration', 'run-list', '--cursor', 'older']);
+});
+
 it('treats a live terminal with a settled dispatch as settled work', () => {
   const shown = { dispatch: { status: 'completed' }, observation: { status: 'live' }, projection: { liveness: { verdict: 'live' } } };
   expect(interpretWorkerShow(shown)).toBe('settled');

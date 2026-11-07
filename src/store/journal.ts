@@ -1,5 +1,6 @@
 import { applyEvent, type GoalEvent, type GoalState } from '../domain/transitions.js';
 import { parseExecutionProposal, parseGoalSpec } from '../domain/contracts.js';
+import { parseWorkPackage } from '../domain/packages.js';
 import { ProjectHistory } from './project-history.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,6 +27,10 @@ export class ProjectJournal implements GoalRepository {
     if (event.type === 'proposal-drafted' || event.type === 'proposal-revised') {
       const proposal = parseExecutionProposal(event.data);
       documents.push({ path: 'execution.md', content: `# ${proposal.id}: ${proposal.mode}\n\n${proposal.approach}\n\n\`\`\`json\n${JSON.stringify(proposal, null, 2)}\n\`\`\`\n` });
+    }
+    if (event.type === 'package-added') {
+      const spec = parseWorkPackage(event.data);
+      documents.push({ path: `packages/${spec.id}.md`, content: `# ${spec.id}: ${spec.outcome}\n\n\`\`\`json\n${JSON.stringify(spec, null, 2)}\n\`\`\`\n` });
     }
     if (event.type === 'decision-logged') {
       const path = join(this.repoPath, '.apos', 'goals', event.goalId, 'decisions.md');

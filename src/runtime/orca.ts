@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
+import type { WorkPackageSpec } from '../domain/packages.js';
+import type { PackageRuntimeRef } from '../app/packages.js';
 
 export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string };
 export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; ref: RuntimeRef };
@@ -59,6 +61,22 @@ export function interpretWorkerShow(shown: Record<string, unknown>): RuntimeObse
 export class OrcaRuntime implements RuntimeAdapter {
   constructor(private readonly execute: (args: string[]) => Record<string, unknown> = runOrca) {}
 
+  private findRun(key: string): Record<string, unknown> | undefined {
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    do {
+      const args = ['orchestration', 'run-list'];
+      if (cursor) args.push('--cursor', cursor);
+      const page = this.execute(args);
+      const run = (Array.isArray(page.runs) ? page.runs : []).map(object).find(row => typeof row.objective === 'string' && row.objective.endsWith(`key ${key}`));
+      if (run) return run;
+      cursor = typeof page.nextCursor === 'string' && page.nextCursor ? page.nextCursor : undefined;
+      if (cursor && seen.has(cursor)) throw new Error('Orca Run pagination repeated its cursor');
+      if (cursor) seen.add(cursor);
+    } while (cursor);
+    return undefined;
+  }
+
   async startSolo(input: SoloInput): Promise<RuntimeRef> {
     this.execute(['repo', 'add', '--path', input.repoPath]);
     const run = this.execute(['orchestration', 'run-create', '--objective', `APOS ${input.goalId} proposal v${input.proposalVersion} key ${input.idempotencyKey}`]);
@@ -68,6 +86,18 @@ export class OrcaRuntime implements RuntimeAdapter {
     const ref = extractStartedRef(started, input.repoPath);
     if (ref.runId !== runId) throw new Error('Orca worker belongs to an unexpected Run');
     return ref;
+  }
+
+  async startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string }): Promise<PackageRuntimeRef> {
+    const item = input.package;
+    this.execute(['repo', 'add', '--path', input.repoPath]);
+    const run = this.execute(['orchestration', 'run-create', '--objective', `APOS ${item.goalId} ${item.id} v${item.version} key ${input.idempotencyKey}`]);
+    const runId = id(object(run.run).id, 'Run ID');
+    const spec = `Target: ${input.repoPath}, ${item.goalId}, ${item.id}. Change: deliver ${item.outcome}. Constraints: read .apos/goals/${item.goalId}/goal.md, execution.md and packages/${item.id}.md; stay within scope; preserve other users' files; do not merge. Ownership: ${item.owner} owns this Work Package end to end. Observable acceptance: meet every local acceptance criterion, test, self-review, and report commit, diff and evidence. APOS dispatch key: ${input.idempotencyKey}.`;
+    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--name', `apos-${item.goalId.toLowerCase()}-${item.id.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, '--agent', 'claude', '--run', runId]);
+    const ref = extractStartedRef(started, input.repoPath);
+    if (ref.runId !== runId) throw new Error('Orca Worker belongs to an unexpected Run');
+    return { ...ref, owner: 'worker' };
   }
 
   async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint): Promise<RuntimeRef> {
@@ -83,8 +113,7 @@ export class OrcaRuntime implements RuntimeAdapter {
   }
 
   async recover(key: string): Promise<RuntimeRef | undefined> {
-    const runs = this.execute(['orchestration', 'run-list']);
-    const run = (Array.isArray(runs.runs) ? runs.runs : []).map(object).find(row => typeof row.objective === 'string' && row.objective.endsWith(`key ${key}`));
+    const run = this.findRun(key);
     if (!run) return undefined;
     const runId = id(run.id, 'Run ID');
     const tasks = this.execute(['orchestration', 'task-list', '--run', runId]);
@@ -97,5 +126,21 @@ export class OrcaRuntime implements RuntimeAdapter {
     const match = /Target: (.*?), (GOAL-[A-Z0-9-]+)\./.exec(String(task.spec));
     if (!match) throw new Error('Orca task has no APOS repo path');
     return { runId, taskId, dispatchId: id(dispatch.id, 'Dispatch ID'), owner: 'lead', repoPath: match[1], terminal: typeof dispatch.assignee_handle === 'string' ? dispatch.assignee_handle : undefined };
+  }
+
+  async recoverPackage(key: string): Promise<PackageRuntimeRef | undefined> {
+    const run = this.findRun(key);
+    if (!run) return undefined;
+    const runId = id(run.id, 'Run ID');
+    const tasks = this.execute(['orchestration', 'task-list', '--run', runId]);
+    const task = (Array.isArray(tasks.tasks) ? tasks.tasks : []).map(object).find(row => typeof row.spec === 'string' && row.spec.includes(`APOS dispatch key: ${key}.`));
+    if (!task) return undefined;
+    const taskId = id(task.id, 'Task ID');
+    const detail = this.execute(['orchestration', 'dispatch-show', '--task', taskId]);
+    const dispatch = object(detail.dispatch);
+    if (!dispatch.id) return undefined;
+    const match = /Target: (.*?), (GOAL-[A-Z0-9-]+), (WP-[A-Z0-9-]+)\./.exec(String(task.spec));
+    if (!match) throw new Error('Orca task has no APOS package target');
+    return { runId, taskId, dispatchId: id(dispatch.id, 'Dispatch ID'), owner: 'worker', repoPath: match[1], terminal: typeof dispatch.assignee_handle === 'string' ? dispatch.assignee_handle : undefined };
   }
 }

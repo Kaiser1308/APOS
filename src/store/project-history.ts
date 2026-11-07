@@ -37,8 +37,9 @@ export class ProjectHistory {
     }
     const files = [eventFile];
     for (const doc of documents) {
-      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/.test(doc.path)) throw new Error(`Invalid document path: ${doc.path}`);
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/.test(doc.path) && !/^packages\/WP-[A-Z0-9-]+\.md$/.test(doc.path)) throw new Error(`Invalid document path: ${doc.path}`);
       const path = join(goalDir, doc.path);
+      mkdirSync(join(path, '..'), { recursive: true });
       writeFileSync(path, doc.content, 'utf8');
       files.push(path);
     }

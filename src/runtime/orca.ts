@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntimeRef } from '../app/packages.js';
-import { DEFAULT_PROFILES, committedFileDigest, leadWakeBrief, oneLine, packageBrief, packageReportPath, parseRepoMarker, repoMarker, repairBrief, reviewBrief, soloBrief, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
+import { DEFAULT_PROFILES, committedFileDigest, leadWakeBrief, oneLine, packageBrief, packageReportPath, parseRepoMarker, repoMarker, repairBrief, reviewBrief, soloBrief, type Budget, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
 
 export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string; requested?: RuntimeProfile };
 /** What Orca says actually launched; compared with the requested profile. */
@@ -11,10 +11,12 @@ export type ReviewerRef = { runId: string; taskId: string; dispatchId: string; o
 export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; outcome?: 'completed' | 'failed'; ref: RuntimeRef };
 export type OrcaMessage = { id: string; type: string; subject?: string; body?: string; payload?: unknown; dispatch_id?: string; dispatchId?: string };
 export type OrcaDelivery = { deliveryId?: string; messages: OrcaMessage[] };
-export type SoloInput = { repoPath: string; goalId: string; proposalVersion: number; checkpoint?: PhaseCheckpoint; idempotencyKey: string; attempt?: number };
+export type SoloInput = { repoPath: string; goalId: string; proposalVersion: number; checkpoint?: PhaseCheckpoint; idempotencyKey: string; attempt?: number; budget?: Budget };
 export interface RuntimeAdapter {
   startSolo(input: SoloInput): Promise<RuntimeRef>;
-  resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string): Promise<RuntimeRef>;
+  resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string, budget?: Budget): Promise<RuntimeRef>;
+  /** Replies to an owner's message on its Run. */
+  replyMessage?(runId: string, messageId: string, body: string): Promise<void>;
   inspect(ref: RuntimeRef): Promise<RuntimeObservation>;
   recover?(key: string, runId?: string): Promise<RuntimeRef | undefined>;
   checkRun?(runId: string): Promise<OrcaDelivery>;
@@ -143,7 +145,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     // Solo runs in its own worktree from an exact base commit, never in the managed checkout.
     const baseCommit = this.gitHead(input.repoPath);
     if (!/^[0-9a-fA-F]{40,64}$/.test(baseCommit)) throw new Error('Full Solo base commit required');
-    const spec = soloBrief({ repoPath: input.repoPath, goalId: input.goalId, baseCommit, idempotencyKey: input.idempotencyKey, attempt: input.attempt ?? 1, digest: path => this.fileDigest(input.repoPath, baseCommit, path) });
+    const spec = soloBrief({ repoPath: input.repoPath, goalId: input.goalId, baseCommit, idempotencyKey: input.idempotencyKey, attempt: input.attempt ?? 1, budget: input.budget, digest: path => this.fileDigest(input.repoPath, baseCommit, path) });
     const profile = this.profile('lead');
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', baseCommit, '--name', `apos-${input.goalId.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, ...launchArgs(profile), '--run', runId]);
     const ref = extractStartedRef(started, input.repoPath);
@@ -190,13 +192,13 @@ export class OrcaRuntime implements RuntimeAdapter {
     return { ...ref, owner: 'worker', worktreeId: ref.worktreeId ?? prior.worktreeId, baseCommit: prior.baseCommit };
   }
 
-  async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string): Promise<RuntimeRef> {
+  async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string, budget?: Budget): Promise<RuntimeRef> {
     if (!ref.terminal) throw new Error('Orca terminal identity required to resume same owner');
     this.execute(['orchestration', 'run-use', '--id', ref.runId]);
     if (!ref.worktreeId) throw new Error('Solo owner worktree identity required to resume same owner');
     const goalId = /^GOAL-[A-Z0-9-]+$/.test(checkpoint.goalId ?? '') ? checkpoint.goalId! : 'GOAL';
     const finding = `${checkpoint.phase}: ${checkpoint.progress}${checkpoint.evidenceRefs.length ? `\nLogs: ${checkpoint.evidenceRefs.join(', ')}` : ''}`;
-    const spec = repairBrief({ repoPath: ref.repoPath, goalId, attempt: checkpoint.attempt ?? 2, finding, idempotencyKey, baseCommit: ref.baseCommit });
+    const spec = repairBrief({ repoPath: ref.repoPath, goalId, attempt: checkpoint.attempt ?? 2, finding, idempotencyKey, baseCommit: ref.baseCommit, budget });
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `id:${ref.worktreeId}`, '--run', ref.runId]);
     const next = extractStartedRef(started, ref.repoPath);
     return { ...next, terminal: next.terminal ?? ref.terminal, worktreeId: next.worktreeId ?? ref.worktreeId, baseCommit: ref.baseCommit, requested: ref.requested };
@@ -215,6 +217,10 @@ export class OrcaRuntime implements RuntimeAdapter {
       deliveryId: typeof result.deliveryId === 'string' ? result.deliveryId : undefined,
       messages: Array.isArray(result.messages) ? result.messages.map(value => object(value) as OrcaMessage) : []
     };
+  }
+
+  async replyMessage(runId: string, messageId: string, body: string): Promise<void> {
+    this.execute(['orchestration', 'reply', '--run', runId, '--id', messageId, '--body', oneLine(body)]);
   }
 
   async ackRun(runId: string, deliveryId: string): Promise<void> {

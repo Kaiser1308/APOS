@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { runCli } from '../cli.js';
 import { spec as baseSpec, proposal, sourceText } from '../domain/fixtures.test-support.js';
 import type { GoalSpec } from '../domain/contracts.js';
-import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
+import type { OrcaMessage, RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
+import type { Budget } from '../runtime/brief.js';
+import { ESCALATION_REPLY } from './controller.js';
 import { CORE_SKILL, activationLine, committedFileDigest, reviewResultPath, soloReportPath } from '../runtime/brief.js';
 import { ProjectJournal } from '../store/journal.js';
 import { SqliteStore } from '../store/sqlite.js';
@@ -26,7 +28,7 @@ const APPETITE = ['--size', 'M', '--max-spend', '20', '--max-minutes', '240', '-
  * scripted work for that attempt, then settles. Everything else - gate, findings, resume, review,
  * verification, merge - is the real controller on real Git.
  */
-async function setup(work: (attempt: number, commit: (files: Record<string, string>, message: string) => void, line: string) => void, options: { risks?: string[]; reviewer?: (commit: (files: Record<string, string>) => void, key: string) => void; launched?: string; intrude?: boolean } = {}) {
+async function setup(work: (attempt: number, commit: (files: Record<string, string>, message: string) => void, line: string) => void, options: { risks?: string[]; reviewer?: (commit: (files: Record<string, string>) => void, key: string) => void; launched?: string; intrude?: boolean; failed?: (attempt: number) => boolean; inbox?: OrcaMessage[] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'apos-auto-')); dirs.push(dir);
   const artifacts = mkdtempSync(join(tmpdir(), 'apos-auto-art-')); dirs.push(artifacts);
   execFileSync('git', ['init', '-q', dir]);
@@ -44,6 +46,11 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
   const dispatches: string[] = [];
   const settled = new Set<string>();
   const released: string[] = [];
+  const failedDispatches = new Set<string>();
+  const budgets: (Budget | undefined)[] = [];
+  const replies: { messageId: string; body: string }[] = [];
+  const acked: string[] = [];
+  let inbox = options.inbox ?? [];
   let reviewKey: string | undefined;
   const ref = (n: number): RuntimeRef => ({ runId: 'run_1', taskId: `task_${n}`, dispatchId: `ctx_${n}`, owner: 'lead', repoPath: dir, terminal: 'term_1', worktreeId: `repo::${owner}`, baseCommit: base, requested: { agent: 'codex', model: 'gpt-6.1-terra' } });
   let base = '';
@@ -51,16 +58,18 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
     attempt += 1;
     work(attempt, commit, activationLine(committedFileDigest(dir, base, CORE_SKILL)));
     settled.add(`ctx_${attempt}`);
+    if (options.failed?.(attempt)) failedDispatches.add(`ctx_${attempt}`);
   };
   const runtime: RuntimeAdapter = {
-    async startSolo() {
+    async startSolo(input) {
+      budgets.push(input.budget);
       base = git('rev-parse', 'HEAD'); dispatches.push('start');
       owner = join(mkdtempSync(join(tmpdir(), 'apos-auto-wt-')), 'wt'); dirs.push(join(owner, '..'));
       git('worktree', 'add', '-q', '-b', 'owner', owner, base);
       const r = ref(1); runOwner(); return r;
     },
-    async resumeSolo() { dispatches.push('resume'); const r = ref(attempt + 1); runOwner(); return r; },
-    async inspect(r) { return settled.has(r.dispatchId) ? { state: 'settled', outcome: 'completed', ref: r } : { state: 'live', ref: r }; },
+    async resumeSolo(_ref, _checkpoint, _key, budget) { budgets.push(budget); dispatches.push('resume'); const r = ref(attempt + 1); runOwner(); return r; },
+    async inspect(r) { return settled.has(r.dispatchId) ? { state: 'settled', outcome: failedDispatches.has(r.dispatchId) ? 'failed' : 'completed', ref: r } : { state: 'live', ref: r }; },
     async deliveryHead(r) { return execFileSync('git', ['-C', r.worktreeId ? r.worktreeId.split('::')[1] : owner, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); },
     async launchReceipt() { return { agent: 'codex', model: options.launched ?? 'gpt-6.1-terra' }; },
     async startReviewer(input) {
@@ -71,7 +80,13 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
       settled.add('ctx_review');
       return { runId: 'run_1', taskId: 'task_r', dispatchId: 'ctx_review', owner: 'reviewer', repoPath: dir, worktreeId: `repo::${reviewWt}`, key: input.idempotencyKey, commit: input.commit };
     },
-    async releaseWorker(dispatchId) { released.push(dispatchId); }
+    async releaseWorker(dispatchId) { released.push(dispatchId); },
+    ...(options.inbox ? {
+      async checkRun() { return inbox.length ? { deliveryId: 'delivery_1', messages: inbox } : { messages: [] }; },
+      async ackRun(_run: string, deliveryId: string) { acked.push(deliveryId); inbox = []; },
+      async retainWorker() {},
+      async replyMessage(_run: string, messageId: string, body: string) { replies.push({ messageId, body }); }
+    } : {})
   };
   const output: string[] = [];
   const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, gate: { artifactRoot: artifacts }, write: line => output.push(line) });
@@ -87,7 +102,7 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
   await invoke('lead', 'commit', spec.id);
   const tick = async () => { await invoke('controller', 'tick'); return output.at(-1)!; };
   const state = () => { const opened = ProjectJournal.open(dir); try { return opened.journal.getGoal(spec.id)!; } finally { opened.close(); } };
-  return { dir, git, invoke, tick, state, dispatches, released, output, reviewKeyOf: () => reviewKey };
+  return { dir, git, invoke, tick, state, dispatches, released, output, reviewKeyOf: () => reviewKey, budgets, replies, acked };
 }
 
 const report = (attempt: number, line: string) => ({ [soloReportPath(spec.id, attempt)]: `# Delivery\n\n${line}\nreviewedHead: HEAD\n` });
@@ -172,6 +187,71 @@ describe('Solo autopilot', () => {
     const { tick, state } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work in the wrong place'), { intrude: true });
     await tick();
     expect(state().blocker).toMatchObject({ note: expect.stringMatching(/needs-decision: the owner.s delivery landed in the managed checkout/) });
+  }, 90_000);
+});
+
+describe('owner stops early (seen live on SQLFMT)', () => {
+  it('resumes an owner that reported failed with budget left, quoting its own Remaining list, and tells it the budget', async () => {
+    const { tick, state, dispatches, budgets } = await setup((attempt, commit, line) => {
+      const body = attempt === 1 ? `# Solo attempt: incomplete
+
+${line}
+
+## Remaining
+
+Lowercase TRUE and FALSE literals.
+` : `# Delivery
+
+${line}
+
+## Remaining
+
+none
+`;
+      commit({ 'feature.js': 'process.exit(0);', [soloReportPath(spec.id, attempt)]: body }, `attempt ${attempt}`);
+    }, { failed: attempt => attempt === 1 });
+    await tick();
+    expect(dispatches).toEqual(['start', 'resume']);
+    expect(state().findings![0]).toMatchObject({ kind: 'patch', by: 'controller', signature: 'owner-incomplete' });
+    expect(state().findings![0].note).toMatch(/Lowercase TRUE and FALSE literals/);
+    expect(budgets[0]).toMatchObject({ attemptsLeft: 2 });
+    expect(budgets[0]!.minutesLeft).toBeGreaterThan(239);
+    expect(budgets[1]).toMatchObject({ attemptsLeft: 1 });
+    await tick();
+    expect(state().status).toBe('verified');
+  }, 90_000);
+
+  it('still stops for a decision when an owner reports failed without a delivery report', async () => {
+    const { tick, state, dispatches } = await setup((attempt, commit) => commit({ 'feature.js': 'process.exit(0);' }, 'work'), { failed: () => true });
+    await tick();
+    expect(dispatches).toEqual(['start']);
+    expect(state().blocker).toMatchObject({ note: expect.stringMatching(/reported failed on attempt 1 without a delivery report/) });
+  }, 90_000);
+
+  it('stops when an owner keeps reporting failed and the attempt budget is spent', async () => {
+    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', [soloReportPath(spec.id, attempt)]: `${line}
+## Remaining
+more
+` }, `a${attempt}`), { failed: () => true });
+    for (let i = 0; i < 4; i++) await tick();
+    expect(dispatches).toEqual(['start', 'resume', 'resume']);
+    expect(state().status).toBe('blocked');
+  }, 90_000);
+
+  it('notifies the Human of an owner escalation once, answers with the standing rule, and acks the delivery', async () => {
+    const message: OrcaMessage = { id: 'msg_1', type: 'escalation', subject: 'Conflicting oracle', body: 'An existing fixture contradicts AC-1.' };
+    const { tick, state, replies, acked, dir } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), { inbox: [message] });
+    await tick();
+    const opened = ProjectJournal.open(dir);
+    const notices = opened.journal.events(spec.id).filter(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'escalation');
+    opened.close();
+    expect(notices).toHaveLength(1);
+    expect(notices[0].data).toMatchObject({ messageId: 'msg_1', subject: 'Conflicting oracle' });
+    expect(replies).toEqual([{ messageId: 'msg_1', body: ESCALATION_REPLY }]);
+    expect(acked).toEqual(['delivery_1']);
+    await tick();
+    expect(replies).toHaveLength(1);
+    expect(state().status).toBe('verified');
   }, 90_000);
 });
 

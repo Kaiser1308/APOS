@@ -44,6 +44,12 @@ export const oneLine = (text: string) => text.replace(/\s*\r?\n\s*/g, ' / ');
 export const repoMarker = (repoPath: string) => `APOS repo: <${repoPath}>.`;
 export const parseRepoMarker = (spec: string): string | undefined => /APOS repo: <([^>]*)>/.exec(spec)?.[1] ?? /Target: (.*?), (?:GOAL-|APOS Solo Goal)/.exec(spec)?.[1];
 
+/** What the Human's appetite leaves for the owner. Seen live: an owner that did not know it stopped at 15 of 90 minutes. */
+export type Budget = { minutesLeft: number; attemptsLeft: number };
+export const budgetLine = (budget?: Budget) => budget
+  ? `Budget left for this Goal: about ${Math.max(0, Math.round(budget.minutesLeft))} min of wall time and ${budget.attemptsLeft} attempt(s) after this one. Use it: do not stop at partial work or report failed while budget remains, unless the Goal cannot be met within scope (then name the requirement that blocks it and why).`
+  : undefined;
+
 type BriefBase = { repoPath: string; goalId: string; baseCommit: string; idempotencyKey: string; digest?: (path: string) => string };
 
 function skillLines(input: BriefBase, role: Role): string[] {
@@ -60,24 +66,26 @@ function skillLines(input: BriefBase, role: Role): string[] {
  * Briefs point at committed files by path and hash instead of pasting product text into a shell
  * argument, so quotes, `$` and newlines in a Goal cannot break or alter the dispatch.
  */
-export function soloBrief(input: BriefBase & { attempt: number }): string {
+export function soloBrief(input: BriefBase & { attempt: number; budget?: Budget }): string {
   return [
     `${input.goalId}: APOS Solo owner, attempt ${input.attempt}.`,
     WORKSPACE,
     ...skillLines(input, 'lead'),
     `Contract: .apos/goals/${input.goalId}/goal.md, source.md and execution.md at base commit ${input.baseCommit}. You own the whole Goal in this worktree.`,
     `Commit your delivery report at ${soloReportPath(input.goalId, input.attempt)}. The controller will run every Goal check itself on your final commit.`,
+    ...(budgetLine(input.budget) ? [budgetLine(input.budget)!] : []),
     'Follow the injected Orca preamble; report worker_done exactly once with succeeded or failed, then idle. Do not merge.',
     `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`
   ].join(' ');
 }
 
-export function repairBrief(input: { goalId: string; attempt: number; finding: string; idempotencyKey: string; repoPath: string; baseCommit?: string }): string {
+export function repairBrief(input: { goalId: string; attempt: number; finding: string; idempotencyKey: string; repoPath: string; baseCommit?: string; budget?: Budget }): string {
   return [
     `${input.goalId}: same owner, repair attempt ${input.attempt}.`,
     WORKSPACE,
-    `The controller ran the Goal checks itself on your last commit. Its finding: ${oneLine(input.finding)}`,
+    `The controller's finding on your last attempt: ${oneLine(input.finding)}`,
     `Fix it under ${CORE_SKILL}. Recheck every acceptance criterion, not only this finding, and commit a new delivery report at ${soloReportPath(input.goalId, input.attempt)} with the same activation line.`,
+    ...(budgetLine(input.budget) ? [budgetLine(input.budget)!] : []),
     'Report worker_done exactly once with succeeded or failed.',
     `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}.${input.baseCommit ? ` APOS base commit: ${input.baseCommit}.` : ''}`
   ].join(' ');

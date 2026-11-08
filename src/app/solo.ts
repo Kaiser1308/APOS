@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { attemptLimit, type GoalEventType } from '../domain/transitions.js';
+import { attemptLimit, type GoalEventType, type GoalState } from '../domain/transitions.js';
+import type { Budget } from '../runtime/brief.js';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { GoalRepository } from '../store/journal.js';
 import { OrcaRefused, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
@@ -10,6 +11,14 @@ export class SoloService {
 
   private record(goalId: string, type: GoalEventType, data?: unknown): void {
     this.store.append({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
+  }
+
+  /** What the approved appetite leaves after `attempt` starts; the owner sees it in its brief. */
+  private budget(state: GoalState, attempt: number): Budget | undefined {
+    if (!state.appetite) return undefined;
+    const started = this.store.events(state.spec.id).find(item => item.type === 'execution-started');
+    const used = started ? (Date.now() - Date.parse(started.at)) / 60_000 : 0;
+    return { minutesLeft: state.appetite.maxWallMinutes - used, attemptsLeft: Math.max(0, attemptLimit(state) - attempt) };
   }
 
   async start(goalId: string, repoPath: string): Promise<RuntimeRef> {
@@ -26,7 +35,7 @@ export class SoloService {
     }
     this.record(goalId, 'dispatch-intended', key);
     let ref: RuntimeRef;
-    try { ref = await this.runtime.startSolo({ repoPath, goalId, proposalVersion: state.proposal.version, idempotencyKey: key }); }
+    try { ref = await this.runtime.startSolo({ repoPath, goalId, proposalVersion: state.proposal.version, idempotencyKey: key, budget: this.budget(state, 1) }); }
     catch (error) {
       if (error instanceof OrcaRefused) this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
       throw error;
@@ -53,7 +62,7 @@ export class SoloService {
     const key = randomUUID();
     this.record(goalId, 'resume-intended', key);
     let next: RuntimeRef;
-    try { next = await this.runtime.resumeSolo(state.runtimeRef as RuntimeRef, state.checkpoint as PhaseCheckpoint, key); }
+    try { next = await this.runtime.resumeSolo(state.runtimeRef as RuntimeRef, state.checkpoint as PhaseCheckpoint, key, this.budget(state, (state.checkpoint as PhaseCheckpoint).attempt ?? (state.soloAttempts ?? 1) + 1)); }
     catch (error) {
       if (error instanceof OrcaRefused) this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
       throw error;

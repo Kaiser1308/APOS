@@ -39,6 +39,9 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | Orca refuses a resume (`agent_unconfigured`, seen live) | intent abandoned, retried; needs-decision after 3 refusals | `supervisor.test.ts` › Orca refusing a resume |
 | Orca outcome unknown on start or resume (seen live) | recovered by dispatch key, never retried blindly; Human notified after 10 min | `supervisor.test.ts` › Orca refusing a resume; `solo.test.ts` › recovers a lost … response |
 | Resume continues a cumulative Codex session (seen live) | tokens attributed per dispatch | `telemetry.test.ts` |
+| Owner reports failed with budget left (seen live, SQLFMT pilot: stopped at 15 of 90 min) | same owner resumed with its own `## Remaining` list; stops when attempts or wall time are spent, or when there is no report | `supervisor.test.ts` › owner stops early |
+| Owner does not know its budget (seen live) | brief states minutes and attempts left | `brief.test.ts` |
+| Owner escalates over Orca mid-attempt and waits (seen live: fixture vs approved criterion) | Human notified once, owner answered with the standing rule, delivery acked | `supervisor.test.ts` › notifies the Human of an owner escalation once |
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
 
 ## Not covered by automated tests

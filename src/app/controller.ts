@@ -1,11 +1,19 @@
 import { PackageService, type PackageRuntime, type PackageRuntimeRef } from './packages.js';
 import { SoloService } from './solo.js';
-import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
+import type { OrcaMessage, RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
 import type { GoalRepository } from '../store/journal.js';
 import { randomUUID } from 'node:crypto';
 import { MultiSupervisor, SoloSupervisor, type SupervisorOptions } from './supervisor.js';
 
 export type ControllerTick = { goalId: string; dispatched: string[]; recovered: string[]; unresolved: string[]; resumed: string[]; settled: string[]; inboxPending: string[]; errors: string[]; supervised: string[] };
+
+/**
+ * The standing answer to an owner's question or escalation in Solo. Seen live: an owner escalated a
+ * fixture that contradicted the approved Goal, then waited. The Human hears about it; the owner is told
+ * the rule it already has instead of an improvised decision.
+ */
+export const ESCALATION_REPLY = 'APOS controller: logged for the Human, who will read it after this attempt. Keep working under the approved Goal and .apos/skills/_core/execute.md. Approved acceptance criteria and their recorded ambiguity decisions win over existing tests or fixtures that contradict them: update those, with the criterion as the reason. Where the Goal is silent, take the reading closest to source.md and record it in your report. Report failed only if the Goal cannot be met within scope.';
+const OWNER_MESSAGES = new Set(['escalation', 'question', 'decision_gate', 'blocker']);
 
 export class ControllerService {
   constructor(private readonly store: GoalRepository, private readonly runtime: RuntimeAdapter & PackageRuntime, private readonly options: SupervisorOptions = {}) {}
@@ -21,7 +29,10 @@ export class ControllerService {
     if (!delivery.deliveryId) return;
     for (const message of delivery.messages) {
       if (message.type === 'status' || message.type === 'heartbeat') continue;
-      if (message.type !== 'worker_done') { result.inboxPending.push(`${message.type}:${message.id}`); continue; }
+      if (message.type !== 'worker_done') {
+        if (state.proposal?.mode.startsWith('solo') && OWNER_MESSAGES.has(message.type)) { await this.relay(goalId, runId, message, result); continue; }
+        result.inboxPending.push(`${message.type}:${message.id}`); continue;
+      }
       let payload = message.payload;
       if (typeof payload === 'string') {
         try { payload = JSON.parse(payload); } catch { result.inboxPending.push(`invalid payload:${message.id}`); continue; }
@@ -41,6 +52,15 @@ export class ControllerService {
       }
     }
     if (!result.inboxPending.length) await this.runtime.ackRun(runId, delivery.deliveryId);
+  }
+
+  /** Notifies the Human once per message and answers the owner with the standing rule. */
+  private async relay(goalId: string, runId: string, message: OrcaMessage, result: ControllerTick): Promise<void> {
+    const seen = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { messageId?: string }).messageId === message.id);
+    if (seen) return;
+    this.store.append({ id: randomUUID(), goalId, type: 'human-notified', data: { kind: 'escalation', goalId, messageId: message.id, messageType: message.type, subject: message.subject, body: message.body }, at: new Date().toISOString() });
+    if (this.runtime.replyMessage) await this.runtime.replyMessage(runId, message.id, ESCALATION_REPLY);
+    result.settled.push(`relayed ${message.type}:${message.id}`);
   }
 
   async tick(repoPath: string): Promise<ControllerTick[]> {

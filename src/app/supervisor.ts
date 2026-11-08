@@ -78,7 +78,18 @@ export class SoloSupervisor {
     }
 
     await this.recordTelemetry(state, ref, 'lead');
-    if (outcome === 'failed') { this.decide(goalId, `owner reported failed on attempt ${attempt}`, actions); return actions; }
+    if (outcome === 'failed') {
+      // Seen live: an owner reported failed with most of the Goal built and 75 of 90 minutes left. While the
+      // appetite lasts, an honest "not done" is a finding for the same owner, not a stop. repair() enforces the budget.
+      const failedHead = await this.runtime.deliveryHead?.(ref);
+      const failedReport = failedHead && show(repoPath, failedHead, soloReportPath(goalId, attempt));
+      const failedLine = ref.baseCommit ? activationLine(committedFileDigest(repoPath, ref.baseCommit, CORE_SKILL)) : undefined;
+      if (!failedHead || !failedReport || !failedLine || !failedReport.includes(failedLine)) { this.decide(goalId, `owner reported failed on attempt ${attempt} without a delivery report`, actions); return actions; }
+      return this.repair(state, {
+        note: `You reported failed on attempt ${attempt} at ${failedHead}, and the approved budget is not spent. Your report says what remains: ${remaining(failedReport)} Finish it. Report failed again only if the Goal cannot be met within scope, naming the requirement that blocks it.`,
+        signature: 'owner-incomplete', commit: failedHead
+      }, repoPath, actions);
+    }
     const receipt = await this.runtime.launchReceipt?.(ref.dispatchId);
     if (ref.requested?.model && receipt?.model && receipt.model !== ref.requested.model) {
       this.decide(goalId, `runtime launched ${receipt.agent}/${receipt.model}, plan requires ${ref.requested.agent}/${ref.requested.model}`, actions);
@@ -214,6 +225,15 @@ function foreignCommits(repoPath: string, base: string, goalId: string): string[
     const rows = execFileSync('git', ['-C', repoPath, 'log', '--format=%H%x09%ae', `${base}..HEAD`, '--', `.apos/goals/${goalId}/evidence/`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split(/\r?\n/).filter(Boolean);
     return rows.filter(row => row.split('\t')[1] !== 'apos@local.invalid').map(row => row.slice(0, 12));
   } catch { return []; }
+}
+
+/** The owner's own account of unfinished work: its "Remaining" section, else the end of the report. */
+function remaining(report: string): string {
+  const lines = report.split(/\r?\n/);
+  const start = lines.findIndex(line => /^#+\s*Remaining/i.test(line));
+  const end = start < 0 ? -1 : lines.findIndex((line, index) => index > start && /^#+\s/.test(line));
+  const section = start < 0 ? '' : lines.slice(start + 1, end < 0 ? undefined : end).join(' ').trim();
+  return (section || report.trim().slice(-800)).slice(0, 1500);
 }
 
 function describe(gate: GateReport): string {

@@ -6,7 +6,7 @@ APOS runs AI agents on software Goals. The design follows what the Hard12 runs s
 - correctness comes from a source-backed contract and a gate the controller runs itself, not from the owner's report;
 - the Human decides WHAT and outcomes, not HOW.
 
-Design: `debates/2026-11-08-apos/FINAL-DESIGN.md` (v2.1). Safety cases: `docs/fault-injection.md`.
+Design: `docs/FINAL-DESIGN.md` (v2.1, in Vietnamese). Safety cases: `docs/fault-injection.md`.
 
 ## Roles and Human gates
 
@@ -35,7 +35,6 @@ Requires Node.js 24+, Git, and the Orca CLI with Codex enabled (default runtime)
 In `~/.codex/config.toml`, set `check_for_update_on_startup = false` (an update prompt blocks Orca workers) and `multi_agent = false` under `[features]` (owners must not spawn sub-agents). The live smokes ran with both.
 
 ```powershell
-cd apos
 npm ci
 npm run build
 node dist/cli.js --repo C:\path\to\project init

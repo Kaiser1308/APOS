@@ -138,3 +138,27 @@ describe('idle watchdog (seen live: a Goal sat 26 min with no agent and no repor
     store.close(); rm(dir, { recursive: true, force: true });
   });
 });
+
+it('retains the settled dispatch of a Lead wake-up, so the next wake is not refused as agent_unconfigured (seen live)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-controller-leadwake-')); dirs.push(dir);
+  const store = SqliteStore.open(join(dir, 'state.sqlite'));
+  let n = 0;
+  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `LW-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+  add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+  const ref = { runId: 'run-1', taskId: 'task-1', dispatchId: 'ctx-1', owner: 'lead' as const, repoPath: dir };
+  add('dispatch-intended', 'key-1'); add('execution-started', ref);
+  add('lead-woken', { dispatchId: 'ctx-lead-wake', events: ['all packages verified: ready to integrate'], runId: 'run-1' });
+  const actions: string[] = [];
+  const runtime: RuntimeAdapter & PackageRuntime = {
+    async startSolo() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
+    async inspect() { return { state: 'live', ref }; },
+    async startPackage() { throw new Error('No package expected'); },
+    async checkRun() { return { deliveryId: 'delivery-1', messages: [{ id: 'msg-lead', type: 'worker_done', payload: { dispatchId: 'ctx-lead-wake' } }] }; },
+    async retainWorker(dispatchId: string) { actions.push(`retain ${dispatchId}`); },
+    async ackRun() { actions.push('ack'); }
+  };
+  await new ControllerService(store, runtime).tick(dir);
+  expect(actions).toEqual(['retain ctx-lead-wake', 'ack']);
+  expect(store.events(spec.id).some(item => item.type === 'decision-logged')).toBe(false);
+  store.close();
+});

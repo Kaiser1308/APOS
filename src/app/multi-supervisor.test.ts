@@ -9,7 +9,7 @@ import type { GoalSpec } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { RuntimeAdapter } from '../runtime/orca.js';
 import type { PackageRuntime, PackageRuntimeRef } from './packages.js';
-import { CORE_SKILL, activationLine, committedFileDigest, packageReportPath } from '../runtime/brief.js';
+import { CORE_SKILL, activationLine, committedFileDigest, packageReportPath, reviewResultPath } from '../runtime/brief.js';
 import { ProjectJournal } from '../store/journal.js';
 
 const dirs: string[] = [];
@@ -34,6 +34,9 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   const attempts: Record<string, number> = {};
   const settled = new Set<string>();
   const wakes: string[][] = [];
+  const reviewerStarts: string[] = [];
+  let verdict = 'pass';
+  let refusedOnce = false;
   const work = (item: WorkPackageSpec, path: string, base: string) => {
     attempts[item.id] = (attempts[item.id] ?? 0) + 1;
     const n = attempts[item.id];
@@ -64,7 +67,19 @@ it('gates each package on its own head, returns a red one to its owner, and wake
     },
     async inspectPackage(ref: PackageRuntimeRef) { return settled.has(ref.dispatchId) ? 'completed' : 'live'; },
     async deliveryHead(ref) { return git(ref.worktreeId!.split('::')[1], 'rev-parse', 'HEAD'); },
-    async wakeLead(input) { wakes.push(input.events); return { dispatchId: `lead-${wakes.length}` }; }
+    async wakeLead(input) {
+      if (input.events.some(item => /Goal review passed/.test(item)) && !refusedOnce) { refusedOnce = true; throw new Error('[agent_unconfigured] Orca refused the wake'); }
+      wakes.push(input.events); return { dispatchId: `lead-${wakes.length}` }; },
+    async startReviewer(input) {
+      reviewerStarts.push(input.idempotencyKey);
+      const path = join(mkdtempSync(join(tmpdir(), 'apos-multi-rev-')), 'wt'); dirs.push(join(path, '..'));
+      git(dir, 'worktree', 'add', '-q', '--detach', path, input.commit);
+      const file = join(path, reviewResultPath(spec.id, input.idempotencyKey));
+      execFileSync('node', ['-e', `require('fs').mkdirSync(require('path').dirname(process.argv[1]),{recursive:true})`, file]);
+      writeFileSync(file, JSON.stringify({ result: verdict, note: 'Reviewed the integration commit against the Goal.' }));
+      git(path, 'add', '-f', '-A'); git(path, '-c', 'user.name=R', '-c', 'user.email=r@local.invalid', 'commit', '-qm', 'review');
+      return { runId: 'run-1', taskId: 'rev', dispatchId: 'rev-1', owner: 'lead', repoPath: input.repoPath, terminal: 'term-rev', worktreeId: `repo::${path}` };
+    }
   };
   const output: string[] = [];
   const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, gate: { artifactRoot: artifacts }, write: line => output.push(line) });
@@ -92,4 +107,19 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   const all = wakes.flat();
   expect(all).toEqual(expect.arrayContaining(['all packages verified: ready to integrate']));
   expect(all.filter(item => item === 'all packages verified: ready to integrate')).toHaveLength(1);
+
+  // Seen live: after the Lead integrated and the gate went green, nobody dispatched the Goal reviewer.
+  const heads = Object.values(state().packages!).map(item => item.evidence.at(-1)!.commitRef);
+  const integrationTree = join(mkdtempSync(join(tmpdir(), 'apos-multi-int-')), 'wt'); dirs.push(join(integrationTree, '..'));
+  git(dir, 'worktree', 'add', '-q', '--detach', integrationTree, git(dir, 'rev-parse', 'HEAD'));
+  git(integrationTree, '-c', 'user.name=L', '-c', 'user.email=l@local.invalid', 'merge', '-q', '--no-edit', ...heads);
+  const integrationCommit = git(integrationTree, 'rev-parse', 'HEAD');
+  await invoke('gate', 'run', spec.id, '--commit', integrationCommit);
+  expect(state().gate?.result).toBe('green');
+  for (let i = 0; i < 4; i++) await invoke('controller', 'tick'); // the first wake with the verdict is refused and retried
+  expect(reviewerStarts).toHaveLength(1);                      // one reviewer per gated integration commit
+  expect(state().reviews.at(-1)).toMatchObject({ subject: 'goal', result: 'pass', commitRef: integrationCommit, session: 'rev-1' });
+  expect(wakes.flat().join('\n')).toMatch(new RegExp(`Goal review passed on ${integrationCommit}: .*integration complete`));
+  await invoke('controller', 'tick');
+  expect(reviewerStarts).toHaveLength(1);                      // a passed review is not asked for again
 }, 120_000);

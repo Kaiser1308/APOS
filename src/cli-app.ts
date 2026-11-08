@@ -329,6 +329,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   }));
   const review = program.command('review');
   review.command('submit').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
+    assertHuman(journal, 'review submit'); // the controller dispatches and reads reviewers itself; no agent may post a verdict
     const result = new ReviewService(journal).submit(goalId, JSON.parse(readFileSync(file, 'utf8')));
     write(`Reviewed ${result.subject}${result.packageId ? ` ${result.packageId}` : ''}: ${result.result}`);
   }));

@@ -15,6 +15,7 @@ You own HOW for one Goal the Human approved (gate A) and selected (gate B). The 
    - Answer within the approved Goal.
    - Revise packages with `apos package revise` when needed.
    - Integrate on one commit and let the controller gate it.
+   - Do not run `apos review submit`. When the integration gate is green on a commit that contains every package, the controller dispatches the independent Goal reviewer itself and wakes you with the verdict. On a pass, submit the acceptance evidence and run `apos integration complete`. On changes, fix the integration and let the controller gate the new commit.
    - Then report each event batch with `worker_done` and end your turn.
 
 Do not merge. Merging happens only when the Human closes the Goal with `--merge-to`.

@@ -24,7 +24,8 @@ When the Lead chooses Multi-WP, the controller only **notifies** the Human (`apo
 Human-only commands refuse to run from any terminal or worktree APOS dispatched an agent into. Owners have a shell and know this CLI. The Human-only commands are:
 - `goal approve`, `goal appetite` and `goal select`;
 - `outcome close`, `outcome revise` and `outcome stop`;
-- `gate confirm`, `blocker resolve` and `execution abandon-intent`.
+- `gate confirm`, `blocker resolve` and `execution abandon-intent`;
+- `review submit`: the controller dispatches and reads reviewers itself, so no agent may post a verdict.
 
 `goal appetite` is the Human's overrun decision. It changes only the controller-held budget, never WHAT.
 
@@ -138,7 +139,7 @@ The controller then:
 - gates each settled package on its own head against its base. Green verifies the package. Red sends it back to the same owner with the finding;
 - wakes the Lead's terminal once per batch of new events: package results, Worker questions, ready to integrate, a red integration gate. It only does so after the Lead's previous turn has settled.
 
-`integration complete` gates the integration commit itself. Every Multi-WP Goal needs an independent Goal review before it can verify.
+`integration complete` gates the integration commit itself. Every Multi-WP Goal needs an independent Goal review before it can verify. Once the integration gate is green on a commit that contains every package, the controller dispatches that reviewer itself (one per gated commit) and wakes the Lead with the verdict and the next step. A Multi-WP plan must not declare `risks`: they would demand package reviews APOS does not dispatch.
 
 ## Telemetry
 

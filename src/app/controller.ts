@@ -44,6 +44,12 @@ export class ControllerService {
       if (dispatchId && dispatchId === this.store.getGoal(goalId)?.reviewDispatch?.dispatchId) continue;
       const ref = refs.find(item => item.dispatchId === dispatchId);
       if (!ref) {
+        // The Lead's own wake-up dispatches are not owner refs, but Orca keeps the Lead terminal bound to a
+        // settled dispatch until it is retained (seen live: the next wake was refused with agent_unconfigured).
+        if (typeof dispatchId === 'string' && this.store.events(goalId).some(item => item.type === 'lead-woken' && (item.data as { dispatchId?: string })?.dispatchId === dispatchId)) {
+          try { await this.runtime.retainWorker(dispatchId); result.settled.push(`lead:${dispatchId}`); continue; }
+          catch { result.inboxPending.push(`unsettled:${message.id}`); continue; }
+        }
         // Seen live: the worker_done of a reviewer whose start was lost sat in the inbox for an hour and
         // kept the delivery from being acked. Settlement never depends on this message (the controller
         // inspects each current dispatch itself), so a worker_done for any other dispatch on this Run is
@@ -84,9 +90,12 @@ export class ControllerService {
    */
   private watchdog(goalId: string, result: ControllerTick): void {
     const state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'executing' || !state.proposal?.mode.startsWith('solo')) return;
+    if (!state || state.status !== 'executing' || !state.proposal) return;
     const ref = state.runtimeRef as RuntimeRef | undefined;
-    const idle = ref && state.settlements?.[ref.dispatchId] && !state.reviewDispatch && !state.reviewIntent && !state.resumeIntent;
+    // Multi-WP: no package still running and no reviewer pending (seen live: the Lead ended its turn waiting for a review nobody dispatched).
+    const multiIdle = state.proposal.mode === 'multi-wp' && !state.reviewDispatch && !state.reviewIntent
+      && Object.values(state.packages ?? {}).every(item => item.status !== 'executing' || !item.runtimeRef || state.settlements?.[(item.runtimeRef as { dispatchId: string }).dispatchId]);
+    const idle = state.proposal.mode === 'multi-wp' ? multiIdle : ref && state.settlements?.[ref.dispatchId] && !state.reviewDispatch && !state.reviewIntent && !state.resumeIntent;
     if (!idle) return;
     const events = this.store.events(goalId);
     const last = events.at(-1)!;

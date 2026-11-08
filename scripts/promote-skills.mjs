@@ -14,7 +14,7 @@ const args = process.argv.slice(2);
 const check = args.includes('--check');
 const toIndex = args.indexOf('--to');
 const stable = toIndex >= 0 ? args[toIndex + 1] : fileURLToPath(new URL('../skills', import.meta.url));
-const positional = args.filter((arg, index) => !arg.startsWith('--') && index !== toIndex + 1);
+const positional = args.filter((arg, index) => !arg.startsWith('--') && (toIndex < 0 || index !== toIndex + 1));
 const dev = positional[0] ?? process.env.APOS_DEV_SKILLS;
 if (!dev || !stable) { console.error('Usage: promote-skills [--check] [--to <stable dir>] <dev skills dir>  (or set APOS_DEV_SKILLS)'); process.exit(2); }
 

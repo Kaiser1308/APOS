@@ -30,6 +30,12 @@ it('reports drift without writing, and brings the development copy over only whe
   expect(run('--check', '--to', stable, dev)).toMatchObject({ code: 0 });
 });
 
+it('takes the development dir as the first argument when no --to is given', () => {
+  const dev = copyOfStable();
+  const result = run("--check", dev); // the real stable copy, read only
+  expect(result.out).toMatch(/same {2,}apos-core/);
+});
+
 it('refuses a development skill that does not declare the contract version', () => {
   const dev = copyOfStable();
   const stable = copyOfStable();

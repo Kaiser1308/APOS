@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { GoalEventType, GoalState } from '../domain/transitions.js';
 import { attemptLimit } from '../domain/transitions.js';
-import { reviewReasons } from '../domain/reviews.js';
+import { requiresIndependentReview, reviewReasons } from '../domain/reviews.js';
 import type { GateReport } from '../domain/gate.js';
 import type { GoalRepository } from '../store/journal.js';
 import { CORE_SKILL, activationLine, committedFileDigest, packageReportPath, reviewResultPath, soloReportPath } from '../runtime/brief.js';
@@ -12,13 +12,14 @@ import { GateService } from './gate.js';
 import { SoloService } from './solo.js';
 import { VerificationService } from './verification.js';
 import { PackageService, type PackageRuntime, type PackageRuntimeRef } from './packages.js';
+import { GitCommitInspector, IntegrationService, type CommitInspector } from './integration.js';
 
 const show = (repo: string, commit: string, path: string): string | undefined => {
   try { return execFileSync('git', ['-C', repo, 'show', `${commit}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
   catch { return undefined; }
 };
 
-export type SupervisorOptions = { gate?: GateService; telemetry?: TelemetryProbe; now?: () => number };
+export type SupervisorOptions = { gate?: GateService; telemetry?: TelemetryProbe; now?: () => number; inspector?: CommitInspector };
 
 /**
  * The controller's mechanical loop for a Solo Goal after its owner settles:
@@ -340,11 +341,111 @@ export class MultiSupervisor {
         events.push(`package ${tag} needs a decision: ${latest.finding}`);
       } else events.push(`package ${tag} red, returned to its owner: ${latest.finding}`);
     }
+    actions.push(...await this.goalReview(goalId, repoPath, events));
     state = this.store.getGoal(goalId)!;
+    // Derived from the recorded review, not from the tick that read it: a wake Orca refuses is retried.
+    const verdict = state.gate && !state.integration ? [...state.reviews].reverse().find(item => item.subject === 'goal' && item.commitRef.toLowerCase() === state!.gate!.deliveryCommit.toLowerCase()) : undefined;
+    if (verdict) events.push(verdict.result === 'pass'
+      ? `Goal review passed on ${verdict.commitRef}: submit the acceptance evidence and run "apos integration complete ${goalId} --file <json>" for that commit`
+      : `Goal review requested changes on ${verdict.commitRef}: ${verdict.note}`);
     const packages = Object.values(state.packages ?? {});
     if (packages.length && packages.every(item => item.status === 'verified') && !state.integration) events.push('all packages verified: ready to integrate');
     if (state.gate && state.gate.result !== 'green') events.push(`integration gate ${state.gate.result} on ${state.gate.deliveryCommit}`);
     actions.push(...await this.wakeLead(goalId, repoPath, events));
+    return actions;
+  }
+
+  /**
+   * Seen live: after the integration gate went green nobody dispatched the Goal reviewer, `integration
+   * complete` refuses without it, and the Lead (rightly) ended its turn, so the Goal sat idle. The
+   * controller now owns this review: intent first, one reviewer per gated integration commit, and the
+   * Lead is woken with the verdict and the exact next step.
+   */
+  private async goalReview(goalId: string, repoPath: string, events: string[]): Promise<string[]> {
+    const state = this.store.getGoal(goalId)!;
+    const actions: string[] = [];
+    if (!this.runtime.startReviewer) return actions;
+    if (state.reviewDispatch) return this.collectGoalReview(state, repoPath, events);
+    const gate = state.gate;
+    const packages = Object.values(state.packages ?? {});
+    if (state.reviewIntent) return this.recoverGoalReview(state, repoPath, actions);
+    if (state.integration || !gate || gate.result !== 'green' || !packages.length || !packages.every(item => item.status === 'verified')) return actions;
+    if (!requiresIndependentReview(state)) return actions;
+    const commit = gate.deliveryCommit;
+    if (state.reviews.some(item => item.subject === 'goal' && item.commitRef.toLowerCase() === commit.toLowerCase())) return actions;
+    const inspector = this.options.inspector ?? new GitCommitInspector();
+    try {
+      const prepared = new IntegrationService(this.store, inspector).prepare(goalId, repoPath);
+      if (!prepared.commits.every(item => inspector.contains(repoPath, item, commit))) return actions;
+    } catch { return actions; }
+    return this.startGoalReview(state, commit, repoPath, actions);
+  }
+
+  private reviewRun(state: GoalState): string | undefined {
+    return state.leadTerminal?.runId ?? Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId).find(Boolean);
+  }
+
+  private async startGoalReview(state: GoalState, commit: string, repoPath: string, actions: string[]): Promise<string[]> {
+    const goalId = state.spec.id;
+    const runId = this.reviewRun(state);
+    if (!runId || !state.proposal?.baseCommit) return actions;
+    const key = randomUUID();
+    this.record(goalId, 'review-intended', { key, commit });
+    try {
+      const reviewer = await this.runtime.startReviewer!({ repoPath, goalId, baseCommit: state.proposal.baseCommit, commit, reasons: reviewReasons(state), idempotencyKey: key, runId });
+      this.record(goalId, 'review-dispatched', { dispatchId: reviewer.dispatchId, runId: reviewer.runId, key, commit, worktreeId: reviewer.worktreeId, terminal: reviewer.terminal });
+      actions.push(`Goal reviewer ${reviewer.dispatchId} on ${commit}`);
+    } catch (error) {
+      actions.push(`Goal reviewer start outcome unknown, will recover by key: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return actions;
+  }
+
+  private async recoverGoalReview(state: GoalState, repoPath: string, actions: string[]): Promise<string[]> {
+    const goalId = state.spec.id;
+    const intent = state.reviewIntent!;
+    const runId = this.reviewRun(state);
+    const found = await this.runtime.recover?.(intent.key, runId ?? '');
+    if (found) {
+      this.record(goalId, 'review-dispatched', { dispatchId: found.dispatchId, runId: found.runId, key: intent.key, commit: intent.commit, worktreeId: found.worktreeId, terminal: found.terminal });
+      actions.push(`recovered Goal reviewer ${found.dispatchId}`);
+      return actions;
+    }
+    if (this.now() - Date.parse(intent.at) < 3 * 60_000) return actions;
+    const tries = this.store.events(goalId).filter(item => item.type === 'review-intended').length;
+    if (tries >= 3) {
+      this.record(goalId, 'blocked', { kind: 'technical', note: `needs-decision: Goal reviewer for ${intent.commit} could not be started or found after ${tries} tries` });
+      this.record(goalId, 'human-notified', { kind: 'needs-decision', goalId, note: `Goal reviewer for ${intent.commit} could not be started or found after ${tries} tries` });
+      actions.push('needs-decision: Goal reviewer could not be started');
+      return actions;
+    }
+    return this.startGoalReview(state, intent.commit, repoPath, actions);
+  }
+
+  private async collectGoalReview(state: GoalState, repoPath: string, events: string[]): Promise<string[]> {
+    const goalId = state.spec.id;
+    const actions: string[] = [];
+    const pending = state.reviewDispatch!;
+    const observation = await this.runtime.inspect({ runId: pending.runId, taskId: '', dispatchId: pending.dispatchId, owner: 'lead', repoPath });
+    if (!observation.outcome) {
+      const since = [...this.store.events(goalId)].reverse().find(item => item.type === 'review-dispatched');
+      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at }));
+      return actions;
+    }
+    const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId });
+    const raw = head && show(repoPath, head, reviewResultPath(goalId, pending.key));
+    let result: { result?: string; note?: string } | undefined;
+    try { result = raw ? JSON.parse(raw.replace(/^\uFEFF/, '')) : undefined; } catch { result = undefined; }
+    if (!result || !['pass', 'changes'].includes(result.result ?? '') || !result.note?.trim()) {
+      const note = `Goal reviewer ${pending.dispatchId} left no valid review at ${reviewResultPath(goalId, pending.key)}`;
+      this.record(goalId, 'blocked', { kind: 'technical', note: `needs-decision: ${note}` });
+      this.record(goalId, 'human-notified', { kind: 'needs-decision', goalId, note });
+      actions.push(`needs-decision: ${note}`);
+      return actions;
+    }
+    this.record(goalId, 'review-submitted', { subject: 'goal', reviewer: 'apos-reviewer', session: pending.dispatchId, result: result.result, commitRef: pending.commit, note: result.note });
+    actions.push(`Goal review ${result.result}`);
+    void events; // the Lead is told from the recorded review, so a refused wake is retried (see step)
     return actions;
   }
 

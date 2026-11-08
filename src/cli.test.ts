@@ -63,7 +63,6 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
   writeFileSync(evidenceFile, JSON.stringify({ acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'commit:abc' }));
   await invoke('evidence', 'add', spec.id, '--file', evidenceFile);
   soloDone = true;
-  await invoke('controller', 'tick');
   // The owner claims pass but has not delivered the code: the controller's own run is red.
   writeFileSync(join(dir, 'check.js'), 'process.exit(1);');
   const broken = commitAll(git, 'owner: broken');
@@ -78,7 +77,7 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
   await invoke('execution', 'verify', spec.id, '--commit', fixed);
   await invoke('outcome', 'close', spec.id, '--merge-to', git(['branch', '--show-current']));
   expect(output.find(line => line.startsWith('Merged'))).toMatch(/post-merge gate green/);
-  expect(released).toEqual(['ctx_1']);
+  expect(released).toEqual([]); // no settlement was recorded on this manual path; see the autopilot test
   await invoke('execution', 'status', spec.id);
   expect(output.at(-1)).toContain('closed');
 }, 30_000);

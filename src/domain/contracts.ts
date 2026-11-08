@@ -144,7 +144,7 @@ export type GoalSpec = z.infer<typeof goalSchema>;
 export type GoalCheck = GoalSpec['checks'][number];
 export type CommandCheck = Extract<GoalCheck, { kind: 'command' }>;
 export type ExecutionProposal = z.infer<typeof proposalSchema>;
-export type PhaseCheckpoint = { phase: string; progress: string; evidenceRefs: string[] };
+export type PhaseCheckpoint = { phase: string; progress: string; evidenceRefs: string[]; goalId?: string; attempt?: number };
 export type Evidence = { acceptanceId: string; result: 'pass' | 'fail'; command: string; artifactRef: string; commitRef?: string };
 
 export function parseGoalSpec(value: unknown): GoalSpec { return goalSchema.parse(value); }

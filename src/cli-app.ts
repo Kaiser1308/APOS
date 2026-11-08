@@ -17,18 +17,22 @@ import { MetricsService } from './app/metrics.js';
 import { GoalRegistryService } from './app/registry.js';
 import { VerificationService } from './app/verification.js';
 import { GateService, type GateOptions } from './app/gate.js';
+import { CodexSessionProbe, type TelemetryProbe } from './runtime/telemetry.js';
+import { loadProfiles } from './runtime/brief.js';
+import { controllerHome } from './store/event-log.js';
 import { sourceDigest } from './domain/gate.js';
 import { execFileSync } from 'node:child_process';
 import { parseWorkPackage } from './domain/packages.js';
 import { OrcaRuntime, type RuntimeAdapter } from './runtime/orca.js';
 import { ProjectJournal } from './store/journal.js';
 
-export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; gate?: GateOptions; home?: string; write?: (line: string) => void };
+export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; gate?: GateOptions; telemetry?: TelemetryProbe; home?: string; write?: (line: string) => void };
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<void> {
   const program = new Command();
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
-  const runtime = options.runtime ?? new OrcaRuntime();
+  // Role profiles come from <controller home>/runtime.json, read when a dispatch needs them.
+  const runtime = options.runtime ?? new OrcaRuntime(undefined, undefined, () => loadProfiles(options.home ?? controllerHome(repo())));
   const packageRuntime = (): PackageRuntime => {
     if (!runtime.startPackage) throw new Error('Configured runtime cannot start Work Package Workers');
     return runtime as PackageRuntime;
@@ -231,7 +235,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   const controller = program.command('controller');
   controller.command('tick').action(() => withJournalAsync(async journal => {
-    write(JSON.stringify(await new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime).tick(repo())));
+    write(JSON.stringify(await new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime, { gate: new GateService(journal, { inspector: options.inspector, ...options.gate }), telemetry: options.telemetry ?? new CodexSessionProbe() }).tick(repo())));
   }));
   controller.command('watch').option('--interval-ms <n>', 'mechanical controller interval', '15000').action(async ({ intervalMs }: { intervalMs: string }) => {
     const interval = Number(intervalMs);
@@ -244,8 +248,8 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     try {
       let lastReport = '';
       while (!stopped) {
-        const ticks = await withJournalAsync(async journal => new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime).tick(repo()));
-        const changed = ticks.filter(item => item.dispatched.length || item.recovered.length || item.resumed.length || item.settled.length || item.inboxPending.length || item.errors.length);
+        const ticks = await withJournalAsync(async journal => new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime, { gate: new GateService(journal, { inspector: options.inspector, ...options.gate }), telemetry: options.telemetry ?? new CodexSessionProbe() }).tick(repo()));
+        const changed = ticks.filter(item => item.dispatched.length || item.recovered.length || item.resumed.length || item.settled.length || item.inboxPending.length || item.errors.length || item.supervised.length);
         const report = JSON.stringify(changed);
         if (changed.length && report !== lastReport) write(report);
         lastReport = report;

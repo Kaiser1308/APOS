@@ -42,7 +42,7 @@ it('releases dependency-ready Workers after a restart without duplicate dispatch
   store.close();
 });
 
-it('records a settled Solo Dispatch once while leaving acceptance to Lead', async () => {
+it('records a settled Solo Dispatch once and never accepts it without a delivery commit', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-controller-solo-')); dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
@@ -58,7 +58,8 @@ it('records a settled Solo Dispatch once while leaving acceptance to Lead', asyn
   expect((await controller.tick(dir))[0].dispatched).toEqual(['ctx-1']);
   expect((await controller.tick(dir))[0].settled).toEqual(['solo:completed']);
   expect((await controller.tick(dir))[0].settled).toEqual([]);
-  expect(store.getGoal(spec.id)?.status).toBe('executing');
+  // With no way to read the owner's delivery commit, the controller parks the Goal for a decision instead of trusting the report.
+  expect(store.getGoal(spec.id)).toMatchObject({ status: 'blocked', blocker: { note: expect.stringMatching(/needs-decision: delivery commit unknown/) } });
   store.close();
 });
 

@@ -7,7 +7,7 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified'
+  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -42,10 +42,17 @@ export type GoalState = {
   /** Gate rerun at the target branch head after a merge. */
   postMergeGate?: GateReport;
   findings?: Finding[];
+  /** Reviewer session the controller started for the current gated commit. */
+  reviewDispatch?: { dispatchId: string; runId: string; key: string; commit: string; worktreeId?: string; terminal?: string };
+  telemetry?: Telemetry[];
+  /** Lead terminal for Multi-WP wake-ups, and events already delivered to it. */
+  leadTerminal?: { terminal: string; worktree: string; runId?: string };
+  wokenFor?: string[];
 };
+export type Telemetry = { dispatchId: string; role: 'lead' | 'worker' | 'reviewer'; requestedModel?: string; launchedModel?: string | null; usage?: { model?: string; inputTokens: number; cachedInputTokens: number; outputTokens: number; sessions: number } | 'unknown'; wallMs?: number };
 export type MergeAuthorization = { goalId: string; goalVersion: number; integrationCommit: string; targetBranch: string; scope: 'goal'; once: true; by: string };
 export type FindingKind = 'intent_gap' | 'bad_plan' | 'patch' | 'defer';
-export type Finding = { kind: FindingKind; note: string; checkIds?: string[]; commit?: string; logRefs?: string[]; by: string; signature?: string };
+export type Finding = { kind: FindingKind; note: string; checkIds?: string[]; commit?: string; logRefs?: string[]; by: string; signature?: string; attempt?: number };
 
 function requireThat(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
@@ -225,7 +232,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'runtime-resumed':
       requireThat(state.status === 'executing' && state.runtimeRef && state.resumeIntent && event.data, 'Existing resume intent required');
       requireThat((state.soloAttempts ?? 1) < attemptLimit(state), 'Solo retry budget exhausted');
-      return { ...state, runtimeRef: event.data, resumeIntent: undefined, evidence: [], reviews: [], gate: undefined, soloAttempts: (state.soloAttempts ?? 1) + 1 };
+      return { ...state, runtimeRef: event.data, resumeIntent: undefined, evidence: [], reviews: [], gate: undefined, reviewDispatch: undefined, soloAttempts: (state.soloAttempts ?? 1) + 1 };
     case 'resume-intended':
       requireThat(state.status === 'executing' && state.runtimeRef && state.checkpoint && !state.resumeIntent && state.proposal?.mode.startsWith('solo'), 'Solo checkpoint and prior owner required');
       requireThat(typeof event.data === 'string' && event.data.length > 0, 'Resume key required');
@@ -264,7 +271,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(!owners.names.includes(review.reviewer.toLowerCase()), 'Goal reviewer must differ from Lead owner');
       requireThat(!owners.sessions.includes(review.session), 'Goal reviewer must use a session separate from every owner');
       requireThat(state.gate && review.commitRef.toLowerCase() === state.gate.deliveryCommit.toLowerCase(), 'Goal review must name the commit the controller gated');
-      return { ...state, reviews: [...state.reviews, review] };
+      return { ...state, reviews: [...state.reviews, review], reviewDispatch: undefined };
     }
     case 'gate-recorded': {
       const gate = event.data as GateReport;
@@ -319,6 +326,23 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       // A gap in intent cannot be fixed by retrying: it parks the Goal for PM and Human.
       if (data.kind === 'intent_gap' && state.status === 'executing') return { ...state, findings, status: 'blocked', blocker: { kind: 'product', note: data.note } };
       return { ...state, findings };
+    }
+    case 'review-dispatched': {
+      const data = event.data as GoalState['reviewDispatch'];
+      requireThat(state.status === 'executing' && state.gate?.result === 'green' && !state.reviewDispatch, 'Green gate without a pending reviewer required');
+      requireThat(data?.dispatchId && data.key && data.commit?.toLowerCase() === state.gate.deliveryCommit.toLowerCase(), 'Reviewer must be dispatched on the gated commit');
+      return { ...state, reviewDispatch: data };
+    }
+    case 'telemetry-recorded': {
+      const data = event.data as Telemetry;
+      requireThat(data?.dispatchId && ['lead', 'worker', 'reviewer'].includes(data.role), 'Telemetry needs Dispatch and role');
+      return { ...state, telemetry: [...(state.telemetry ?? []).filter(item => item.dispatchId !== data.dispatchId), data] };
+    }
+    case 'lead-woken': {
+      const data = event.data as { dispatchId?: string; events?: string[]; terminal?: string; worktree?: string; runId?: string };
+      requireThat(Array.isArray(data?.events), 'Woken events required');
+      const leadTerminal = data.terminal && data.worktree ? { terminal: data.terminal, worktree: data.worktree, runId: data.runId } : state.leadTerminal;
+      return { ...state, leadTerminal, wokenFor: [...(state.wokenFor ?? []), ...data.events!] };
     }
     case 'human-notified':
       requireThat(event.data && typeof event.data === 'object', 'Notification details required');

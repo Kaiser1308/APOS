@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractStartedRef, interpretWorkerShow, OrcaRuntime, parseOrcaResult } from './orca.js';
+import { DEFAULT_PROFILES } from './brief.js';
 
 describe('Orca adapter result', () => {
   it('rejects an unknown or failed response rather than claiming a dispatch', () => {
@@ -15,7 +16,7 @@ it('registers an unmanaged project before starting its Solo Lead', async () => {
     if (args[0] === 'repo') return { repo: { id: 'repo_1' } };
     if (args[1] === 'run-create') return { run: { id: 'run_1' } };
     return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', effects: [] };
-  }, () => 'a'.repeat(40));
+  }, () => 'a'.repeat(40), DEFAULT_PROFILES, () => 'd'.repeat(64));
   const ref = await runtime.startSolo({ repoPath: 'C:/project', goalId: 'GOAL-001', proposalVersion: 1, idempotencyKey: 'key-1' });
   expect(calls[0]).toEqual(['repo', 'add', '--path', 'C:/project']);
   expect(ref.dispatchId).toBe('ctx_1');
@@ -29,7 +30,7 @@ it('starts a package Worker in a dedicated Orca worktree', async () => {
     if (args[1] === 'run-list') return { runs: [] };
     if (args[1] === 'run-create') return { run: { id: 'run_1' } };
     return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', effects: [] };
-  }, () => 'a'.repeat(40));
+  }, () => 'a'.repeat(40), DEFAULT_PROFILES, () => 'd'.repeat(64));
   const ref = await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-1', package: {
     id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies'
   } });
@@ -37,8 +38,10 @@ it('starts a package Worker in a dedicated Orca worktree', async () => {
   const start = calls.find(args => args[1] === 'worker-start')!;
   expect(start).toContain('new-top-level');
   expect(start).toContain('path:C:/project');
-  expect(start).toContain('HEAD');
-  expect(start.join(' ')).toContain('.apos/goals/GOAL-001/evidence/WP-01-v1.md');
+  expect(start).toContain('a'.repeat(40));
+  expect(start.join(' ')).toContain('.apos/goals/GOAL-001/evidence/WP-01-v1-a1.md');
+  expect(start.join(' ')).toContain('apos-core: dddddddddddddddd');
+  expect(start).toEqual(expect.arrayContaining(['--agent', 'codex', '--model', 'gpt-6.1-terra']));
   expect(ref.owner).toBe('worker');
 });
 
@@ -50,7 +53,7 @@ it('shares one Orca Run across independent packages in a dispatch wave', async (
     if (args[1] === 'run-list') return { runs: [] };
     if (args[1] === 'run-create') return { run: { id: 'run_shared' } };
     return { runId: 'run_shared', taskId: 'task_1', dispatchId: `ctx_${calls.length}`, effects: [] };
-  }, () => 'a'.repeat(40));
+  }, () => 'a'.repeat(40), DEFAULT_PROFILES, () => 'd'.repeat(64));
   const a = { id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies' };
   const refs = await Promise.all([runtime.startPackage({ package: a, repoPath: 'C:/project', idempotencyKey: 'key-1' }), runtime.startPackage({ package: { ...a, id: 'WP-02' }, repoPath: 'C:/project', idempotencyKey: 'key-2' })]);
   expect(calls.filter(args => args[1] === 'run-create')).toHaveLength(1);
@@ -65,7 +68,7 @@ it('rebinds an existing Goal Run before dispatching its next package wave', asyn
     if (args[1] === 'run-list') return { runs: [{ id: 'run_shared', objective: 'APOS package Run C:/project GOAL-001 goal v1' }] };
     if (args[1] === 'run-use') return { run: { id: 'run_shared' } };
     return { runId: 'run_shared', taskId: 'task_2', dispatchId: 'ctx_2', effects: [] };
-  }, () => 'a'.repeat(40));
+  }, () => 'a'.repeat(40), DEFAULT_PROFILES, () => 'd'.repeat(64));
   await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-2', package: { id: 'WP-02', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-b', outcome: 'History', scope: ['history'], exclusions: [], dependencies: [], interfaces: ['history()@v1'], acceptance: [{ id: 'WP-AC-2', text: 'history' }], integration: 'Lead verifies' } });
   expect(calls.find(args => args[1] === 'run-use')).toEqual(['orchestration', 'run-use', '--id', 'run_shared']);
   expect(calls.some(args => args[1] === 'run-create')).toBe(false);

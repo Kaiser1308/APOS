@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "apos": "./dist/cli.js" },
+  "bin": {
+    "apos": "./dist/cli.js"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "skills:check": "node scripts/promote-skills.mjs --check",
+    "skills:promote": "node scripts/promote-skills.mjs"
   },
   "dependencies": {
     "commander": "14.0.2",

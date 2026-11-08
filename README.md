@@ -34,17 +34,23 @@ Requires Node.js 24+, Git, and the Orca CLI with Codex enabled (default runtime)
 
 In `~/.codex/config.toml`, set `check_for_update_on_startup = false` (an update prompt blocks Orca workers) and `multi_agent = false` under `[features]` (owners must not spawn sub-agents). The live smokes ran with both.
 
-The APOS skills are published with the other skills, not from this repo. A skills folder holds `apos-core/`, `apos-pm/`, `apos-lead/`, `apos-worker/` and `apos-reviewer/`, each with a `SKILL.md` that declares `apos-contract: 2`. Point `init` at it with `--skills <dir>` or `APOS_SKILLS`. `init` refuses a missing skill or one written for another contract version, so the code and the skills cannot drift apart silently.
+**Skills: two copies.** `skills/` in this repo is the **stable** copy and the default for `init`. It holds `apos-core/`, `apos-pm/`, `apos-lead/`, `apos-worker/` and `apos-reviewer/`, each with a `SKILL.md` that declares `apos-contract: 2`. The copy **under development** lives in the Custom-Skills repo with the other skills. Try it without touching the stable one by passing `--skills <dir>` or setting `APOS_SKILLS`. `init` refuses a missing skill or one written for another contract version, so the code and the skills cannot drift apart silently.
 
 ```powershell
 npm ci
 npm run build
-node dist/cli.js --repo C:\path\to\project init --skills C:\path\to\skills
+node dist/cli.js --repo C:\path\to\project init                              # stable skills bundled here
+node dist/cli.js --repo C:\path\to\project init --skills C:\path\to\Custom-Skills   # skills under development
 ```
 
-`init` commits `.apos/project.yaml`, copies of those skills under `.apos/skills/` (`apos-core` as `_core/execute.md`, plus `pm`, `lead`, `worker` and `reviewer`), and entrypoint copies under `.claude/skills/`. Briefs pin the committed copies by sha256, so a later change to the published skills reaches a project only when `init` runs again.
+When the development copy is ready, bring it over and review the result:
 
-Tests use minimal fixture skills in `test-fixtures/skills/`.
+```powershell
+npm run skills:check -- C:\path\to\Custom-Skills    # reports which skills differ, changes nothing
+npm run skills:promote -- C:\path\to\Custom-Skills  # copies them into skills/; then run the tests and commit
+```
+
+(`APOS_DEV_SKILLS` can replace the path argument.) `init` commits `.apos/project.yaml`, copies of the skills under `.apos/skills/` (`apos-core` as `_core/execute.md`, plus `pm`, `lead`, `worker` and `reviewer`), and entrypoint copies under `.claude/skills/`. Briefs pin the committed copies by sha256, so a later change to the skills reaches a project only when `init` runs again.
 
 Controller state lives **outside the repo**, in `~/.apos/projects/<repo>-<hash>/` (override with `APOS_HOME`):
 

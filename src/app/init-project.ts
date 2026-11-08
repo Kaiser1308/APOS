@@ -2,19 +2,23 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { join } from 'node:path';
 import { relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { assertGitRoot } from '../store/project-history.js';
 
 /** The skill/controller contract this build implements; every APOS skill declares it in frontmatter. */
 export const APOS_CONTRACT = 2;
 const ROLES = ['pm', 'lead', 'worker', 'reviewer'] as const;
 
+/** The stable copy of the skills, bundled with this repo (`skills/apos-core`, `skills/apos-<role>`). */
+export const BUNDLED_SKILLS = fileURLToPath(new URL('../../skills', import.meta.url));
+
 /**
- * The skills live with the other published skills (Custom-Skills), not in this repo: `--skills <dir>`
- * or `APOS_SKILLS` names the folder holding `apos-core/` and `apos-<role>/`. A skill written for another
- * contract version is refused, so code and skills cannot drift apart silently.
+ * Skills come from `--skills <dir>`, else `APOS_SKILLS`, else the stable copy bundled here. The copy
+ * under development lives in Custom-Skills: try it with `--skills`, and bring it over with
+ * `npm run skills:promote -- <dir>` once it is ready. A skill written for another contract version is
+ * refused, so code and skills cannot drift apart silently.
  */
-export function resolveSkills(skillsRoot = process.env.APOS_SKILLS): { core: string; roles: Record<(typeof ROLES)[number], string> } {
-  if (!skillsRoot) throw new Error('APOS skills folder required: pass --skills <dir> or set APOS_SKILLS (the folder with apos-core/ and apos-<role>/)');
+export function resolveSkills(skillsRoot: string = process.env.APOS_SKILLS || BUNDLED_SKILLS): { core: string; roles: Record<(typeof ROLES)[number], string> } {
   const read = (name: string) => {
     const path = join(skillsRoot, name, 'SKILL.md');
     if (!existsSync(path)) throw new Error(`APOS skill missing: ${path}`);

@@ -45,6 +45,9 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | Orca creates the reviewer but reports its start as outcome-unknown (seen live, SQLFMT run 2) | `review-intended` recorded first; reviewer recovered by dispatch key; new try after 3 min; needs-decision after 3 | `supervisor.test.ts` › recovers a reviewer Orca created |
 | Resume refused after a review asks for changes on a green gate (seen live, SQLFMT run 2: Goal sat 26 min) | the bounded retry runs before the green-gate early return | `supervisor.test.ts` › retries a refused resume after a review asks for changes |
 | Resume brief left unsubmitted in a reused Codex terminal, reported as pending / turn_start_unobserved (seen live, SQLFMT run 2) | counted as stalled input, so the one-Enter nudge applies | `orca.test.ts` › treats a resume whose brief sits unsubmitted |
+| Long repair or wake-up text (seen live: 7.8k-char brief never submitted) | text over 400 chars goes to `<controller home>/notes/<key>.md`; the brief carries path and sha256 | `orca.test.ts` › writes a long repair finding to a note file |
+| Review JSON written with a UTF-8 BOM by PowerShell (seen live) | BOM stripped before parsing | `supervisor.ts` collectReview |
+| Goal idle with no agent running and no controller progress (seen live: 26 min, silent) | `human-notified` kind `idle` once per quiet spell after 15 min | `controller.test.ts` › idle watchdog |
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
 
 ## Not covered by automated tests

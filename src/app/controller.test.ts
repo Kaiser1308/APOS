@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -85,4 +85,31 @@ it('processes a settled worker_done, retains its owner, then acknowledges the Or
   expect(actions).toEqual(['check', 'retain', 'ack']);
   expect(store.getGoal(spec.id)?.settlements).toEqual({ 'ctx-1': 'completed' });
   store.close();
+});
+
+describe('idle watchdog (seen live: a Goal sat 26 min with no agent and no report)', () => {
+  it('tells the Human once when the current dispatch settled and nothing has happened for 15 min', async () => {
+    const { mkdtempSync: mk, rmSync: rm } = await import('node:fs');
+    const { tmpdir: tmp } = await import('node:os');
+    const { join: j } = await import('node:path');
+    const { SqliteStore } = await import('../store/sqlite.js');
+    const { spec, proposal, approval } = await import('../domain/fixtures.test-support.js');
+    const { ControllerService } = await import('./controller.js');
+    const dir = mk(j(tmp(), 'apos-idle-'));
+    const store = SqliteStore.open(j(dir, 'state.sqlite'));
+    const old = new Date(Date.now() - 20 * 60_000).toISOString();
+    let n = 0;
+    const add = (type: string, data?: unknown) => store.append({ id: `I-${++n}`, goalId: spec.id, type: type as never, data, at: old });
+    add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    const ref = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead' as const, repoPath: dir };
+    add('dispatch-intended', 'k'); add('execution-started', ref); add('worker-settled', { dispatchId: 'ctx_1', outcome: 'completed' });
+    const service = new ControllerService(store, { async startSolo() { return ref; }, async resumeSolo() { return ref; }, async inspect(r) { return { state: 'settled', outcome: 'completed', ref: r }; } } as never);
+    const result = { goalId: spec.id, dispatched: [], recovered: [], unresolved: [], resumed: [], settled: [], inboxPending: [], errors: [], supervised: [] as string[] };
+    (service as unknown as { watchdog(id: string, r: typeof result): void }).watchdog(spec.id, result);
+    (service as unknown as { watchdog(id: string, r: typeof result): void }).watchdog(spec.id, result);
+    const notices = store.events(spec.id).filter(item => item.type === 'human-notified');
+    expect(notices).toHaveLength(1);
+    expect(notices[0].data).toMatchObject({ kind: 'idle', lastEvent: 'worker-settled' });
+    store.close(); rm(dir, { recursive: true, force: true });
+  });
 });

@@ -5,6 +5,7 @@ import type { GoalRepository } from '../store/journal.js';
 import { randomUUID } from 'node:crypto';
 import { MultiSupervisor, SoloSupervisor, type SupervisorOptions } from './supervisor.js';
 
+export const IDLE_MINUTES = 15;
 export type ControllerTick = { goalId: string; dispatched: string[]; recovered: string[]; unresolved: string[]; resumed: string[]; settled: string[]; inboxPending: string[]; errors: string[]; supervised: string[] };
 
 /**
@@ -63,6 +64,24 @@ export class ControllerService {
     this.store.append({ id: randomUUID(), goalId, type: 'human-notified', data: { kind: 'escalation', goalId, messageId: message.id, messageType: message.type, subject: message.subject, body: message.body }, at: new Date().toISOString() });
     if (this.runtime.replyMessage) await this.runtime.replyMessage(runId, message.id, ESCALATION_REPLY);
     result.settled.push(`relayed ${message.type}:${message.id}`);
+  }
+
+  /**
+   * Seen live: a Goal sat 26 minutes with no agent running and nothing for the controller to do,
+   * and no tick said so. A Solo Goal whose current dispatch has settled, with no reviewer pending and
+   * no event for IDLE_MINUTES, is reported once per quiet spell.
+   */
+  private watchdog(goalId: string, result: ControllerTick): void {
+    const state = this.store.getGoal(goalId);
+    if (!state || state.status !== 'executing' || !state.proposal?.mode.startsWith('solo')) return;
+    const ref = state.runtimeRef as RuntimeRef | undefined;
+    const idle = ref && state.settlements?.[ref.dispatchId] && !state.reviewDispatch && !state.reviewIntent && !state.resumeIntent;
+    if (!idle) return;
+    const events = this.store.events(goalId);
+    const last = events.at(-1)!;
+    if (last.type === 'human-notified' || Date.now() - Date.parse(last.at) < IDLE_MINUTES * 60_000) return;
+    this.store.append({ id: randomUUID(), goalId, type: 'human-notified', data: { kind: 'idle', goalId, since: last.at, lastEvent: last.type, note: `no agent running and no controller progress for ${IDLE_MINUTES}+ min after ${last.type}; tick errors: ${result.errors.join('; ') || 'none'}` }, at: new Date().toISOString() });
+    result.supervised.push(`idle since ${last.at} after ${last.type}; Human notified`);
   }
 
   async tick(repoPath: string): Promise<ControllerTick[]> {
@@ -134,6 +153,7 @@ export class ControllerService {
           ? await new MultiSupervisor(this.store, this.runtime, this.options).step(goalId, repoPath, result.inboxPending)
           : await new SoloSupervisor(this.store, this.runtime, this.options).step(goalId, repoPath)));
       } catch (error) { result.errors.push(`supervisor: ${error instanceof Error ? error.message : String(error)}`); }
+      this.watchdog(goalId, result);
       results.push(result);
     }
     return results;

@@ -32,7 +32,8 @@ export interface RuntimeAdapter {
   wakeLead?(input: { repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string }): Promise<{ dispatchId: string }>;
 }
 export const worktreePath = (worktreeId: string | undefined): string | undefined => worktreeId?.includes('::') ? worktreeId.slice(worktreeId.indexOf('::') + 2) : undefined;
-const launchArgs = (profile: RuntimeProfile): string[] => ['--agent', profile.agent, ...(profile.model ? ['--model', profile.model] : []), ...(profile.model && profile.effort ? ['--effort', profile.effort] : [])];
+// Codex can take over a minute to become ready; Orca's 60 s default reported a dispatch that did start as failed (seen live).
+const launchArgs = (profile: RuntimeProfile): string[] => ['--timeout-ms', '240000', '--agent', profile.agent, ...(profile.model ? ['--model', profile.model] : []), ...(profile.model && profile.effort ? ['--effort', profile.effort] : [])];
 
 export function parseOrcaResult(json: string): Record<string, unknown> {
   let parsed: unknown;

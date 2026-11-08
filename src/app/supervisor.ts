@@ -181,7 +181,11 @@ export class SoloSupervisor {
   private async recordTelemetry(state: GoalState, ref: RuntimeRef, role: 'lead' | 'worker' | 'reviewer'): Promise<void> {
     if (state.telemetry?.some(item => item.dispatchId === ref.dispatchId)) return;
     const receipt = await this.runtime.launchReceipt?.(ref.dispatchId).catch(() => undefined);
-    const started = [...this.store.events(state.spec.id)].reverse().find(item => ['execution-started', 'runtime-resumed', 'review-dispatched'].includes(item.type) && (item.data as { dispatchId?: string })?.dispatchId === ref.dispatchId);
+    const events = this.store.events(state.spec.id);
+    const startedAt = events.findIndex(item => ['execution-started', 'runtime-resumed', 'review-dispatched'].includes(item.type) && (item.data as { dispatchId?: string })?.dispatchId === ref.dispatchId);
+    // The window opens at the dispatch intent: a dispatch recovered later was already running before it was recorded (seen live).
+    const intent = startedAt > 0 && ['dispatch-intended', 'resume-intended'].includes(events[startedAt - 1].type) ? events[startedAt - 1] : undefined;
+    const started = intent ?? (startedAt >= 0 ? events[startedAt] : undefined);
     const path = worktreePath(ref.worktreeId);
     const until = new Date(this.now()).toISOString();
     const usage = path && started ? this.options.telemetry?.usage({ worktreePath: path, since: started.at, until }) : undefined;

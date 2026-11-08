@@ -21,9 +21,18 @@ Design: `debates/2026-11-08-apos/FINAL-DESIGN.md` (v2.1). Safety cases: `docs/fa
 
 When the Lead chooses Multi-WP, the controller only **notifies** the Human (`apos inbox`).
 
+Human-only commands refuse to run from any terminal or worktree APOS dispatched an agent into. Owners have a shell and know this CLI. The Human-only commands are:
+- `goal approve`, `goal appetite` and `goal select`;
+- `outcome close`, `outcome revise` and `outcome stop`;
+- `gate confirm`, `blocker resolve` and `execution abandon-intent`.
+
+`goal appetite` is the Human's overrun decision. It changes only the controller-held budget, never WHAT.
+
 ## Setup
 
 Requires Node.js 24+, Git, and the Orca CLI with Codex enabled (default runtime).
+
+In `~/.codex/config.toml`, set `check_for_update_on_startup = false` (an update prompt blocks Orca workers) and `multi_agent = false` under `[features]` (owners must not spawn sub-agents). The live smokes ran with both.
 
 ```powershell
 cd apos
@@ -74,6 +83,8 @@ apos controller watch              # or: apos controller tick
 apos inbox                         # needs-decision, notices, verified Goals awaiting outcome
 apos outcome close GOAL-001 --merge-to main
 ```
+
+If a dispatch or resume outcome stays unknown for 10 minutes, it appears in `apos inbox`. Check `orca orchestration task-list`; if Orca created nothing, run `apos execution abandon-intent <id> --key <key> --reason ...`.
 
 **What the controller checks before dispatch** (`lead commit`):
 
@@ -126,7 +137,7 @@ The controller then:
 
 ## Validation
 
-- `npm test`: 148 tests, covering every safety case in `docs/fault-injection.md`; `npm run typecheck` and `npm run build` pass.
+- `npm test`: 150 tests, covering every safety case in `docs/fault-injection.md`; `npm run typecheck` and `npm run build` pass.
 - **Live smoke (2026-11-08).** Real Orca 1.4.240 and codex-cli 0.167.0 with `gpt-6.1-terra` on throwaway repos:
   - **`GOAL-SMOKE-V2`.** Gate A, gate B and `lead commit` ran. The owner worked in its own Orca worktree from the exact base commit, and the launch receipt showed codex/gpt-6.1-terra. Its report carried the activation line, a full self-review and independent checks. The gate went green on the owner's worktree head, and the Goal verified. `outcome close --merge-to` on a disposable branch gave a green post-merge gate, and the terminal was released.
   - **`GOAL-SMOKE-R`, the repair path.** A break was injected after the first delivery. The gate went red, and the controller recorded the finding and resumed the same Codex terminal. The owner fixed the break, the gate went green on the new head, and the Goal verified and merged. Per-dispatch tokens: attempt 1 used 307k input (298k cached) and 2.5k output; the repair used 270k input (263k cached) and 2.0k output.

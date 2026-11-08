@@ -87,8 +87,8 @@ export class SoloSupervisor {
     const head = await this.runtime.deliveryHead?.(ref);
     if (!head || !ref.baseCommit) { this.decide(goalId, 'delivery commit unknown: owner worktree or base commit missing', actions); return actions; }
     // Seen live: an owner told the repo path committed into the managed checkout instead of its worktree.
-    const intruders = foreignCommits(repoPath, ref.baseCommit);
-    if (intruders.length) { this.decide(goalId, `commits by someone other than APOS landed in the managed checkout during the attempt: ${intruders.join(', ')}`, actions); return actions; }
+    const intruders = foreignCommits(repoPath, ref.baseCommit, goalId);
+    if (intruders.length) { this.decide(goalId, `the owner's delivery landed in the managed checkout instead of its worktree: ${intruders.join(', ')}`, actions); return actions; }
 
     const report = show(repoPath, head, soloReportPath(goalId, attempt));
     const line = activationLine(committedFileDigest(repoPath, ref.baseCommit, CORE_SKILL));
@@ -205,10 +205,13 @@ export class SoloSupervisor {
   }
 }
 
-/** Commits on the managed checkout since the dispatch base that APOS did not author. */
-function foreignCommits(repoPath: string, base: string): string[] {
+/**
+ * Non-APOS commits on the managed checkout since the base that touch this Goal's evidence: the
+ * signature of an owner working in the checkout. Ordinary Human commits elsewhere are not flagged.
+ */
+function foreignCommits(repoPath: string, base: string, goalId: string): string[] {
   try {
-    const rows = execFileSync('git', ['-C', repoPath, 'log', '--format=%H%x09%ae', `${base}..HEAD`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split(/\r?\n/).filter(Boolean);
+    const rows = execFileSync('git', ['-C', repoPath, 'log', '--format=%H%x09%ae', `${base}..HEAD`, '--', `.apos/goals/${goalId}/evidence/`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split(/\r?\n/).filter(Boolean);
     return rows.filter(row => row.split('\t')[1] !== 'apos@local.invalid').map(row => row.slice(0, 12));
   } catch { return []; }
 }

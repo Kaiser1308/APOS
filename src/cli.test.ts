@@ -161,3 +161,25 @@ it('refuses approval when the source snapshot was edited after drafting, or a re
   await invoke('goal', 'create', '--file', join(dir, 'goal2.json'), '--source', join(dir, 'brief.md'));
   await expect(invoke('goal', 'approve', 'GOAL-002', '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3')).rejects.toThrow(/R-2 has no acceptance/);
 }, 30_000);
+
+it('refuses Human-only commands from an APOS agent terminal, so an owner cannot merge or approve for itself', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-cli-human-')); dirs.push(dir);
+  execFileSync('git', ['init', '-q', dir]);
+  const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_owner' };
+  const runtime: RuntimeAdapter = { async startSolo() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; } };
+  const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, write: () => undefined });
+  writeFileSync(join(dir, 'goal.json'), JSON.stringify(spec)); writeFileSync(join(dir, 'brief.md'), sourceText); writeFileSync(join(dir, 'plan.json'), JSON.stringify(proposal));
+  await invoke('init');
+  await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
+  await invoke('goal', 'approve', spec.id, '--size', 'S', '--max-spend', '5', '--max-minutes', '60', '--max-attempts', '2');
+  await invoke('goal', 'select', spec.id);
+  await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
+  await invoke('lead', 'commit', spec.id);
+  process.env.ORCA_TERMINAL_HANDLE = 'term_owner';
+  try {
+    await expect(invoke('outcome', 'close', spec.id, '--merge-to', 'main')).rejects.toThrow(/Human decision/);
+    await expect(invoke('goal', 'appetite', spec.id, '--size', 'L', '--max-spend', '99', '--max-minutes', '999', '--max-attempts', '9', '--reason', 'more')).rejects.toThrow(/Human decision/);
+    await expect(invoke('blocker', 'resolve', spec.id, '--note', 'fine')).rejects.toThrow(/Human decision/);
+  } finally { delete process.env.ORCA_TERMINAL_HANDLE; }
+}, 30_000);
+

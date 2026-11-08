@@ -23,7 +23,7 @@ import { controllerHome } from './store/event-log.js';
 import { sourceDigest } from './domain/gate.js';
 import { execFileSync } from 'node:child_process';
 import { parseWorkPackage } from './domain/packages.js';
-import { OrcaRuntime, type RuntimeAdapter } from './runtime/orca.js';
+import { OrcaRuntime, worktreePath, type RuntimeAdapter } from './runtime/orca.js';
 import { ProjectJournal } from './store/journal.js';
 
 export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; gate?: GateOptions; telemetry?: TelemetryProbe; home?: string; write?: (line: string) => void };
@@ -54,6 +54,31 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     try { return await fn(journal); } finally { close(); }
   };
   const event = (goalId: string, type: GoalEventType, data?: unknown) => ({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
+  /**
+   * Gates A, B and D, appetite changes and overrides belong to the Human. Owners run with a shell and
+   * know this CLI, so these commands refuse to run from any agent terminal or worktree APOS dispatched.
+   */
+  const assertHuman = (journal: ProjectJournal, command: string) => {
+    const terminals = new Set<string>();
+    const worktrees = new Set<string>();
+    const add = (ref: unknown) => {
+      const item = ref as { terminal?: string; worktreeId?: string } | undefined;
+      if (item?.terminal) terminals.add(item.terminal);
+      const path = worktreePath(item?.worktreeId);
+      if (path) worktrees.add(resolve(path).toLowerCase());
+    };
+    for (const state of journal.listGoals()) {
+      add(state.runtimeRef); add(state.reviewDispatch);
+      for (const item of Object.values(state.packages ?? {})) add(item.runtimeRef);
+      if (state.leadTerminal) terminals.add(state.leadTerminal.terminal);
+      for (const item of journal.events(state.spec.id)) if (['execution-started', 'runtime-resumed', 'package-started', 'package-resumed'].includes(item.type)) add((item.data as { ref?: unknown })?.ref ?? item.data);
+    }
+    const here = resolve(process.cwd()).toLowerCase();
+    const handle = process.env.ORCA_TERMINAL_HANDLE;
+    if ((handle && terminals.has(handle)) || [...worktrees].some(path => here === path || here.startsWith(`${path}\\`) || here.startsWith(`${path}/`))) {
+      throw new Error(`${command} is a Human decision and cannot run from an APOS agent terminal or worktree`);
+    }
+  };
   /** Reads the Goal JSON and the verbatim source; fills `source` when absent, otherwise checks it matches. */
   const goalWithSource = (file: string, sourcePath: string, origin: string) => {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
@@ -86,13 +111,16 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   type AppetiteFlags = { size: string; maxSpend: string; maxMinutes: string; maxAttempts: string; overrun: string };
   const appetiteOf = (flags: AppetiteFlags) => ({ size: flags.size, maxSpendUsd: Number(flags.maxSpend), maxWallMinutes: Number(flags.maxMinutes), maxAttempts: Number(flags.maxAttempts), overrunPolicy: flags.overrun });
   appetiteOptions(goal.command('approve').argument('<id>')).action((id: string, flags: AppetiteFlags) => withJournal(journal => {
+    assertHuman(journal, 'goal approve');
     new GoalRegistryService(journal).approve(id, parseAppetite(appetiteOf(flags))); write(`Approved ${id}`);
   }));
   appetiteOptions(goal.command('appetite').argument('<id>')).requiredOption('--reason <text>').action((id: string, flags: AppetiteFlags & { reason: string }) => withJournal(journal => {
+    assertHuman(journal, 'goal appetite');
     journal.append(event(id, 'appetite-set', { appetite: parseAppetite(appetiteOf(flags)), reason: flags.reason }));
     write(`Appetite for ${id} updated`);
   }));
   goal.command('select').argument('<id>').action((id: string) => withJournal(journal => {
+    assertHuman(journal, 'goal select');
     new GoalRegistryService(journal).select(id); write(`Selected ${id}`);
   }));
   goal.command('revise').requiredOption('--file <json>').requiredOption('--source <path>').option('--origin <text>', 'who or what produced the source', 'human').action(({ file, source, origin }: { file: string; source: string; origin: string }) => withJournalAsync(async journal => {
@@ -127,7 +155,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   // No Human gate on HOW: the Lead commits its plan, the controller machine-checks it and dispatches.
   // A Multi-WP plan only notifies the Human.
   lead.command('commit').argument('<id>').description('Lead commits its plan; the controller checks it and dispatches')
-    .option('--terminal <handle>', 'Lead terminal to wake for Multi-WP events', process.env.ORCA_TERMINAL_HANDLE)
+    .option('--terminal <handle>', 'the Lead agent terminal to wake for Multi-WP events (never a Human terminal)')
     .option('--worktree <selector>', 'worktree selector of the Lead terminal')
     .action(async (id: string, flags: { terminal?: string; worktree?: string }) => withJournalAsync(async journal => {
       const state = journal.getGoal(id);
@@ -165,6 +193,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(`Retried ${id}: ${ref.dispatchId}`);
   }));
   execution.command('abandon-intent').argument('<id>').requiredOption('--key <key>').requiredOption('--reason <text>').description('Human: drop a dispatch/resume intent after confirming in Orca that it created nothing').action((id: string, flags: { key: string; reason: string }) => withJournal(journal => {
+    assertHuman(journal, 'execution abandon-intent');
     journal.append(event(id, 'intent-abandoned', { key: flags.key, reason: `human: ${flags.reason}` }));
     write(`Abandoned intent ${flags.key} for ${id}`);
   }));
@@ -285,6 +314,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(JSON.stringify({ gateId: report.gateId, result: report.result, deliveryCommit: report.deliveryCommit, checks: report.checks.map(item => ({ checkId: item.checkId, status: item.status, reason: item.reason, newFailures: item.newFailures })) }));
   }));
   gate.command('confirm').argument('<goalId>').argument('<checkId>').requiredOption('--commit <sha>').requiredOption('--by <name>').requiredOption('--note <text>').action((goalId: string, checkId: string, { commit, by, note }: { commit: string; by: string; note: string }) => withJournal(journal => {
+    assertHuman(journal, 'gate confirm');
     new GateService(journal, { inspector: options.inspector, ...options.gate }).confirmManual(goalId, { checkId, deliveryCommit: commit, by, note });
     write(`Confirmed ${checkId} on ${commit}`);
   }));
@@ -316,6 +346,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   }));
   blocker.command('resolve').argument('<id>').requiredOption('--note <text>').action((id: string, { note }: { note: string }) => withJournal(journal => {
     if (!note.trim()) throw new Error('Resolution note required');
+    assertHuman(journal, 'blocker resolve');
     journal.append(event(id, 'decision-logged', { note }));
     journal.append(event(id, 'unblocked'));
     write(`Unblocked ${id}`);
@@ -326,6 +357,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     const command = outcome.command(decision).argument('<id>');
     if (decision === 'close') command.option('--merge-to <branch>', 'authorize and perform one merge of the gated commit').option('--by <name>', 'who decided', 'human');
     command.action((id: string, flags: { mergeTo?: string; by?: string }) => withJournalAsync(async journal => {
+      assertHuman(journal, `outcome ${decision}`);
       const state = journal.getGoal(id);
       if (decision === 'close') {
         if (state?.status !== 'verified') throw new Error('Verified Goal required before closing');

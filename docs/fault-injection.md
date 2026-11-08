@@ -1,6 +1,6 @@
 # APOS v2 safety cases (FINAL-DESIGN §8)
 
-Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.** Every case below is an automated test. Run them with `npm test`.
+Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.** Human gates are enforced against agent terminals and worktrees, not against a local process deliberately impersonating the Human. Every case below is an automated test. Run them with `npm test`.
 
 | Injected fault | Expected | Test |
 | --- | --- | --- |
@@ -34,6 +34,11 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | Same failure after two repairs | needs-decision | `supervisor.test.ts` › sends the Goal to a Human decision when the same failure survives two repairs |
 | Owner commits into the managed checkout instead of its worktree (seen live) | needs-decision | `supervisor.test.ts` › stops for a decision when the owner commits into the managed checkout |
 | Codex leaves the brief pasted but unsubmitted (seen live) | one Enter after 4 quiet minutes, Human notified at 10 | `supervisor.test.ts` › stalled Codex input |
+| An owner runs a Human-only command (merge, approve, appetite, confirm, unblock) | refused from any agent terminal or worktree | `cli.test.ts` › refuses Human-only commands from an APOS agent terminal |
+| A Human commit on the managed checkout mid-attempt | not flagged | `supervisor.test.ts` › does not block a Goal for an ordinary Human commit |
+| Orca refuses a resume (`agent_unconfigured`, seen live) | intent abandoned, retried; needs-decision after 3 refusals | `supervisor.test.ts` › Orca refusing a resume |
+| Orca outcome unknown on start or resume (seen live) | recovered by dispatch key, never retried blindly; Human notified after 10 min | `supervisor.test.ts` › Orca refusing a resume; `solo.test.ts` › recovers a lost … response |
+| Resume continues a cumulative Codex session (seen live) | tokens attributed per dispatch | `telemetry.test.ts` |
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
 
 ## Not covered by automated tests

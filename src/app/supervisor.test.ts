@@ -159,10 +159,19 @@ describe('Solo autopilot', () => {
     expect(state().status).toBe('verified');
   }, 90_000);
 
+  it('does not block a Goal for an ordinary Human commit on the managed checkout during the attempt', async () => {
+    const { tick, state, git, dir } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'));
+    // The owner is done; meanwhile anh commits unrelated work on the managed checkout.
+    writeFileSync(join(dir, 'notes.md'), 'unrelated');
+    git('add', 'notes.md'); git('-c', 'user.name=Anh', '-c', 'user.email=anh@local.invalid', 'commit', '-qm', 'unrelated human work');
+    await tick();
+    expect(state().status).toBe('verified');
+  }, 90_000);
+
   it('stops for a decision when the owner commits into the managed checkout instead of its worktree', async () => {
     const { tick, state } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work in the wrong place'), { intrude: true });
     await tick();
-    expect(state().blocker).toMatchObject({ note: expect.stringMatching(/needs-decision: commits by someone other than APOS landed in the managed checkout/) });
+    expect(state().blocker).toMatchObject({ note: expect.stringMatching(/needs-decision: the owner.s delivery landed in the managed checkout/) });
   }, 90_000);
 });
 
@@ -217,4 +226,3 @@ describe('Orca refusing a resume', () => {
     store.close();
   });
 });
-

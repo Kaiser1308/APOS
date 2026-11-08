@@ -84,7 +84,16 @@ export class ControllerService {
           if (snapshot.status === 'ready') result.dispatched.push((await service.start(goalId, repoPath)).dispatchId);
           else {
             const observed = await service.reconcile(goalId);
-            if (observed === 'unverifiable') result.unresolved.push('Solo dispatch unverifiable');
+            if (observed === 'unverifiable') {
+              result.unresolved.push('Solo dispatch unverifiable');
+              const events = this.store.events(goalId);
+              const intent = [...events].reverse().find(item => item.type === 'resume-intended' || item.type === 'dispatch-intended');
+              const key = intent?.data as string | undefined;
+              const old = intent && Date.now() - Date.parse(intent.at) > 10 * 60_000;
+              if (key && old && !events.some(item => item.type === 'human-notified' && (item.data as { key?: string }).key === key)) {
+                this.store.append({ id: randomUUID(), goalId, type: 'human-notified', data: { kind: 'needs-decision', goalId, key, note: `Orca outcome for intent ${key} is unknown after 10 min. Check \`orca orchestration task-list\`; if it created nothing, run \`apos execution abandon-intent ${goalId} --key ${key} --reason ...\`.` }, at: new Date().toISOString() });
+              }
+            }
             const current = this.store.getGoal(goalId)!;
             if (current.runtimeRef && !current.settlements?.[(current.runtimeRef as RuntimeRef).dispatchId]) {
               const observation = await this.runtime.inspect(current.runtimeRef as RuntimeRef);

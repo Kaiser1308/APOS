@@ -126,6 +126,6 @@ The controller then:
 
 ## Validation
 
-- `npm test`: 144 tests, covering every safety case in `docs/fault-injection.md`.
+- `npm test`: 146 tests, covering every safety case in `docs/fault-injection.md`.
 - `npm run typecheck` and `npm run build`.
 - **The v2 path still needs a live smoke run with real Orca and Codex.** The v1 smokes ran Claude Code without a gate.

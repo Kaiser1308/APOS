@@ -60,6 +60,7 @@ export class SoloSupervisor {
     if (!outcome) {
       const noticed = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'overrun');
       if (overTime && !noticed) { this.record(goalId, 'human-notified', { kind: 'overrun', goalId, note: 'owner still running past the approved wall time' }); actions.push('notified overrun'); }
+      actions.push(...await this.unstick(goalId, ref));
       return actions;
     }
     if (state.reviewDispatch) return this.collectReview(state, repoPath, actions);
@@ -76,6 +77,9 @@ export class SoloSupervisor {
     }
     const head = await this.runtime.deliveryHead?.(ref);
     if (!head || !ref.baseCommit) { this.decide(goalId, 'delivery commit unknown: owner worktree or base commit missing', actions); return actions; }
+    // Seen live: an owner told the repo path committed into the managed checkout instead of its worktree.
+    const intruders = foreignCommits(repoPath, ref.baseCommit);
+    if (intruders.length) { this.decide(goalId, `commits by someone other than APOS landed in the managed checkout during the attempt: ${intruders.join(', ')}`, actions); return actions; }
 
     const report = show(repoPath, head, soloReportPath(goalId, attempt));
     const line = activationLine(committedFileDigest(repoPath, ref.baseCommit, CORE_SKILL));
@@ -110,6 +114,29 @@ export class SoloSupervisor {
       logRefs: failing.flatMap(item => item.delivery.map(run => run.logRef)),
       commit: head
     }, repoPath, actions);
+  }
+
+  /**
+   * Seen live with Codex in Orca: the brief sat pasted in the composer, never submitted. After a few
+   * quiet minutes the controller presses Enter once; if the owner still has not started, the Human decides.
+   */
+  private async unstick(goalId: string, ref: RuntimeRef): Promise<string[]> {
+    if (!this.runtime.inputStalled || !this.runtime.nudge || !ref.terminal) return [];
+    const since = [...this.store.events(goalId)].reverse().find(item => ['execution-started', 'runtime-resumed'].includes(item.type));
+    const minutes = since ? (this.now() - Date.parse(since.at)) / 60_000 : 0;
+    if (minutes < 4 || !(await this.runtime.inputStalled(ref.dispatchId))) return [];
+    const marker = `nudge ${ref.dispatchId}`;
+    const nudged = this.store.events(goalId).filter(item => item.type === 'decision-logged' && String((item.data as { note?: string }).note).startsWith(marker));
+    if (!nudged.length) {
+      await this.runtime.nudge(ref.terminal);
+      this.record(goalId, 'decision-logged', { note: `${marker}: input accepted but the agent never started after ${Math.round(minutes)} min; controller pressed Enter once` });
+      return [`nudged ${ref.dispatchId}`];
+    }
+    if (minutes >= 10 && !this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string; dispatchId?: string }).kind === 'stalled' && (item.data as { dispatchId?: string }).dispatchId === ref.dispatchId)) {
+      this.record(goalId, 'human-notified', { kind: 'stalled', goalId, dispatchId: ref.dispatchId, note: 'owner never started after one nudge' });
+      return [`stalled ${ref.dispatchId}; Human notified`];
+    }
+    return [];
   }
 
   /** Records a machine finding and resumes the same owner, unless a stop condition sends it to the Human. */
@@ -163,6 +190,14 @@ export class SoloSupervisor {
       usage: usage ?? 'unknown', ...(started ? { wallMs: this.now() - Date.parse(started.at) } : {})
     });
   }
+}
+
+/** Commits on the managed checkout since the dispatch base that APOS did not author. */
+function foreignCommits(repoPath: string, base: string): string[] {
+  try {
+    const rows = execFileSync('git', ['-C', repoPath, 'log', '--format=%H%x09%ae', `${base}..HEAD`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split(/\r?\n/).filter(Boolean);
+    return rows.filter(row => row.split('\t')[1] !== 'apos@local.invalid').map(row => row.slice(0, 12));
+  } catch { return []; }
 }
 
 function describe(gate: GateReport): string {

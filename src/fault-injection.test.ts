@@ -31,7 +31,8 @@ describe('brief with $ and quotes', () => {
     await runtime.startPackage({ repoPath: 'C:/p', idempotencyKey: 'k-1', package: { id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'w', outcome, scope: ['s'], exclusions: [], dependencies: [], interfaces: ['x@v1'], acceptance: [{ id: 'AC-1', text: 't' }], integration: 'i' } });
     const start = calls.find(args => args[1] === 'worker-start')!;
     const spec = start[start.indexOf('--spec') + 1];
-    expect(spec).toContain(`Change: deliver ${outcome}.`);
+    expect(spec).toContain(`deliver ${outcome}.`);
+    expect(spec).not.toMatch(/\n/);
   });
 });
 

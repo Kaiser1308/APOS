@@ -38,6 +38,12 @@ export const packageReportPath = (goalId: string, packageId: string, version: nu
 export const reviewResultPath = (goalId: string, key: string) => `.apos/goals/${goalId}/reviews/${key.slice(0, 8)}.json`;
 
 /** `digest(path)` returns the sha256 of a file as committed at the base commit. */
+const WORKSPACE = 'Work only in your current working directory: the git worktree APOS created for you. Never cd into, edit, or commit to the APOS repo named at the end of this brief; the controller reads your delivery from your own worktree branch.';
+export const oneLine = (text: string) => text.replace(/\s*\r?\n\s*/g, ' / ');
+/** Recovery reads the managed repo from this marker; owners are told never to work there. */
+export const repoMarker = (repoPath: string) => `APOS repo: <${repoPath}>.`;
+export const parseRepoMarker = (spec: string): string | undefined => /APOS repo: <([^>]*)>/.exec(spec)?.[1] ?? /Target: (.*?), (?:GOAL-|APOS Solo Goal)/.exec(spec)?.[1];
+
 type BriefBase = { repoPath: string; goalId: string; baseCommit: string; idempotencyKey: string; digest?: (path: string) => string };
 
 function skillLines(input: BriefBase, role: Role): string[] {
@@ -56,54 +62,57 @@ function skillLines(input: BriefBase, role: Role): string[] {
  */
 export function soloBrief(input: BriefBase & { attempt: number }): string {
   return [
-    `Target: ${input.repoPath}, ${input.goalId}. APOS Solo owner, attempt ${input.attempt}.`,
+    `${input.goalId}: APOS Solo owner, attempt ${input.attempt}.`,
+    WORKSPACE,
     ...skillLines(input, 'lead'),
     `Contract: .apos/goals/${input.goalId}/goal.md, source.md and execution.md at base commit ${input.baseCommit}. You own the whole Goal in this worktree.`,
     `Commit your delivery report at ${soloReportPath(input.goalId, input.attempt)}. The controller will run every Goal check itself on your final commit.`,
     'Follow the injected Orca preamble; report worker_done exactly once with succeeded or failed, then idle. Do not merge.',
-    `APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`
-  ].join('\n');
+    `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`
+  ].join(' ');
 }
 
 export function repairBrief(input: { goalId: string; attempt: number; finding: string; idempotencyKey: string; repoPath: string; baseCommit?: string }): string {
   return [
-    `Target: ${input.repoPath}, ${input.goalId}. Same owner, repair attempt ${input.attempt}.`,
-    'The controller ran the Goal checks itself on your last commit. Its finding, from the logs:',
-    input.finding,
+    `${input.goalId}: same owner, repair attempt ${input.attempt}.`,
+    WORKSPACE,
+    `The controller ran the Goal checks itself on your last commit. Its finding: ${oneLine(input.finding)}`,
     `Fix it under ${CORE_SKILL}. Recheck every acceptance criterion, not only this finding, and commit a new delivery report at ${soloReportPath(input.goalId, input.attempt)} with the same activation line.`,
     'Report worker_done exactly once with succeeded or failed.',
-    `APOS dispatch key: ${input.idempotencyKey}.${input.baseCommit ? ` APOS base commit: ${input.baseCommit}.` : ''}`
-  ].join('\n');
+    `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}.${input.baseCommit ? ` APOS base commit: ${input.baseCommit}.` : ''}`
+  ].join(' ');
 }
 
 export function packageBrief(input: BriefBase & { packageId: string; version: number; owner: string; outcome: string; attempt: number }): string {
   return [
-    `Target: ${input.repoPath}, ${input.goalId}, ${input.packageId}. Change: deliver ${input.outcome}.`,
+    `${input.goalId}, ${input.packageId}: deliver ${input.outcome}.`,
+    WORKSPACE,
     ...skillLines(input, 'worker'),
     `Contract: .apos/goals/${input.goalId}/goal.md, source.md, execution.md and packages/${input.packageId}.md (v${input.version}). Ownership: ${input.owner} owns this Work Package end to end.`,
     `Commit your delivery report at ${packageReportPath(input.goalId, input.packageId, input.version, input.attempt)}.`,
     'Follow the injected Orca preamble; report worker_done exactly once with succeeded or failed, then idle. Do not merge.',
-    `APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`
-  ].join('\n');
+    `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`
+  ].join(' ');
 }
 
 export function reviewBrief(input: BriefBase & { commit: string; reasons: string[] }): string {
   return [
-    `Target: ${input.repoPath}, ${input.goalId}. Independent review of commit ${input.commit} against base ${input.baseCommit}.`,
+    `${input.goalId}: independent review of commit ${input.commit} against base ${input.baseCommit}.`,
+    WORKSPACE,
     ...skillLines(input, 'reviewer').slice(0, 1),
     `Review is required because: ${input.reasons.join('; ')}.`,
     `Write {"result":"pass"|"changes","note":"..."} to ${reviewResultPath(input.goalId, input.idempotencyKey)} and commit only that file. Do not edit the implementation.`,
     'Report worker_done exactly once with succeeded when the review is written.',
-    `APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`
-  ].join('\n');
+    `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`
+  ].join(' ');
 }
 
 export function leadWakeBrief(input: { repoPath: string; goalId: string; events: string[]; idempotencyKey: string }): string {
   return [
-    `Target: ${input.repoPath}, ${input.goalId}. APOS Lead wake-up for Multi-WP.`,
+    `${input.goalId}: APOS Lead wake-up for Multi-WP.`,
     'Events since your last turn:',
-    ...input.events.map(item => `- ${item}`),
+    ...input.events.map((item, index) => `(${index + 1}) ${oneLine(item)}`),
     `Handle them under ${roleSkill('lead')}: answer within the approved Goal, revise packages or integrate, then report worker_done once and end your turn.`,
-    `APOS dispatch key: ${input.idempotencyKey}.`
-  ].join('\n');
+    `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}.`
+  ].join(' ');
 }

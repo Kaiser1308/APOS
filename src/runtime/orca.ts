@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntimeRef } from '../app/packages.js';
-import { DEFAULT_PROFILES, committedFileDigest, leadWakeBrief, packageBrief, packageReportPath, repairBrief, reviewBrief, soloBrief, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
+import { DEFAULT_PROFILES, committedFileDigest, leadWakeBrief, oneLine, packageBrief, packageReportPath, parseRepoMarker, repoMarker, repairBrief, reviewBrief, soloBrief, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
 
 export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string; requested?: RuntimeProfile };
 /** What Orca says actually launched; compared with the requested profile. */
@@ -24,6 +24,10 @@ export interface RuntimeAdapter {
   /** Head commit of the owner's worktree: the delivery the controller gates. */
   deliveryHead?(ref: { worktreeId?: string; dispatchId?: string }): Promise<string | undefined>;
   launchReceipt?(dispatchId: string): Promise<LaunchReceipt | undefined>;
+  /** True when Orca accepted the input but the agent never started (no heartbeat, still at input_accepted). */
+  inputStalled?(dispatchId: string): Promise<boolean>;
+  /** Presses Enter once in the owner's terminal. */
+  nudge?(terminal: string): Promise<void>;
   startReviewer?(input: { repoPath: string; goalId: string; baseCommit: string; commit: string; reasons: string[]; idempotencyKey: string; runId: string }): Promise<ReviewerRef>;
   wakeLead?(input: { repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string }): Promise<{ dispatchId: string }>;
 }
@@ -45,7 +49,10 @@ function runOrca(args: string[]): Record<string, unknown> {
   try {
     return parseOrcaResult(execFileSync('orca', [...args, '--json'], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
   } catch (error) {
-    throw new Error(`Orca ${args.join(' ')} failed: ${error instanceof Error ? error.message : String(error)}`);
+    const stdout = (error as { stdout?: string }).stdout;
+    let detail = '';
+    try { const parsed = stdout ? JSON.parse(stdout) as { error?: { code?: string; message?: string } } : undefined; if (parsed?.error) detail = ` [${parsed.error.code}] ${parsed.error.message}`; } catch { detail = stdout ? ` ${stdout.slice(0, 500)}` : ''; }
+    throw new Error(`Orca ${args[0]} ${args[1] ?? ''} failed:${detail || ` ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`}`);
   }
 }
 
@@ -163,12 +170,12 @@ export class OrcaRuntime implements RuntimeAdapter {
     if (!prior.terminal || !prior.worktreeId) throw new Error('Original Worker terminal and worktree required');
     this.execute(['orchestration', 'run-use', '--id', prior.runId]);
     const spec = [
-      `Target: ${prior.repoPath}, ${item.goalId}, ${item.id}. Continue the same package owner for contract v${item.version}, attempt ${input.attempt ?? 2}.`,
-      ...(input.finding ? ['The controller ran the package checks itself on your last commit. Its finding:', input.finding] : []),
+      `${item.goalId}, ${item.id}: continue the same package owner for contract v${item.version}, attempt ${input.attempt ?? 2}. Work only in your current working directory, your own worktree; never in the APOS repo.`,
+      ...(input.finding ? [`The controller ran the package checks itself on your last commit. Its finding: ${oneLine(input.finding)}`] : []),
       `Read .apos/goals/${item.goalId}/packages/${item.id}.md, recheck all local acceptance under .apos/skills/_core/execute.md, and commit a new delivery report at ${packageReportPath(item.goalId, item.id, item.version, input.attempt ?? 2)} with the same activation line.`,
       'Follow the injected Orca preamble and report worker_done exactly once.',
-      `APOS dispatch key: ${input.idempotencyKey}.${prior.baseCommit ? ` APOS base commit: ${prior.baseCommit}.` : ''}`
-    ].join('\n');
+      `${repoMarker(prior.repoPath)} APOS dispatch key: ${input.idempotencyKey}.${prior.baseCommit ? ` APOS base commit: ${prior.baseCommit}.` : ''}`
+    ].join(' ');
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--run', prior.runId]);
     const ref = extractStartedRef(started, prior.repoPath);
     if (ref.runId !== prior.runId) throw new Error('Resumed Worker belongs to an unexpected Run');
@@ -232,6 +239,17 @@ export class OrcaRuntime implements RuntimeAdapter {
     try { return this.gitHead(path); } catch { return undefined; }
   }
 
+  async inputStalled(dispatchId: string): Promise<boolean> {
+    const shown = this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]);
+    const dispatch = object(shown.dispatch);
+    const worker = object(shown.worker);
+    return dispatch.status === 'dispatched' && !dispatch.lastHeartbeatAt && worker.stage === 'input_accepted';
+  }
+
+  async nudge(terminal: string): Promise<void> {
+    this.execute(['terminal', 'send', '--terminal', terminal, '--enter']);
+  }
+
   async launchReceipt(dispatchId: string): Promise<LaunchReceipt | undefined> {
     const shown = this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]);
     const effective = object(object(object(object(shown.worker).startOptions).launch).effective);
@@ -265,8 +283,9 @@ export class OrcaRuntime implements RuntimeAdapter {
     const detail = this.execute(['orchestration', 'dispatch-show', '--task', taskId]);
     const dispatch = object(detail.dispatch);
     if (!dispatch.id) return undefined;
-    const match = /Target: (.*?), (?:GOAL-[A-Z0-9-]+\.|APOS Solo Goal\.)/.exec(String(task.spec));
-    if (!match) throw new Error('Orca task has no APOS repo path');
+    const repoPath = parseRepoMarker(String(task.spec));
+    if (!repoPath) throw new Error('Orca task has no APOS repo path');
+    const match = [repoPath, repoPath];
     const dispatchId = id(dispatch.id, 'Dispatch ID');
     const worker = object(this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]).worker);
     const baseCommit = /APOS base commit: ([0-9a-fA-F]{40,64})\./.exec(String(task.spec))?.[1];
@@ -288,8 +307,9 @@ export class OrcaRuntime implements RuntimeAdapter {
     const detail = this.execute(['orchestration', 'dispatch-show', '--task', taskId]);
     const dispatch = object(detail.dispatch);
     if (!dispatch.id) return undefined;
-    const match = /Target: (.*?), (GOAL-[A-Z0-9-]+), (WP-[A-Z0-9-]+)\./.exec(String(task.spec));
-    if (!match) throw new Error('Orca task has no APOS package target');
+    const repoPath = parseRepoMarker(String(task.spec));
+    if (!repoPath || !/WP-[A-Z0-9-]+/.test(String(task.spec))) throw new Error('Orca task has no APOS package target');
+    const match = [repoPath, repoPath];
     const dispatchId = id(dispatch.id, 'Dispatch ID');
     const shown = this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]);
     const worker = object(shown.worker);

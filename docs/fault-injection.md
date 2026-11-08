@@ -32,6 +32,8 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | Core skill not loaded (no activation line) | finding; same owner resumed | `supervisor.test.ts` › does not accept a delivery whose report lacks the core activation line |
 | Runtime launched another model | needs-decision | `supervisor.test.ts` › stops for a decision when the runtime launched a different model |
 | Same failure after two repairs | needs-decision | `supervisor.test.ts` › sends the Goal to a Human decision when the same failure survives two repairs |
+| Owner commits into the managed checkout instead of its worktree (seen live) | needs-decision | `supervisor.test.ts` › stops for a decision when the owner commits into the managed checkout |
+| Codex leaves the brief pasted but unsubmitted (seen live) | one Enter after 4 quiet minutes, Human notified at 10 | `supervisor.test.ts` › stalled Codex input |
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
 
 ## Not covered by automated tests

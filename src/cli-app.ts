@@ -16,15 +16,14 @@ import { assertExecutionSettled } from './app/replan.js';
 import { MetricsService } from './app/metrics.js';
 import { GoalRegistryService } from './app/registry.js';
 import { VerificationService } from './app/verification.js';
-import { GateService, committedSourceDigest, type GateOptions } from './app/gate.js';
+import { GateService, type GateOptions } from './app/gate.js';
 import { sourceDigest } from './domain/gate.js';
 import { execFileSync } from 'node:child_process';
 import { parseWorkPackage } from './domain/packages.js';
 import { OrcaRuntime, type RuntimeAdapter } from './runtime/orca.js';
 import { ProjectJournal } from './store/journal.js';
-import { SqliteStore } from './store/sqlite.js';
 
-export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; gate?: GateOptions; write?: (line: string) => void };
+export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; gate?: GateOptions; home?: string; write?: (line: string) => void };
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<void> {
   const program = new Command();
@@ -37,17 +36,18 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   program.name('apos').description('Local AI Project Orchestration System').version('0.1.0').option('--repo <path>', 'managed Git project', process.cwd());
 
   const repo = () => resolve(program.opts<{ repo: string }>().repo);
-  const withJournal = <T>(fn: (journal: ProjectJournal) => T): T => {
+  const openJournal = () => {
     const path = repo();
     if (!existsSync(join(path, '.apos', 'project.yaml'))) throw new Error('Run apos init first');
-    const store = SqliteStore.open(join(path, '.apos', 'state.sqlite'));
-    try { return fn(new ProjectJournal(path, store)); } finally { store.close(); }
+    return ProjectJournal.open(path, options.home);
+  };
+  const withJournal = <T>(fn: (journal: ProjectJournal) => T): T => {
+    const { journal, close } = openJournal();
+    try { return fn(journal); } finally { close(); }
   };
   const withJournalAsync = async <T>(fn: (journal: ProjectJournal) => Promise<T>): Promise<T> => {
-    const path = repo();
-    if (!existsSync(join(path, '.apos', 'project.yaml'))) throw new Error('Run apos init first');
-    const store = SqliteStore.open(join(path, '.apos', 'state.sqlite'));
-    try { return await fn(new ProjectJournal(path, store)); } finally { store.close(); }
+    const { journal, close } = openJournal();
+    try { return await fn(journal); } finally { close(); }
   };
   const event = (goalId: string, type: GoalEventType, data?: unknown) => ({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
   /** Reads the Goal JSON and the verbatim source; fills `source` when absent, otherwise checks it matches. */
@@ -62,6 +62,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   };
 
   program.command('init').description('initialize .apos in a Git project').action(async () => { await initProject(repo()); write(`Initialized ${repo()}`); });
+  program.command('migrate').description('import APOS v1 Goal histories from the repo into the controller log').action(() => withJournal(journal => {
+    write(JSON.stringify(journal.importLegacy()));
+  }));
 
   const goal = program.command('goal');
   goal.command('create').requiredOption('--file <json>').requiredOption('--source <path>', 'verbatim source the Goal was shaped from').option('--origin <text>', 'who or what produced the source', 'human').action(({ file, source, origin }: { file: string; source: string; origin: string }) => withJournal(journal => {
@@ -73,7 +76,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     for (const state of journal.listGoals()) write(`${state.spec.id}\t${state.status}\t${state.spec.outcome}`);
   }));
   goal.command('approve').argument('<id>').action((id: string) => withJournal(journal => {
-    new GoalRegistryService(journal).approve(id, goalId => committedSourceDigest(repo(), goalId)); write(`Approved ${id}`);
+    new GoalRegistryService(journal).approve(id); write(`Approved ${id}`);
   }));
   goal.command('select').argument('<id>').action((id: string) => withJournal(journal => {
     new GoalRegistryService(journal).select(id); write(`Selected ${id}`);
@@ -118,12 +121,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
         write(`Dispatched ${id}: ${ref.dispatchId}`);
       }
   }));
-  execution.command('start').argument('<id>').action(async (id: string) => {
-    const path = repo();
-    const store = SqliteStore.open(join(path, '.apos', 'state.sqlite'));
-    try { write((await new SoloService(new ProjectJournal(path, store), runtime).start(id, path)).dispatchId); }
-    finally { store.close(); }
-  });
+  execution.command('start').argument('<id>').action((id: string) => withJournalAsync(async journal => {
+    write((await new SoloService(journal, runtime).start(id, repo())).dispatchId);
+  }));
   execution.command('checkpoint').argument('<id>').requiredOption('--file <json>').action((id: string, { file }: { file: string }) => withJournal(journal => {
     const checkpoint = JSON.parse(readFileSync(file, 'utf8')) as PhaseCheckpoint;
     if (typeof checkpoint.phase !== 'string' || !checkpoint.phase.trim() || typeof checkpoint.progress !== 'string' || !checkpoint.progress.trim() || !Array.isArray(checkpoint.evidenceRefs) || !checkpoint.evidenceRefs.every(item => typeof item === 'string')) throw new Error('Phase checkpoint requires phase, progress and evidenceRefs');
@@ -145,12 +145,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     if (!state) throw new Error(`Unknown Goal: ${id}`);
     write(JSON.stringify({ goalId: id, status: state.status, proposalVersion: state.proposal?.version, runtimeRef: state.runtimeRef }));
   }));
-  execution.command('reconcile').argument('<id>').action(async (id: string) => {
-    const path = repo();
-    const store = SqliteStore.open(join(path, '.apos', 'state.sqlite'));
-    try { write(`${id}: ${await new SoloService(new ProjectJournal(path, store), runtime).reconcile(id)}`); }
-    finally { store.close(); }
-  });
+  execution.command('reconcile').argument('<id>').action((id: string) => withJournalAsync(async journal => {
+    write(`${id}: ${await new SoloService(journal, runtime).reconcile(id)}`);
+  }));
   execution.command('verify').argument('<id>').option('--commit <sha>', 'delivery commit under review').action((id: string, { commit }: { commit?: string }) => withJournalAsync(async journal => {
     const result = await new SoloService(journal, runtime).verify(id, commit);
     write(`Verified ${id} at ${result.deliveryCommit}: ${result.acceptanceIds.join(', ')}`);

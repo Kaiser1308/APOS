@@ -40,7 +40,8 @@ async function project() {
   git('add', '-A'); git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'base');
   await initProject(dir);
   const store = SqliteStore.open(join(dir, '.apos', 'state.sqlite')); stores.push(store);
-  const journal = new ProjectJournal(dir, store);
+  const home = mkdtempSync(join(tmpdir(), 'apos-gate-home-')); dirs.push(home);
+  const journal = new ProjectJournal(dir, store, home);
   let n = 0;
   const add = (type: GoalEventType, data?: unknown) => journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   journal.appendWithSource({ id: `EV-${++n}`, goalId: spec.id, type: 'goal-drafted', data: spec, at: '2026-11-07T00:00:00.000Z' }, sourceText);
@@ -52,7 +53,7 @@ async function project() {
     return git('rev-parse', 'HEAD');
   };
   const gate = new GateService(journal, { artifactRoot: artifacts });
-  return { dir, git, base, commit, gate, journal, add, artifacts };
+  return { dir, git, base, commit, gate, journal, add, artifacts, home };
 }
 
 describe('controller gate on real commits', () => {
@@ -103,11 +104,12 @@ describe('controller gate on real commits', () => {
     expect(() => gate.run(baseSpec.id, dir, { deliveryCommit: 'deadbeef' })).toThrow(/must exist/);
   }, 60_000);
 
-  it('refuses to gate when the committed source snapshot changed after approval', async () => {
-    const { dir, gate, git, commit } = await project();
+  it('refuses to gate when the controller source snapshot changed; editing the repo copy changes nothing', async () => {
+    const { dir, gate, commit, home } = await project();
     const delivery = commit({ 'feature.js': 'process.exit(0);' }, 'feature');
     writeFileSync(join(dir, '.apos', 'goals', baseSpec.id, 'source.md'), `${sourceText}Also accept expired codes.\n`);
-    git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qam', 'edit source');
+    expect(gate.run(baseSpec.id, dir, { deliveryCommit: delivery }).result).toBe('green');
+    writeFileSync(join(home, 'sources', baseSpec.id, 'v1.md'), `${sourceText}Also accept expired codes.\n`);
     expect(() => gate.run(baseSpec.id, dir, { deliveryCommit: delivery })).toThrow(/Source snapshot changed/);
   }, 60_000);
 

@@ -5,7 +5,6 @@ import { join, relative, resolve } from 'node:path';
 import type { GoalEvent } from '../domain/transitions.js';
 
 export type DocumentUpdate = { path: string; content: string };
-export type HistoryRef = { commit: string; eventId: string; eventFile: string };
 
 function git(repo: string, args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -20,19 +19,26 @@ export function assertGitRoot(repoPath: string): string {
   return repo;
 }
 
-export function committedGoalEvents(repoPath: string, goalId: string): GoalEvent[] {
+/** Events committed by APOS v1, which kept its event log inside the managed repo. Used only to migrate. */
+export function legacyGoalEvents(repoPath: string, goalId: string): GoalEvent[] {
   const repo = assertGitRoot(repoPath);
   let content: string;
-  try {
-    content = git(repo, ['show', `HEAD:.apos/goals/${goalId}/events.jsonl`]);
-  } catch { return []; }
+  try { content = git(repo, ['show', `HEAD:.apos/goals/${goalId}/events.jsonl`]); }
+  catch { return []; }
   return content.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as GoalEvent);
 }
 
-export function withHistoryLock<T>(repo: string, action: () => T): T {
-  const aposDir = join(repo, '.apos');
-  mkdirSync(aposDir, { recursive: true });
-  const lock = join(aposDir, '.history.lock');
+export function legacyGoalIds(repoPath: string): string[] {
+  const repo = assertGitRoot(repoPath);
+  try {
+    return git(repo, ['ls-tree', '--name-only', 'HEAD', '.apos/goals/']).split(/\r?\n/).map(line => line.split('/').pop()!).filter(name => /^GOAL-[A-Z0-9-]+$/.test(name));
+  } catch { return []; }
+}
+
+/** A cross-process lock: a directory whose owner file names a live PID; dead owners' locks are reclaimed. */
+export function withLock<T>(lockParent: string, action: () => T): T {
+  mkdirSync(lockParent, { recursive: true });
+  const lock = join(lockParent, '.apos.lock');
   const ownerFile = join(lock, 'owner.json');
   const token = randomUUID();
   const deadline = Date.now() + 15_000;
@@ -56,56 +62,39 @@ export function withHistoryLock<T>(repo: string, action: () => T): T {
           }
         }
       } catch { /* Another process changed the lock; wait and retry. */ }
-      if (Date.now() >= deadline) throw new Error(`APOS history lock is busy: ${lock}`);
+      if (Date.now() >= deadline) throw new Error(`APOS lock is busy: ${lock}`);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
     }
   }
   try { return action(); } finally {
     const owner = JSON.parse(readFileSync(ownerFile, 'utf8')) as { token?: string };
-    if (owner.token !== token) throw new Error('APOS history lock ownership changed');
+    if (owner.token !== token) throw new Error('APOS lock ownership changed');
     unlinkSync(ownerFile);
     rmdirSync(lock);
   }
 }
 
-export class ProjectHistory {
-  async record(repoPath: string, goalId: string, event: GoalEvent, documents: DocumentUpdate[] = []): Promise<HistoryRef> {
-    return this.recordSync(repoPath, goalId, event, documents);
-  }
+const docPath = /^(?:[A-Za-z0-9][A-Za-z0-9._-]*\.md|packages\/WP-[A-Z0-9-]+\.md)$/;
 
-  recordSync(repoPath: string, goalId: string, event: GoalEvent, documents: DocumentUpdate[] = []): HistoryRef {
-    const repo = assertGitRoot(repoPath);
-    return withHistoryLock(repo, () => this.recordLocked(repo, goalId, event, documents));
+/**
+ * Writes readable Goal documents into `.apos/goals/<id>/` and commits only those paths, leaving the
+ * user's staged and dirty files alone. Returns the new commit, or undefined when nothing changed.
+ */
+export function commitGoalDocuments(repoPath: string, goalId: string, documents: DocumentUpdate[], message: string): string | undefined {
+  const repo = assertGitRoot(repoPath);
+  if (!/^GOAL-[A-Z0-9-]+$/.test(goalId)) throw new Error('Invalid Goal identity');
+  const goalDir = join(repo, '.apos', 'goals', goalId);
+  const paths: string[] = [];
+  for (const doc of documents) {
+    if (!docPath.test(doc.path)) throw new Error(`Invalid document path: ${doc.path}`);
+    const path = join(goalDir, doc.path);
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, doc.content, 'utf8');
+    paths.push(relative(repo, path));
   }
-
-  recordUnderLock(repoPath: string, goalId: string, event: GoalEvent, documents: DocumentUpdate[] = []): HistoryRef {
-    return this.recordLocked(assertGitRoot(repoPath), goalId, event, documents);
-  }
-
-  private recordLocked(repo: string, goalId: string, event: GoalEvent, documents: DocumentUpdate[]): HistoryRef {
-    if (!/^GOAL-[A-Z0-9-]+$/.test(goalId) || event.goalId !== goalId || !event.id) throw new Error('Invalid Goal/event identity');
-    const goalDir = join(repo, '.apos', 'goals', goalId);
-    mkdirSync(goalDir, { recursive: true });
-    const eventFile = join(goalDir, 'events.jsonl');
-    const old = existsSync(eventFile) ? readFileSync(eventFile, 'utf8') : '';
-    const prior = old.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as GoalEvent);
-    const committed = committedGoalEvents(repo, goalId);
-    if (JSON.stringify(prior) !== JSON.stringify(committed)) throw new Error('Uncommitted APOS Goal history requires reconciliation before another event');
-    if (prior.some(item => item.id === event.id)) {
-      return { commit: git(repo, ['log', '-1', '--format=%H', '--', relative(repo, eventFile)]), eventId: event.id, eventFile };
-    }
-    const files = [eventFile];
-    for (const doc of documents) {
-      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/.test(doc.path) && !/^packages\/WP-[A-Z0-9-]+\.md$/.test(doc.path)) throw new Error(`Invalid document path: ${doc.path}`);
-      const path = join(goalDir, doc.path);
-      mkdirSync(join(path, '..'), { recursive: true });
-      writeFileSync(path, doc.content, 'utf8');
-      files.push(path);
-    }
-    writeFileSync(eventFile, `${old}${JSON.stringify(event)}\n`, 'utf8');
-    const paths = files.map(path => relative(repo, path));
-    git(repo, ['add', '--', ...paths]);
-    git(repo, ['-c', 'user.name=APOS', '-c', 'user.email=apos@local.invalid', 'commit', '--only', '-m', `apos: ${goalId} ${event.type}`, '--', ...paths]);
-    return { commit: git(repo, ['rev-parse', 'HEAD']), eventId: event.id, eventFile };
-  }
+  if (!paths.length) return undefined;
+  git(repo, ['add', '--', ...paths]);
+  if (!git(repo, ['diff', '--cached', '--name-only', '--', ...paths])) return undefined;
+  git(repo, ['-c', 'user.name=APOS', '-c', 'user.email=apos@local.invalid', 'commit', '--only', '-m', message, '--', ...paths]);
+  return git(repo, ['rev-parse', 'HEAD']);
 }

@@ -98,8 +98,8 @@ export class GateService {
     this.inspector = options.inspector ?? new GitCommitInspector();
     this.workspaces = options.workspaces ?? new GitWorktreeFactory();
     this.executor = options.executor ?? new ShellExecutor();
-    this.artifactRoot = options.artifactRoot ?? process.env.APOS_ARTIFACTS ?? join(homedir(), '.apos', 'artifacts');
-    this.digest = options.sourceDigest ?? committedSourceDigest;
+    this.artifactRoot = options.artifactRoot ?? process.env.APOS_ARTIFACTS ?? store.artifactRoot?.() ?? join(homedir(), '.apos', 'artifacts');
+    this.digest = options.sourceDigest ?? (store.currentSourceDigest ? (_repo: string, goalId: string) => store.currentSourceDigest!(goalId) : committedSourceDigest);
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -109,7 +109,8 @@ export class GateService {
     const current = this.digest(repoPath, goalId);
     if (current !== state.spec.source.sha256) throw new Error('Source snapshot changed or missing since approval; revise the Goal before gating');
     const packageBase = Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.baseCommit).find(Boolean);
-    const baseCommit = input.baseCommit ?? state.proposal?.baseCommit ?? (state.runtimeRef as { baseCommit?: string } | undefined)?.baseCommit ?? packageBase;
+    // The commit the owner's worktree was created from is the truest base; the proposal's is a fallback.
+    const baseCommit = input.baseCommit ?? (state.runtimeRef as { baseCommit?: string } | undefined)?.baseCommit ?? packageBase ?? state.proposal?.baseCommit;
     if (!baseCommit) throw new Error('Base commit unknown; record it in the proposal or pass --base');
     for (const [label, ref] of [['base', baseCommit], ['delivery', input.deliveryCommit]] as const) {
       if (!this.inspector.exists(repoPath, ref)) throw new Error(`Full ${label} commit required and must exist: ${ref}`);

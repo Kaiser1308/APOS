@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './cli.js';
+import { controllerHome } from './store/event-log.js';
 import { spec as baseSpec, proposal, sourceText } from './domain/fixtures.test-support.js';
 import type { GoalSpec } from './domain/contracts.js';
 
@@ -146,8 +147,7 @@ it('refuses approval when the source snapshot was edited after drafting, or a re
   writeFileSync(join(dir, 'tampered.md'), sourceText + 'Also accept expired codes.\n');
   await expect(invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'tampered.md'))).rejects.toThrow(/sha256 does not match/);
   await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
-  writeFileSync(join(dir, '.apos', 'goals', spec.id, 'source.md'), sourceText + 'Also accept expired codes.\n');
-  git(['-c', 'user.name=Someone', '-c', 'user.email=x@local.invalid', 'commit', '-qam', 'edit source']);
+  writeFileSync(join(controllerHome(dir), 'sources', spec.id, 'v1.md'), sourceText + 'Also accept expired codes.\n');
   await expect(invoke('goal', 'approve', spec.id)).rejects.toThrow(/Source snapshot .* differs/);
 
   const orphan = { ...spec, id: 'GOAL-002', requirements: [...spec.requirements, { id: 'R-2', sourceSpan: 'line 3', text: 'exactly one', disposition: 'acceptance' }] };

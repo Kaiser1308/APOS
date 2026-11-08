@@ -1,71 +1,106 @@
 import { afterEach, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SqliteStore } from './sqlite.js';
 import { ProjectJournal } from './journal.js';
-import { ProjectHistory } from './project-history.js';
-import { spec } from '../domain/fixtures.test-support.js';
+import { spec, proposal, sourceText } from '../domain/fixtures.test-support.js';
 import { initProject } from '../app/init-project.js';
+import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
+const at = '2026-11-07T00:00:00.000Z';
 
-it('records Goal state and its readable Git history together', async () => {
+async function project() {
   const dir = mkdtempSync(join(tmpdir(), 'apos-journal-')); dirs.push(dir);
+  const home = mkdtempSync(join(tmpdir(), 'apos-journal-home-')); dirs.push(home);
   execFileSync('git', ['init', '-q', dir]);
   await initProject(dir);
-  const store = SqliteStore.open(join(dir, '.apos', 'state.sqlite'));
-  const journal = new ProjectJournal(dir, store);
-  const event = { id: 'EV-1', goalId: spec.id, type: 'goal-drafted' as const, data: spec, at: '2026-11-07T00:00:00.000Z' };
-  await journal.append(event);
+  const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  const opened = ProjectJournal.open(dir, home);
+  let n = 0;
+  const add = (type: GoalEventType, data?: unknown) => opened.journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at });
+  const draft = () => opened.journal.appendWithSource({ id: `EV-${++n}`, goalId: spec.id, type: 'goal-drafted', data: spec, at }, sourceText);
+  return { dir, home, git, add, draft, ...opened };
+}
+
+it('keeps events in the controller home and commits nothing to the repo before a milestone', async () => {
+  const { dir, home, git, draft, journal, close } = await project();
+  const before = git('rev-parse', 'HEAD');
+  draft();
   expect(journal.getGoal(spec.id)?.status).toBe('draft');
-  expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'goal.md'), 'utf8')).toContain('check in');
-  expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'events.jsonl'), 'utf8')).toContain('EV-1');
-  const history = execFileSync('git', ['-C', dir, 'show', '--pretty=format:', '--name-only', 'HEAD'], { encoding: 'utf8' });
-  expect(history).toContain('.apos/goals/GOAL-001/events.jsonl');
-  expect(history).not.toContain('state.sqlite');
-  store.close();
+  expect(existsSync(join(home, 'events', `${spec.id}.jsonl`))).toBe(true);
+  expect(existsSync(join(dir, '.apos', 'goals', spec.id, 'events.jsonl'))).toBe(false);
+  expect(git('rev-parse', 'HEAD')).toBe(before);
+  expect(journal.currentSourceDigest(spec.id)).toBe(spec.source.sha256);
+  close();
 });
 
-it('does not commit an event that fails the approval gate', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-journal-')); dirs.push(dir);
-  execFileSync('git', ['init', '-q', dir]);
-  await initProject(dir);
-  const store = SqliteStore.open(join(dir, '.apos', 'state.sqlite'));
-  const journal = new ProjectJournal(dir, store);
-  const invalid = { id: 'EV-2', goalId: spec.id, type: 'goal-approved' as const, at: '2026-11-07T00:00:00.000Z' };
-  expect(() => journal.append(invalid)).toThrow(/Goal does not exist/);
-  expect(journal.getGoal(spec.id)).toBeUndefined();
-  expect(execFileSync('git', ['-C', dir, 'show', '--pretty=format:', '--name-only', 'HEAD'], { encoding: 'utf8' })).not.toContain('events.jsonl');
-  store.close();
+it('commits the readable Goal record with its source at approval', async () => {
+  const { dir, git, draft, add, close } = await project();
+  draft(); add('goal-approved');
+  expect(git('log', '-1', '--format=%s')).toBe(`apos: ${spec.id} goal-approved`);
+  const files = git('show', '--pretty=format:', '--name-only', 'HEAD');
+  expect(files).toContain(`.apos/goals/${spec.id}/goal.md`);
+  expect(files).toContain(`.apos/goals/${spec.id}/source.md`);
+  expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'source.md'), 'utf8')).toBe(sourceText);
+  close();
 });
 
-it('saves each Work Package spec inside its Goal history', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-journal-')); dirs.push(dir);
-  execFileSync('git', ['init', '-q', dir]);
-  await initProject(dir);
-  const store = SqliteStore.open(join(dir, '.apos', 'state.sqlite'));
-  const journal = new ProjectJournal(dir, store);
-  const at = '2026-11-07T00:00:00.000Z';
-  const add = (id: string, type: import('../domain/transitions.js').GoalEventType, data?: unknown) => journal.append({ id, goalId: spec.id, type, data, at });
-  add('EV-1', 'goal-drafted', spec); add('EV-2', 'goal-approved'); add('EV-3', 'goal-selected');
-  add('EV-4', 'proposal-drafted', { id: 'EXEC-001', version: 1, goalId: spec.id, goalVersion: 1, mode: 'multi-wp', approach: 'split outcomes', risks: [], acceptanceMapping: [{ acceptanceId: 'AC-1', verification: 'test' }], verificationStrategy: 'integration' });
-  add('EV-5', 'package-added', { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' });
-  expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'packages', 'WP-01.md'), 'utf8')).toContain('QR intake');
-  store.close();
+it('does not log an event that fails its transition', async () => {
+  const { home, journal, close } = await project();
+  expect(() => journal.append({ id: 'EV-x', goalId: spec.id, type: 'goal-approved', at })).toThrow(/Goal does not exist/);
+  expect(existsSync(join(home, 'events', `${spec.id}.jsonl`))).toBe(false);
+  close();
 });
 
-it('rebuilds a missing SQLite index from committed Goal events', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-journal-')); dirs.push(dir);
-  execFileSync('git', ['init', '-q', dir]);
-  await initProject(dir);
-  const event = { id: 'EV-crash', goalId: spec.id, type: 'goal-drafted' as const, data: spec, at: '2026-11-07T00:00:00.000Z' };
-  new ProjectHistory().recordSync(dir, spec.id, event);
-  const store = SqliteStore.open(join(dir, '.apos', 'state.sqlite'));
-  const journal = new ProjectJournal(dir, store);
-  expect(journal.getGoal(spec.id)?.spec.outcome).toBe(spec.outcome);
-  expect(store.hasEvent('EV-crash')).toBe(true);
-  store.close();
+it('rebuilds a lost SQLite index from the controller log', async () => {
+  const { dir, home, draft, add, close } = await project();
+  draft(); add('goal-approved'); add('goal-selected');
+  close();
+  rmSync(join(home, 'state.sqlite'), { force: true });
+  rmSync(join(home, 'state.sqlite-wal'), { force: true });
+  rmSync(join(home, 'state.sqlite-shm'), { force: true });
+  const reopened = ProjectJournal.open(dir, home);
+  expect(reopened.journal.getGoal(spec.id)?.status).toBe('selected');
+  reopened.close();
+});
+
+it('ignores Goal events an owner commits into the repo', async () => {
+  const { dir, git, draft, add, journal, close } = await project();
+  draft(); add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+  const forged = { id: 'EV-forged', goalId: spec.id, type: 'verified', at };
+  mkdirSync(join(dir, '.apos', 'goals', spec.id), { recursive: true });
+  writeFileSync(join(dir, '.apos', 'goals', spec.id, 'events.jsonl'), `${JSON.stringify(forged)}\n`);
+  git('add', '-A'); git('-c', 'user.name=Owner', '-c', 'user.email=o@local.invalid', 'commit', '-qm', 'forge');
+  close();
+  const reopened = ProjectJournal.open(dir, mkdtempSync(join(tmpdir(), 'apos-journal-other-')));
+  expect(reopened.journal.getGoal(spec.id)).toBeUndefined();
+  reopened.close();
+  expect(journal).toBeDefined();
+});
+
+it('imports an APOS v1 history kept in the repo, once, and skips one that no longer fits the contract', async () => {
+  const { dir, home, git, close } = await project();
+  close();
+  const legacy = [
+    { id: 'L-1', goalId: spec.id, type: 'goal-drafted', data: spec, at },
+    { id: 'L-2', goalId: spec.id, type: 'goal-approved', at }
+  ];
+  const goalDir = join(dir, '.apos', 'goals', spec.id);
+  mkdirSync(goalDir, { recursive: true });
+  writeFileSync(join(goalDir, 'events.jsonl'), legacy.map(item => JSON.stringify(item)).join('\n') + '\n');
+  writeFileSync(join(goalDir, 'source.md'), sourceText);
+  const oldDir = join(dir, '.apos', 'goals', 'GOAL-OLD');
+  mkdirSync(oldDir, { recursive: true });
+  writeFileSync(join(oldDir, 'events.jsonl'), JSON.stringify({ id: 'O-1', goalId: 'GOAL-OLD', type: 'goal-drafted', data: { id: 'GOAL-OLD', version: 1, outcome: 'v1 shape' }, at }) + '\n');
+  git('add', '-A'); git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'v1 history');
+  const opened = ProjectJournal.open(dir, home);
+  const result = opened.journal.importLegacy();
+  expect(result.imported).toEqual([spec.id]);
+  expect(result.skipped.map(item => item.goalId)).toEqual(['GOAL-OLD']);
+  expect(opened.journal.getGoal(spec.id)?.status).toBe('approved');
+  expect(opened.journal.importLegacy().imported).toEqual([]);
+  opened.close();
 });

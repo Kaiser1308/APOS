@@ -222,7 +222,7 @@ export class SoloSupervisor {
     const until = new Date(this.now()).toISOString();
     const usage = path && started ? this.options.telemetry?.usage({ worktreePath: path, since: started.at, until }) : undefined;
     this.record(state.spec.id, 'telemetry-recorded', {
-      dispatchId: ref.dispatchId, role, requestedModel: ref.requested?.model, launchedModel: receipt?.model,
+      dispatchId: ref.dispatchId, role, requestedModel: ref.requested?.model, launchedModel: receipt?.model ?? usage?.model,
       usage: usage ?? 'unknown', ...(started ? { wallMs: this.now() - Date.parse(started.at) } : {})
     });
   }

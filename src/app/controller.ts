@@ -43,7 +43,18 @@ export class ControllerService {
       // The reviewer's worker_done: collectReview reads the review from its worktree.
       if (dispatchId && dispatchId === this.store.getGoal(goalId)?.reviewDispatch?.dispatchId) continue;
       const ref = refs.find(item => item.dispatchId === dispatchId);
-      if (!ref) { result.inboxPending.push(`unknown Dispatch:${message.id}`); continue; }
+      if (!ref) {
+        // Seen live: the worker_done of a reviewer whose start was lost sat in the inbox for an hour and
+        // kept the delivery from being acked. Settlement never depends on this message (the controller
+        // inspects each current dispatch itself), so a worker_done for any other dispatch on this Run is
+        // logged once and acked.
+        const note = `stale worker_done ${message.id} for dispatch ${String(dispatchId ?? 'unknown')}: not a current dispatch of this Goal; acked`;
+        if (!this.store.events(goalId).some(item => item.type === 'decision-logged' && (item.data as { note?: string }).note === note)) {
+          this.store.append({ id: randomUUID(), goalId, type: 'decision-logged', data: { note }, at: new Date().toISOString() });
+        }
+        result.settled.push(`stale ${message.id}`);
+        continue;
+      }
       const outcome = ref.owner === 'lead'
         ? (await this.runtime.inspect(ref)).outcome
         : await this.runtime.inspectPackage?.(ref);

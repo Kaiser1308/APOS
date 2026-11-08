@@ -87,6 +87,31 @@ it('processes a settled worker_done, retains its owner, then acknowledges the Or
   store.close();
 });
 
+it('acks a worker_done for a dispatch that is not current, so a lost reviewer cannot hold the inbox (seen live)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-controller-stale-')); dirs.push(dir);
+  const store = SqliteStore.open(join(dir, 'state.sqlite'));
+  let n = 0;
+  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `STALE-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+  add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+  const ref = { runId: 'run-1', taskId: 'task-1', dispatchId: 'ctx-1', owner: 'lead' as const, repoPath: dir };
+  add('dispatch-intended', 'key-1'); add('execution-started', ref);
+  const actions: string[] = [];
+  const runtime: RuntimeAdapter & PackageRuntime = {
+    async startSolo() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
+    async inspect() { return { state: 'live', ref }; },
+    async startPackage() { throw new Error('No package expected'); },
+    async checkRun() { actions.push('check'); return { deliveryId: 'delivery-1', messages: [{ id: 'msg-9', type: 'worker_done', payload: { dispatchId: 'ctx-lost-reviewer' } }] }; },
+    async retainWorker() { actions.push('retain'); },
+    async ackRun() { actions.push('ack'); }
+  };
+  await new ControllerService(store, runtime).tick(dir);
+  await new ControllerService(store, runtime).tick(dir);
+  expect(actions).toEqual(['check', 'ack', 'check', 'ack']);
+  expect(store.events(spec.id).filter(item => item.type === 'decision-logged' && String((item.data as { note?: string }).note).startsWith('stale worker_done msg-9'))).toHaveLength(1);
+  expect(store.getGoal(spec.id)?.settlements ?? {}).toEqual({});
+  store.close();
+});
+
 describe('idle watchdog (seen live: a Goal sat 26 min with no agent and no report)', () => {
   it('tells the Human once when the current dispatch settled and nothing has happened for 15 min', async () => {
     const { mkdtempSync: mk, rmSync: rm } = await import('node:fs');

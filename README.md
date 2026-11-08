@@ -147,7 +147,7 @@ The controller then:
 
 ## Validation
 
-- `npm test`: 150 tests, covering every safety case in `docs/fault-injection.md`; `npm run typecheck` and `npm run build` pass.
+- `npm test`: 171 tests, covering every safety case in `docs/fault-injection.md`; `npm run typecheck` and `npm run build` pass.
 - **Live smoke (2026-11-08).** Real Orca 1.4.240 and codex-cli 0.167.0 with `gpt-6.1-terra` on throwaway repos:
   - **`GOAL-SMOKE-V2`.** Gate A, gate B and `lead commit` ran. The owner worked in its own Orca worktree from the exact base commit, and the launch receipt showed codex/gpt-6.1-terra. Its report carried the activation line, a full self-review and independent checks. The gate went green on the owner's worktree head, and the Goal verified. `outcome close --merge-to` on a disposable branch gave a green post-merge gate, and the terminal was released.
   - **`GOAL-SMOKE-R`, the repair path.** A break was injected after the first delivery. The gate went red, and the controller recorded the finding and resumed the same Codex terminal. The owner fixed the break, the gate went green on the new head, and the Goal verified and merged. Per-dispatch tokens: attempt 1 used 307k input (298k cached) and 2.5k output; the repair used 270k input (263k cached) and 2.0k output.
@@ -161,7 +161,8 @@ The controller then:
 ## Open items
 
 - **Spend is not enforced.** `maxSpendUsd` and `overrunPolicy` are recorded, but there is no price table, and an overrun only notifies. The controller cannot stop a running owner; it only declines to resume it.
-- **Multi-WP has not run live.** It is covered by automated tests only, and the design orders it after Solo passes its trial.
-- **The quality pilot has not run.** FINAL-DESIGN step 6, a paired comparison against `pm-onlyone`, still needs to be done. A smoke run proves the plumbing, not quality.
+- **Multi-WP has run live only on a toy Goal.** A Lead (Codex luna in an Orca terminal) planned two packages; the controller gated each, dispatched the Goal reviewer, woke the Lead with the verdict, and the Goal verified and merged. That run found and fixed three faults (a Lead wake sent to the wrong worktree, a plan that declared risks and deadlocked its packages, and a Goal review nobody dispatched). It has not run on a Goal where the packages truly depend on each other or where the review asks for changes.
+- **The quality pilot did not beat the baseline.** On the SQLFMT task APOS (luna) ended with 28/32 target tests against the single-agent baseline's 32/32; the controller blocked the Goal rather than verify it. The current aim is a smooth controller, not accuracy, so this is recorded, not chased.
+- **Clean Solo run.** A medium Goal (CSV to Markdown table) went gate, independent review, repair, second review, verified, closed and merged under `controller watch` with no manual step.
 - **Solo loses the Lead's planning context.** The Solo owner is a fresh session dispatched after `lead commit`, not the session that wrote the plan.
 - **Trust boundary.** The controller home is tamper-evident, not a security boundary against a process that runs as the same OS user.

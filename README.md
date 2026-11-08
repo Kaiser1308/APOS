@@ -34,13 +34,17 @@ Requires Node.js 24+, Git, and the Orca CLI with Codex enabled (default runtime)
 
 In `~/.codex/config.toml`, set `check_for_update_on_startup = false` (an update prompt blocks Orca workers) and `multi_agent = false` under `[features]` (owners must not spawn sub-agents). The live smokes ran with both.
 
+The APOS skills are published with the other skills, not from this repo. A skills folder holds `apos-core/`, `apos-pm/`, `apos-lead/`, `apos-worker/` and `apos-reviewer/`, each with a `SKILL.md` that declares `apos-contract: 2`. Point `init` at it with `--skills <dir>` or `APOS_SKILLS`. `init` refuses a missing skill or one written for another contract version, so the code and the skills cannot drift apart silently.
+
 ```powershell
 npm ci
 npm run build
-node dist/cli.js --repo C:\path\to\project init
+node dist/cli.js --repo C:\path\to\project init --skills C:\path\to\skills
 ```
 
-`init` commits `.apos/project.yaml`, the APOS-owned skills under `.apos/skills/` (the core discipline `_core/execute.md` plus `pm`, `lead`, `worker` and `reviewer`), and entrypoint copies under `.claude/skills/`.
+`init` commits `.apos/project.yaml`, copies of those skills under `.apos/skills/` (`apos-core` as `_core/execute.md`, plus `pm`, `lead`, `worker` and `reviewer`), and entrypoint copies under `.claude/skills/`. Briefs pin the committed copies by sha256, so a later change to the published skills reaches a project only when `init` runs again.
+
+Tests use minimal fixture skills in `test-fixtures/skills/`.
 
 Controller state lives **outside the repo**, in `~/.apos/projects/<repo>-<hash>/` (override with `APOS_HOME`):
 

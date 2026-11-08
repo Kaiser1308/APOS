@@ -170,3 +170,11 @@ it('releases a terminal only after Orca reports a settled Dispatch', async () =>
   await runtime.releaseWorker('ctx_1');
   expect(calls.at(-1)).toEqual(['orchestration', 'worker-release', '--dispatch', 'ctx_1']);
 });
+
+it('treats a resume whose brief sits unsubmitted (pending, turn_start_unobserved, no heartbeat) as stalled input', async () => {
+  const shown = (status: string, stage: string, heartbeat?: string) => new OrcaRuntime(() => ({ dispatch: { status, lastHeartbeatAt: heartbeat ?? null }, worker: { stage } }));
+  expect(await shown('pending', 'turn_start_unobserved').inputStalled('ctx')).toBe(true);
+  expect(await shown('dispatched', 'input_accepted').inputStalled('ctx')).toBe(true);
+  expect(await shown('dispatched', 'turn_started', '2026-11-08T00:00:00Z').inputStalled('ctx')).toBe(false);
+  expect(await shown('completed', 'settled').inputStalled('ctx')).toBe(false);
+});

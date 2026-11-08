@@ -257,7 +257,8 @@ export class OrcaRuntime implements RuntimeAdapter {
     const shown = this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]);
     const dispatch = object(shown.dispatch);
     const worker = object(shown.worker);
-    return dispatch.status === 'dispatched' && !dispatch.lastHeartbeatAt && worker.stage === 'input_accepted';
+    // Seen live on a resume into a reused Codex terminal: status pending, stage turn_start_unobserved, brief still in the composer.
+    return ['dispatched', 'pending'].includes(String(dispatch.status)) && !dispatch.lastHeartbeatAt && ['input_accepted', 'turn_start_unobserved'].includes(String(worker.stage));
   }
 
   async nudge(terminal: string): Promise<void> {

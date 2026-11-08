@@ -44,6 +44,7 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | Owner escalates over Orca mid-attempt and waits (seen live: fixture vs approved criterion) | Human notified once, owner answered with the standing rule, delivery acked | `supervisor.test.ts` › notifies the Human of an owner escalation once |
 | Orca creates the reviewer but reports its start as outcome-unknown (seen live, SQLFMT run 2) | `review-intended` recorded first; reviewer recovered by dispatch key; new try after 3 min; needs-decision after 3 | `supervisor.test.ts` › recovers a reviewer Orca created |
 | Resume refused after a review asks for changes on a green gate (seen live, SQLFMT run 2: Goal sat 26 min) | the bounded retry runs before the green-gate early return | `supervisor.test.ts` › retries a refused resume after a review asks for changes |
+| Resume brief left unsubmitted in a reused Codex terminal, reported as pending / turn_start_unobserved (seen live, SQLFMT run 2) | counted as stalled input, so the one-Enter nudge applies | `orca.test.ts` › treats a resume whose brief sits unsubmitted |
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
 
 ## Not covered by automated tests

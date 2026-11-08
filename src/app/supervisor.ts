@@ -196,7 +196,8 @@ export class SoloSupervisor {
     const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId });
     const raw = head && show(repoPath, head, reviewResultPath(goalId, pending.key));
     let result: { result?: string; note?: string } | undefined;
-    try { result = raw ? JSON.parse(raw) : undefined; } catch { result = undefined; }
+    // PowerShell writes a UTF-8 BOM (seen live: a valid review was rejected).
+    try { result = raw ? JSON.parse(raw.replace(/^﻿/, '')) : undefined; } catch { result = undefined; }
     if (!result || !['pass', 'changes'].includes(result.result ?? '') || !result.note?.trim()) { this.decide(goalId, `reviewer ${pending.dispatchId} left no valid review at ${reviewResultPath(goalId, pending.key)}`, actions); return actions; }
     this.record(goalId, 'review-submitted', { subject: 'goal', reviewer: 'apos-reviewer', session: pending.dispatchId, result: result.result, commitRef: pending.commit, note: result.note });
     actions.push(`review ${result.result}`);

@@ -126,6 +126,21 @@ The controller then:
 
 ## Validation
 
-- `npm test`: 146 tests, covering every safety case in `docs/fault-injection.md`.
-- `npm run typecheck` and `npm run build`.
-- **The v2 path still needs a live smoke run with real Orca and Codex.** The v1 smokes ran Claude Code without a gate.
+- `npm test`: 148 tests, covering every safety case in `docs/fault-injection.md`; `npm run typecheck` and `npm run build` pass.
+- **Live smoke (2026-11-08).** Real Orca 1.4.240 and codex-cli 0.167.0 with `gpt-6.1-terra` on throwaway repos:
+  - **`GOAL-SMOKE-V2`.** Gate A, gate B and `lead commit` ran. The owner worked in its own Orca worktree from the exact base commit, and the launch receipt showed codex/gpt-6.1-terra. Its report carried the activation line, a full self-review and independent checks. The gate went green on the owner's worktree head, and the Goal verified. `outcome close --merge-to` on a disposable branch gave a green post-merge gate, and the terminal was released.
+  - **`GOAL-SMOKE-R`, the repair path.** A break was injected after the first delivery. The gate went red, and the controller recorded the finding and resumed the same Codex terminal. The owner fixed the break, the gate went green on the new head, and the Goal verified and merged. Per-dispatch tokens: attempt 1 used 307k input (298k cached) and 2.5k output; the repair used 270k input (263k cached) and 2.0k output.
+- **Problems the live runs found, all fixed and tested:**
+  - multi-line briefs stalled in the Codex composer, and were refused on terminal reuse;
+  - an owner committed into the managed checkout;
+  - Orca timed out on a dispatch that had started, and APOS recovered it by key;
+  - Orca refused a resume right after `worker_done` with `agent_unconfigured`;
+  - telemetry double counting, and Windows not updating mtime.
+
+## Open items
+
+- **Spend is not enforced.** `maxSpendUsd` and `overrunPolicy` are recorded, but there is no price table, and an overrun only notifies. The controller cannot stop a running owner; it only declines to resume it.
+- **Multi-WP has not run live.** It is covered by automated tests only, and the design orders it after Solo passes its trial.
+- **The quality pilot has not run.** FINAL-DESIGN step 6, a paired comparison against `pm-onlyone`, still needs to be done. A smoke run proves the plumbing, not quality.
+- **Solo loses the Lead's planning context.** The Solo owner is a fresh session dispatched after `lead commit`, not the session that wrote the plan.
+- **Trust boundary.** The controller home is tamper-evident, not a security boundary against a process that runs as the same OS user.

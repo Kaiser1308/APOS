@@ -23,3 +23,20 @@ it('initializes a managed Git project twice without losing the first state', asy
   expect(committed).toContain('.claude/skills/apos-worker/SKILL.md');
   expect(execFileSync('git', ['-C', dir, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('1');
 });
+
+it('refuses skills that are missing or written for another APOS contract', async () => {
+  const { mkdtempSync: mk, mkdirSync: md, writeFileSync: wf, cpSync, rmSync: rm } = await import('node:fs');
+  const { tmpdir: tmp } = await import('node:os');
+  const { join: j } = await import('node:path');
+  const { resolveSkills } = await import('./init-project.js');
+  expect(() => resolveSkills('')).toThrow(/--skills <dir> or set APOS_SKILLS/);
+  const root = mk(j(tmp(), 'apos-skills-'));
+  cpSync(process.env.APOS_SKILLS!, root, { recursive: true });
+  expect(resolveSkills(root).roles.lead).toMatch(/apos-lead/);
+  wf(j(root, 'apos-lead', 'SKILL.md'), ['---', 'name: apos-lead', 'apos-contract: 1', '---', 'old'].join('\n'));
+  expect(() => resolveSkills(root)).toThrow(/declares apos-contract 1; this APOS build needs 2/);
+  rm(j(root, 'apos-worker'), { recursive: true });
+  md(j(root, 'apos-lead'), { recursive: true });
+  expect(() => resolveSkills(root)).toThrow(/apos-contract 1|APOS skill missing/);
+  rm(root, { recursive: true, force: true });
+});

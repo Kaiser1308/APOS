@@ -91,7 +91,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     return { spec, text };
   };
 
-  program.command('init').description('initialize .apos in a Git project').action(async () => { await initProject(repo()); write(`Initialized ${repo()}`); });
+  program.command('init').description('initialize .apos in a Git project').option('--skills <dir>', 'folder with apos-core/ and apos-<role>/ skills (default: APOS_SKILLS)').action(async (flags: { skills?: string }) => { await initProject(repo(), flags.skills); write(`Initialized ${repo()}`); });
   program.command('migrate').description('import APOS v1 Goal histories from the repo into the controller log').action(() => withJournal(journal => {
     write(JSON.stringify(journal.importLegacy()));
   }));

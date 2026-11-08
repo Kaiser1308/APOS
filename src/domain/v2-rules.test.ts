@@ -49,6 +49,13 @@ describe('findings and review', () => {
     expect(reviewReasons(gated)).toEqual(['tests or oracles changed: src/checkin.test.ts']);
     expect(reviewReasons(applyEvent(state, event('gate-recorded', { ...gate, changedFiles: ['src/checkin.ts'] })))).toEqual([]);
   });
+  it('requires review when the diff changes a file a check runs, or a build manifest', () => {
+    const state = executing();
+    const gated = (files: string[]) => applyEvent(state, event('gate-recorded', { ...gateReport(DELIVERY), attemptKey: attemptKey(state), changedFiles: files }));
+    const npmTest = { ...state, spec: { ...state.spec, checks: [{ ...state.spec.checks[0], command: 'node ./harness.js' }] } };
+    expect(reviewReasons({ ...gated(['harness.js']), spec: npmTest.spec })[0]).toMatch(/files the checks run .*harness.js/);
+    expect(reviewReasons(gated(['package.json']))[0]).toMatch(/package.json/);
+  });
   it('rejects a reviewer reusing the owner session', () => {
     const state = executing();
     const gated = applyEvent(state, event('gate-recorded', { ...gateReport(DELIVERY), attemptKey: attemptKey(state) }));

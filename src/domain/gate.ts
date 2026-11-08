@@ -91,6 +91,20 @@ export function evaluateManualCheck(check: Extract<GoalCheck, { kind: 'manual' }
   return { checkId: check.id, status: confirmed ? 'pass' : 'manual-pending', reason: confirmed ? `confirmed by ${confirmed.by}: ${confirmed.note}` : 'awaiting manual confirmation on this commit', base: [], delivery: [], newFailures: [] };
 }
 
+/**
+ * Files under `.apos/` are the controller's contract and skills; a delivery may add only its own
+ * evidence and review files. Anything else in the diff fails the gate, so an owner cannot rewrite the
+ * skills, Goal documents or sources that briefs, reviewers and future dispatches trust.
+ */
+export function protectedChanges(goalId: string, changedFiles: string[]): string[] {
+  return changedFiles.filter(file => file.startsWith('.apos/') && !file.startsWith(`.apos/goals/${goalId}/evidence/`) && !file.startsWith(`.apos/goals/${goalId}/reviews/`));
+}
+export const PROTECTED_CHECK = 'APOS-PROTECTED';
+export function protectedCheck(goalId: string, changedFiles: string[]): CheckResult | undefined {
+  const touched = protectedChanges(goalId, changedFiles);
+  return touched.length ? { checkId: PROTECTED_CHECK, status: 'fail', reason: `delivery modifies APOS-managed files: ${touched.join(', ')}`, base: [], delivery: [], newFailures: [] } : undefined;
+}
+
 export function summarizeGate(checks: CheckResult[]): GateResult {
   if (checks.some(item => item.status === 'fail')) return 'red';
   if (checks.some(item => item.status === 'unverifiable')) return 'unverifiable';

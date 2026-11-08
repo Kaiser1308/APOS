@@ -20,6 +20,8 @@ const schema = z.object({
 export type ReviewRecord = z.infer<typeof schema>;
 export function parseReview(value: unknown): ReviewRecord { return schema.parse(value); }
 
+/** Manifests and build config: they decide what a check actually runs. */
+const MANIFEST = /(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|setup\.(cfg|py)|requirements[^/]*\.txt|Makefile|go\.(mod|sum)|Cargo\.(toml|lock)|tox\.ini|pytest\.ini|(vitest|jest|vite)\.config\.[cm]?[jt]s|tsconfig[^/]*\.json)$/i;
 /** Test, spec and fixture files: changing them can make a gate green without fixing behaviour. */
 const ORACLE = /(^|\/)(tests?|__tests__|spec|specs|fixtures?|testdata)\/|\.(test|spec)\.[A-Za-z0-9]+$|(^|\/)test_[^/]+\.py$|_test\.(go|py)$/i;
 
@@ -36,6 +38,10 @@ export function reviewReasons(state: GoalState): string[] {
   if (oracle.length) reasons.push(`tests or oracles changed: ${oracle.join(', ')}`);
   const shared = changed.filter(file => (state.proposal?.sharedPaths ?? []).some(prefix => file === prefix || file.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`)));
   if (shared.length) reasons.push(`shared interface paths changed: ${shared.join(', ')}`);
+  // A check is only as honest as the files it runs and the build that wires them.
+  const commands = state.spec.checks.flatMap(check => check.kind === 'command' ? [check.command] : []).join(' ');
+  const wired = changed.filter(file => !oracle.includes(file) && (MANIFEST.test(file) || commands.split(/[\s"'=]+/).some(token => token && (token === file || token.replace(/^\.\//, '') === file))));
+  if (wired.length) reasons.push(`files the checks run or are built from changed: ${wired.join(', ')}`);
   return reasons;
 }
 export function requiresIndependentReview(state: GoalState): boolean { return reviewReasons(state).length > 0; }

@@ -12,7 +12,7 @@ import { ProjectJournal } from '../store/journal.js';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
-const spec: GoalSpec = { ...baseSpec, checks: [{ id: 'CHK-1', kind: 'command', command: 'node check.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} }] };
+const spec: GoalSpec = { ...baseSpec, checks: [{ id: 'CHK-1', kind: 'command', command: 'node harness.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} }] };
 const APPETITE = ['--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3'];
 
 /**
@@ -25,6 +25,8 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
   const artifacts = mkdtempSync(join(tmpdir(), 'apos-auto-art-')); dirs.push(artifacts);
   execFileSync('git', ['init', '-q', dir]);
   const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  writeFileSync(join(dir, 'harness.js'), "require('./feature.js');");
+  git('add', 'harness.js'); git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'harness');
   const commit = (files: Record<string, string>, message: string) => {
     for (const [name, content] of Object.entries(files)) { mkdirSync(join(dir, name, '..'), { recursive: true }); writeFileSync(join(dir, name), content); }
     git('add', '--', ...Object.keys(files)); git('-c', 'user.name=Owner', '-c', 'user.email=o@local.invalid', 'commit', '-qm', message);
@@ -77,7 +79,7 @@ const report = (attempt: number, line: string) => ({ [soloReportPath(spec.id, at
 describe('Solo autopilot', () => {
   it('turns a red gate into a machine finding, resumes the same owner, then verifies the fix', async () => {
     const { tick, state, dispatches, invoke, git, released } = await setup((attempt, commit, line) => {
-      commit({ 'check.js': attempt === 1 ? 'process.exit(1);' : 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`);
+      commit({ 'feature.js': attempt === 1 ? 'process.exit(1);' : 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`);
     });
     await tick();
     await tick();
@@ -95,14 +97,14 @@ describe('Solo autopilot', () => {
   }, 90_000);
 
   it('sends the Goal to a Human decision when the same failure survives two repairs', async () => {
-    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'check.js': 'process.exit(1);', ...report(attempt, line) }, `attempt ${attempt}`));
+    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(1);', ...report(attempt, line) }, `attempt ${attempt}`));
     for (let i = 0; i < 4; i++) await tick();
     expect(dispatches).toEqual(['start', 'resume', 'resume']);
     expect(state()).toMatchObject({ status: 'blocked', blocker: { note: expect.stringMatching(/needs-decision: same failure after two repairs/) } });
   }, 90_000);
 
   it('does not accept a delivery whose report lacks the core activation line', async () => {
-    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'check.js': 'process.exit(0);', ...report(attempt, attempt === 1 ? 'no activation' : line) }, `attempt ${attempt}`));
+    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, attempt === 1 ? 'no activation' : line) }, `attempt ${attempt}`));
     await tick(); await tick(); await tick();
     expect(dispatches).toEqual(['start', 'resume']);
     expect(state().findings![0].note).toMatch(/activation line/);
@@ -110,13 +112,13 @@ describe('Solo autopilot', () => {
   }, 90_000);
 
   it('stops for a decision when the runtime launched a different model than planned', async () => {
-    const { tick, state } = await setup((attempt, commit, line) => commit({ 'check.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), { launched: 'gpt-6-luna' });
+    const { tick, state } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), { launched: 'gpt-6-luna' });
     await tick(); await tick();
     expect(state().blocker).toMatchObject({ note: expect.stringMatching(/launched codex\/gpt-6-luna, plan requires codex\/gpt-6.1-terra/) });
   }, 90_000);
 
   it('sends a risky green delivery to a separate reviewer session and verifies only on its pass', async () => {
-    const { tick, state } = await setup((attempt, commit, line) => commit({ 'check.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), {
+    const { tick, state } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), {
       risks: ['auth regression'],
       reviewer: (commit, key) => commit({ [reviewResultPath(spec.id, key)]: JSON.stringify({ result: 'pass', note: 'Checked auth paths and boundaries' }) })
     });
@@ -130,7 +132,7 @@ describe('Solo autopilot', () => {
 
   it('turns a reviewer request for changes into a finding for the same owner', async () => {
     let reviews = 0;
-    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'check.js': 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`), {
+    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`), {
       risks: ['auth regression'],
       reviewer: (commit, key) => { reviews += 1; commit({ [reviewResultPath(spec.id, key)]: JSON.stringify(reviews === 1 ? { result: 'changes', note: 'src/auth.ts: expired token still accepted' } : { result: 'pass', note: 'Fixed' }) }); }
     });

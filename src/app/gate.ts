@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CommandCheck } from '../domain/contracts.js';
-import { attemptKey, evaluateCommandCheck, extractFailures, evaluateManualCheck, requiredChecks, sourceDigest, summarizeGate, type CheckResult, type CheckRun, type GateEnvironment, type GateReport } from '../domain/gate.js';
+import { attemptKey, evaluateCommandCheck, extractFailures, protectedCheck, evaluateManualCheck, requiredChecks, sourceDigest, summarizeGate, type CheckResult, type CheckRun, type GateEnvironment, type GateReport } from '../domain/gate.js';
 import type { GoalRepository } from '../store/journal.js';
 import { assertGitRoot } from '../store/project-history.js';
 import { GitCommitInspector, type CommitInspector } from './integration.js';
@@ -127,10 +127,13 @@ export class GateService {
       const baseRuns = check.expect === 'no-new-failures' ? this.runMany(check, repoPath, base, 'base', artifacts) : [];
       return evaluateCommandCheck(check, baseRuns, this.runMany(check, repoPath, head, 'delivery', artifacts));
     });
+    const changedFiles = this.inspector.files(repoPath, head, base);
+    const guard = protectedCheck(goalId, changedFiles);
+    if (guard) checks.push(guard);
     const report: GateReport = {
       gateId: `GATE-${randomUUID()}`, goalId, goalVersion: state.spec.version, sourceSha256: state.spec.source.sha256,
       baseCommit: base, deliveryCommit: head, attemptKey: `${item.spec.id}@${item.spec.version}:${item.attempts}`, phase: 'delivery',
-      changedFiles: this.inspector.files(repoPath, head, base),
+      changedFiles,
       environment: { platform: process.platform, shell: this.executor.shell, node: process.version }, checks, result: summarizeGate(checks), at: this.now()
     };
     writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
@@ -167,11 +170,14 @@ export class GateService {
       return evaluateCommandCheck(check, base, this.runMany(check, repoPath, input.deliveryCommit, 'delivery', artifacts));
     });
     const environment: GateEnvironment = { platform: process.platform, shell: this.executor.shell, node: process.version };
+    const changedFiles = this.inspector.files(repoPath, input.deliveryCommit, baseCommit);
+    // After a merge the target legitimately carries APOS milestone commits; the guard applies to deliveries.
+    const guard = phase === 'delivery' ? protectedCheck(goalId, changedFiles) : undefined;
+    if (guard) checks.push(guard);
     const report: GateReport = {
       gateId, goalId, goalVersion: state.spec.version, sourceSha256: state.spec.source.sha256,
       baseCommit, deliveryCommit: input.deliveryCommit, attemptKey: attempt, phase,
-      changedFiles: this.inspector.files(repoPath, input.deliveryCommit, baseCommit),
-      environment, checks, result: summarizeGate(checks), at: this.now()
+      changedFiles, environment, checks, result: summarizeGate(checks), at: this.now()
     };
     writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
     this.store.append({ id: randomUUID(), goalId, type: 'gate-recorded', data: report, at: this.now() });

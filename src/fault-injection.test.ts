@@ -41,13 +41,15 @@ describe('target branch head moved after verification', () => {
     const artifacts = mkdtempSync(join(tmpdir(), 'apos-fault-art-')); dirs.push(artifacts);
     execFileSync('git', ['init', '-q', dir]);
     const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
-    const spec: GoalSpec = { ...baseSpec, checks: [{ id: 'CHK-1', kind: 'command', command: 'node check.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} }] };
+    const spec: GoalSpec = { ...baseSpec, checks: [{ id: 'CHK-1', kind: 'command', command: 'node harness.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} }] };
     const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir };
-    const runtime: RuntimeAdapter = { async startSolo() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'settled', outcome: 'completed', ref }; } };
+    const runtime: RuntimeAdapter = { async startSolo() { ref.baseCommit = git('rev-parse', 'HEAD'); return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'settled', outcome: 'completed', ref }; } };
     const output: string[] = [];
     const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, gate: { artifactRoot: artifacts }, write: line => output.push(line) });
     writeFileSync(join(dir, '.git', 'info', 'exclude'), '*.json\nbrief.md\n');
     writeFileSync(join(dir, 'goal.json'), JSON.stringify(spec)); writeFileSync(join(dir, 'brief.md'), sourceText); writeFileSync(join(dir, 'plan.json'), JSON.stringify(proposal));
+    writeFileSync(join(dir, 'harness.js'), "require('./feature.js'); process.exit(require('fs').existsSync('legacy.flag') ? 1 : 0);");
+    git('add', 'harness.js'); git('-c', 'user.name=T', '-c', 'user.email=t@x.invalid', 'commit', '-qm', 'harness');
     await invoke('init');
     const target = git('branch', '--show-current');
     await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
@@ -56,8 +58,8 @@ describe('target branch head moved after verification', () => {
     await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
     await invoke('lead', 'commit', spec.id);
     git('switch', '-q', '-c', 'owner');
-    writeFileSync(join(dir, 'check.js'), "process.exit(require('fs').existsSync('legacy.flag') ? 1 : 0);");
-    git('add', 'check.js'); git('-c', 'user.name=O', '-c', 'user.email=o@x.invalid', 'commit', '-qm', 'owner work');
+    writeFileSync(join(dir, 'feature.js'), 'module.exports = 1;');
+    git('add', 'feature.js'); git('-c', 'user.name=O', '-c', 'user.email=o@x.invalid', 'commit', '-qm', 'owner work');
     const delivery = git('rev-parse', 'HEAD');
     await invoke('gate', 'run', spec.id, '--commit', delivery);
     await invoke('execution', 'verify', spec.id, '--commit', delivery);

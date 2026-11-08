@@ -12,7 +12,7 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | Uncommitted files in the owner tree | not counted | `gate.test.ts` › runs in a clean checkout |
 | Delivery not descended from base | refused | `gate.test.ts` › refuses a delivery commit that does not descend from the base |
 | Review by the wrong party | refused: the owner's name, the owner's session, or a review without a session | `review.test.ts`; `v2-rules.test.ts` › rejects a reviewer reusing the owner session; `packages.test.ts` › requires a different reviewer |
-| Tests or oracles changed without review | review required | `v2-rules.test.ts` › requires review when the gated diff changes tests |
+| Tests, oracles, check-run files or build manifests changed | review required | `v2-rules.test.ts` › requires review when the gated diff changes tests |
 | New failing test | red, names the test | `gate.test.ts` › goes red and names the test the delivery newly broke |
 | Base red, or baseline cannot run | `unverifiable`, never green; Solo goes to needs-decision | `gate.test.ts` › is unverifiable when the baseline suite cannot run; `gate.test.ts` (domain) › is unverifiable … |
 | Flaky or hung check | `unverifiable`; process tree killed and workspace removed | `domain/gate.test.ts` › repeated runs disagree or a run times out; `gate.test.ts` › kills a hung check at its timeout |
@@ -27,6 +27,7 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | Target branch moved after verification | gated commit merged, gate rerun on the merge; red keeps the Goal open | `fault-injection.test.ts` › target branch head moved after verification |
 | Event log edited or forged | reported, not trusted; a torn tail from a crash is dropped | `project-history.test.ts` › reports an edited or forged event; › drops a torn final line |
 | Goal events committed into the repo by an owner | ignored | `journal.test.ts` › ignores Goal events an owner commits into the repo |
+| Delivery rewrites an APOS skill, Goal document or source in the repo | gate red (`APOS-PROTECTED`); the reviewer skill is pinned at the base commit | `gate.test.ts` › fails the gate when the delivery rewrites an APOS-managed file |
 | Lost SQLite index | rebuilt from the controller log | `journal.test.ts` › rebuilds a lost SQLite index |
 | Core skill not loaded (no activation line) | finding; same owner resumed | `supervisor.test.ts` › does not accept a delivery whose report lacks the core activation line |
 | Runtime launched another model | needs-decision | `supervisor.test.ts` › stops for a decision when the runtime launched a different model |

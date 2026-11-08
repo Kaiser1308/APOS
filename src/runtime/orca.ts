@@ -22,7 +22,7 @@ export interface RuntimeAdapter {
   retainWorker?(dispatchId: string): Promise<void>;
   releaseWorker?(dispatchId: string): Promise<void>;
   /** Head commit of the owner's worktree: the delivery the controller gates. */
-  deliveryHead?(ref: { worktreeId?: string }): Promise<string | undefined>;
+  deliveryHead?(ref: { worktreeId?: string; dispatchId?: string }): Promise<string | undefined>;
   launchReceipt?(dispatchId: string): Promise<LaunchReceipt | undefined>;
   startReviewer?(input: { repoPath: string; goalId: string; baseCommit: string; commit: string; reasons: string[]; idempotencyKey: string; runId: string }): Promise<ReviewerRef>;
   wakeLead?(input: { repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string }): Promise<{ dispatchId: string }>;
@@ -224,8 +224,10 @@ export class OrcaRuntime implements RuntimeAdapter {
     this.execute(['orchestration', 'worker-release', '--dispatch', dispatchId]);
   }
 
-  async deliveryHead(ref: { worktreeId?: string }): Promise<string | undefined> {
-    const path = worktreePath(ref.worktreeId);
+  async deliveryHead(ref: { worktreeId?: string; dispatchId?: string }): Promise<string | undefined> {
+    // The start receipt may omit the worktree effect; Orca's worker record is authoritative.
+    const worktreeId = ref.worktreeId ?? (ref.dispatchId ? object(this.execute(['orchestration', 'worker-show', '--dispatch', ref.dispatchId]).worker).worktreeId as string | undefined : undefined);
+    const path = worktreePath(worktreeId);
     if (!path) return undefined;
     try { return this.gitHead(path); } catch { return undefined; }
   }
@@ -239,7 +241,8 @@ export class OrcaRuntime implements RuntimeAdapter {
   /** A reviewer gets its own worktree at the gated commit and its own session; it never shares the owner's. */
   async startReviewer(input: { repoPath: string; goalId: string; baseCommit: string; commit: string; reasons: string[]; idempotencyKey: string; runId: string }): Promise<ReviewerRef> {
     this.execute(['orchestration', 'run-use', '--id', input.runId]);
-    const spec = reviewBrief({ repoPath: input.repoPath, goalId: input.goalId, baseCommit: input.baseCommit, idempotencyKey: input.idempotencyKey, commit: input.commit, reasons: input.reasons, digest: path => this.fileDigest(input.repoPath, input.commit, path) });
+    // Pin the reviewer skill at the base commit: the delivery under review must not choose its reviewer's rules.
+    const spec = reviewBrief({ repoPath: input.repoPath, goalId: input.goalId, baseCommit: input.baseCommit, idempotencyKey: input.idempotencyKey, commit: input.commit, reasons: input.reasons, digest: path => this.fileDigest(input.repoPath, input.baseCommit, path) });
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', input.commit, '--name', `apos-review-${input.goalId.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, ...launchArgs(this.profile('reviewer')), '--run', input.runId]);
     const ref = extractStartedRef(started, input.repoPath);
     return { ...ref, owner: 'reviewer', key: input.idempotencyKey, commit: input.commit };

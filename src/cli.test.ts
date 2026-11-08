@@ -9,7 +9,7 @@ import { spec as baseSpec, proposal, sourceText, approval } from './domain/fixtu
 import type { GoalSpec } from './domain/contracts.js';
 
 // The gate really runs this in a fresh worktree at the commit under test.
-const spec: GoalSpec = { ...baseSpec, checks: [{ id: 'CHK-1', kind: 'command', command: 'node check.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} }] };
+const spec: GoalSpec = { ...baseSpec, checks: [{ id: 'CHK-1', kind: 'command', command: 'node harness.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} }] };
 const commitAll = (git: (args: string[]) => string, message: string) => { git(['add', '-A', '--', '.', ':!*.json', ':!brief.md']); git(['-c', 'user.name=Owner', '-c', 'user.email=owner@local.invalid', 'commit', '-qm', message]); return git(['rev-parse', 'HEAD']); };
 import type { RuntimeAdapter, RuntimeRef } from './runtime/orca.js';
 import type { WorkPackageSpec } from './domain/packages.js';
@@ -29,12 +29,14 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
   writeFileSync(goalFile, JSON.stringify(spec));
   writeFileSync(sourceFile, sourceText);
   writeFileSync(proposalFile, JSON.stringify(proposal));
+  writeFileSync(join(dir, 'harness.js'), "require('./feature.js');");
+  git(['add', 'harness.js']); git(['-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'harness']);
   let starts = 0;
   let soloDone = false;
   const released: string[] = [];
   const ref: RuntimeRef = { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir };
   const runtime: RuntimeAdapter = {
-    async startSolo() { starts++; return ref; },
+    async startSolo() { starts++; ref.baseCommit = git(['rev-parse', 'HEAD']); return ref; },
     async resumeSolo() { return ref; },
     async inspect() { return soloDone ? { state: 'settled', outcome: 'completed', ref } : { state: 'live', ref }; },
     async releaseWorker(dispatchId) { released.push(dispatchId); }
@@ -64,12 +66,12 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
   await invoke('evidence', 'add', spec.id, '--file', evidenceFile);
   soloDone = true;
   // The owner claims pass but has not delivered the code: the controller's own run is red.
-  writeFileSync(join(dir, 'check.js'), 'process.exit(1);');
+  writeFileSync(join(dir, 'feature.js'), 'process.exit(1);');
   const broken = commitAll(git, 'owner: broken');
   await invoke('gate', 'run', spec.id, '--commit', broken);
   expect(JSON.parse(output.at(-1)!)).toMatchObject({ result: 'red' });
   await expect(invoke('execution', 'verify', spec.id)).rejects.toThrow(/gate is red/);
-  writeFileSync(join(dir, 'check.js'), 'process.exit(0);');
+  writeFileSync(join(dir, 'feature.js'), 'process.exit(0);');
   const fixed = commitAll(git, 'owner: fixed');
   await invoke('gate', 'run', spec.id, '--commit', fixed);
   expect(JSON.parse(output.at(-1)!)).toMatchObject({ result: 'green', deliveryCommit: fixed });
@@ -95,12 +97,14 @@ it('runs an approved two-package Goal through dependency release, integration an
     async resumeSolo() { throw new Error('Solo must not resume'); },
     async inspect(ref) { return { state: 'settled', ref }; },
     async inspectPackage() { return 'completed'; },
-    async startPackage({ package: item, repoPath }) { starts.push(item.id); return { runId: 'run_1', taskId: item.id, dispatchId: item.id, owner: 'worker', repoPath }; }
+    async startPackage({ package: item, repoPath }) { starts.push(item.id); return { runId: 'run_1', taskId: item.id, dispatchId: item.id, owner: 'worker', repoPath, baseCommit: git(['rev-parse', 'HEAD']) }; }
   };
   const output: string[] = [];
   const artifacts = mkdtempSync(join(tmpdir(), 'apos-cli-art-')); dirs.push(artifacts);
   const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, gate: { artifactRoot: artifacts }, write: line => output.push(line) });
   writeFileSync(join(dir, 'brief.md'), sourceText);
+  writeFileSync(join(dir, 'harness.js'), "require('./feature.js');");
+  git(['add', 'harness.js']); git(['-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'harness']);
   await invoke('init');
   await invoke('goal', 'create', '--file', input('goal.json', spec), '--source', join(dir, 'brief.md'));
   await invoke('goal', 'approve', spec.id, '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3'); await invoke('goal', 'select', spec.id);
@@ -119,7 +123,7 @@ it('runs an approved two-package Goal through dependency release, integration an
   await invoke('package', 'ready', spec.id);
   expect(output.at(-1)).toBe('[]');
   expect(starts).toEqual(['WP-01', 'WP-02']);
-  writeFileSync(join(dir, 'history.ts'), 'export const history = true;'); writeFileSync(join(dir, 'check.js'), 'process.exit(0);'); git(['add', 'history.ts', 'check.js']);
+  writeFileSync(join(dir, 'history.ts'), 'export const history = true;'); writeFileSync(join(dir, 'feature.js'), 'process.exit(0);'); git(['add', 'history.ts', 'feature.js']);
   git(['-c', 'user.name=APOS', '-c', 'user.email=apos@local.invalid', 'commit', '-qm', 'history']);
   const commitB = git(['rev-parse', 'HEAD']);
   await invoke('package', 'evidence', spec.id, '--file', input('evidence-b.json', { packageId: b.id, packageVersion: 1, owner: b.owner, acceptanceId: 'WP-AC-2', result: 'pass', command: 'npm test', artifactRef: 'log:b', commitRef: commitB }));

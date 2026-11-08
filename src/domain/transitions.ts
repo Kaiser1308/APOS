@@ -7,7 +7,7 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken' | 'package-gate-recorded' | 'intent-abandoned'
+  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-intended' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken' | 'package-gate-recorded' | 'intent-abandoned'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -44,6 +44,8 @@ export type GoalState = {
   findings?: Finding[];
   /** Reviewer session the controller started for the current gated commit. */
   reviewDispatch?: { dispatchId: string; runId: string; key: string; commit: string; worktreeId?: string; terminal?: string };
+  /** A reviewer start whose Orca outcome is not yet known; recovered by its dispatch key. */
+  reviewIntent?: { key: string; commit: string; at: string };
   telemetry?: Telemetry[];
   /** Lead terminal for Multi-WP wake-ups, and events already delivered to it. */
   leadTerminal?: { terminal: string; worktree: string; runId?: string };
@@ -243,7 +245,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'runtime-resumed':
       requireThat(state.status === 'executing' && state.runtimeRef && state.resumeIntent && event.data, 'Existing resume intent required');
       requireThat((state.soloAttempts ?? 1) < attemptLimit(state), 'Solo retry budget exhausted');
-      return { ...state, runtimeRef: event.data, resumeIntent: undefined, evidence: [], reviews: [], gate: undefined, reviewDispatch: undefined, soloAttempts: (state.soloAttempts ?? 1) + 1 };
+      return { ...state, runtimeRef: event.data, resumeIntent: undefined, evidence: [], reviews: [], gate: undefined, reviewDispatch: undefined, reviewIntent: undefined, soloAttempts: (state.soloAttempts ?? 1) + 1 };
     case 'resume-intended':
       requireThat(state.status === 'executing' && state.runtimeRef && state.checkpoint && !state.resumeIntent && state.proposal?.mode.startsWith('solo'), 'Solo checkpoint and prior owner required');
       requireThat(typeof event.data === 'string' && event.data.length > 0, 'Resume key required');
@@ -346,11 +348,17 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       if (data.kind === 'intent_gap' && state.status === 'executing') return { ...state, findings, status: 'blocked', blocker: { kind: 'product', note: data.note } };
       return { ...state, findings };
     }
+    case 'review-intended': {
+      const data = event.data as GoalState['reviewIntent'];
+      requireThat(state.status === 'executing' && state.gate?.result === 'green' && !state.reviewDispatch, 'Green gate without a pending reviewer required');
+      requireThat(data?.key && data.commit?.toLowerCase() === state.gate.deliveryCommit.toLowerCase(), 'Review intent must name the gated commit');
+      return { ...state, reviewIntent: { ...data, at: event.at } };
+    }
     case 'review-dispatched': {
       const data = event.data as GoalState['reviewDispatch'];
       requireThat(state.status === 'executing' && state.gate?.result === 'green' && !state.reviewDispatch, 'Green gate without a pending reviewer required');
       requireThat(data?.dispatchId && data.key && data.commit?.toLowerCase() === state.gate.deliveryCommit.toLowerCase(), 'Reviewer must be dispatched on the gated commit');
-      return { ...state, reviewDispatch: data };
+      return { ...state, reviewDispatch: data, reviewIntent: undefined };
     }
     case 'telemetry-recorded': {
       const data = event.data as Telemetry;

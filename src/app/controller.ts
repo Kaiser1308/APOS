@@ -39,6 +39,8 @@ export class ControllerService {
       }
       const body = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
       const dispatchId = message.dispatchId ?? message.dispatch_id ?? body.dispatchId ?? body.dispatch_id;
+      // The reviewer's worker_done: collectReview reads the review from its worktree.
+      if (dispatchId && dispatchId === this.store.getGoal(goalId)?.reviewDispatch?.dispatchId) continue;
       const ref = refs.find(item => item.dispatchId === dispatchId);
       if (!ref) { result.inboxPending.push(`unknown Dispatch:${message.id}`); continue; }
       const outcome = ref.owner === 'lead'

@@ -64,7 +64,6 @@ export class SoloSupervisor {
       return actions;
     }
     if (state.reviewDispatch) return this.collectReview(state, repoPath, actions);
-    if (state.gate?.attemptKey && state.gate.result === 'green') return actions;
     const attempt = state.soloAttempts ?? 1;
     if ((state.findings ?? []).some(item => item.attempt === attempt && item.by === 'controller')) {
       // A repair the controller already decided on but Orca refused to start: retry, bounded.
@@ -74,6 +73,12 @@ export class SoloSupervisor {
         try { actions.push(`resumed owner: ${(await new SoloService(this.store, this.runtime).resume(goalId)).dispatchId}`); }
         catch (error) { actions.push(`resume refused, will retry: ${error instanceof Error ? error.message : String(error)}`); }
       }
+      return actions;
+    }
+
+    // After the repair check: a review that asks for changes leaves a green gate behind (seen live).
+    if (state.gate?.attemptKey && state.gate.result === 'green') {
+      if (state.reviewIntent && state.status === 'executing') return this.recoverReview(state, ref, repoPath, actions);
       return actions;
     }
 
@@ -111,13 +116,7 @@ export class SoloSupervisor {
     actions.push(`gate ${gate.result} on ${head}`);
     if (gate.result === 'green') {
       const reasons = reviewReasons(this.store.getGoal(goalId)!);
-      if (reasons.length && this.runtime.startReviewer) {
-        const key = randomUUID();
-        const reviewer = await this.runtime.startReviewer({ repoPath, goalId, baseCommit: ref.baseCommit, commit: head, reasons, idempotencyKey: key, runId: ref.runId });
-        this.record(goalId, 'review-dispatched', { dispatchId: reviewer.dispatchId, runId: reviewer.runId, key, commit: head, worktreeId: reviewer.worktreeId, terminal: reviewer.terminal });
-        actions.push(`reviewer ${reviewer.dispatchId}: ${reasons.join('; ')}`);
-        return actions;
-      }
+      if (reasons.length && this.runtime.startReviewer) return this.startReview(goalId, ref, head, repoPath, reasons, actions);
       if (reasons.length) { this.decide(goalId, `review required (${reasons.join('; ')}) but no reviewer runtime`, actions); return actions; }
       new VerificationService(this.store).verify(goalId, head);
       this.record(goalId, 'human-notified', { kind: 'awaiting-outcome', goalId, deliveryCommit: head });
@@ -157,6 +156,35 @@ export class SoloSupervisor {
       return [`stalled ${ref.dispatchId}; Human notified`];
     }
     return [];
+  }
+
+  /** The intent is recorded first: seen live, Orca created the reviewer but reported its start as outcome-unknown. */
+  private async startReview(goalId: string, ref: RuntimeRef, head: string, repoPath: string, reasons: string[], actions: string[]): Promise<string[]> {
+    const key = randomUUID();
+    this.record(goalId, 'review-intended', { key, commit: head });
+    try {
+      const reviewer = await this.runtime.startReviewer!({ repoPath, goalId, baseCommit: ref.baseCommit!, commit: head, reasons, idempotencyKey: key, runId: ref.runId });
+      this.record(goalId, 'review-dispatched', { dispatchId: reviewer.dispatchId, runId: reviewer.runId, key, commit: head, worktreeId: reviewer.worktreeId, terminal: reviewer.terminal });
+      actions.push(`reviewer ${reviewer.dispatchId}: ${reasons.join('; ')}`);
+    } catch (error) {
+      actions.push(`reviewer start outcome unknown, will recover by key: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return actions;
+  }
+
+  private async recoverReview(state: GoalState, ref: RuntimeRef, repoPath: string, actions: string[]): Promise<string[]> {
+    const goalId = state.spec.id;
+    const intent = state.reviewIntent!;
+    const found = await this.runtime.recover?.(intent.key, ref.runId);
+    if (found) {
+      this.record(goalId, 'review-dispatched', { dispatchId: found.dispatchId, runId: found.runId, key: intent.key, commit: intent.commit, worktreeId: found.worktreeId, terminal: found.terminal });
+      actions.push(`recovered reviewer ${found.dispatchId}`);
+      return actions;
+    }
+    if (this.now() - Date.parse(intent.at) < 3 * 60_000) return actions;
+    const tries = this.store.events(goalId).filter(item => item.type === 'review-intended').length;
+    if (tries >= 3 || !this.runtime.startReviewer || !ref.baseCommit) { this.decide(goalId, `reviewer for ${intent.commit} could not be started or found after ${tries} tries`, actions); return actions; }
+    return this.startReview(goalId, ref, intent.commit, repoPath, reviewReasons(state), actions);
   }
 
   /** Records a machine finding and resumes the same owner, unless a stop condition sends it to the Human. */

@@ -28,7 +28,7 @@ const APPETITE = ['--size', 'M', '--max-spend', '20', '--max-minutes', '240', '-
  * scripted work for that attempt, then settles. Everything else - gate, findings, resume, review,
  * verification, merge - is the real controller on real Git.
  */
-async function setup(work: (attempt: number, commit: (files: Record<string, string>, message: string) => void, line: string) => void, options: { risks?: string[]; reviewer?: (commit: (files: Record<string, string>) => void, key: string) => void; launched?: string; intrude?: boolean; failed?: (attempt: number) => boolean; inbox?: OrcaMessage[] } = {}) {
+async function setup(work: (attempt: number, commit: (files: Record<string, string>, message: string) => void, line: string) => void, options: { risks?: string[]; reviewer?: (commit: (files: Record<string, string>) => void, key: string) => void; launched?: string; intrude?: boolean; failed?: (attempt: number) => boolean; inbox?: OrcaMessage[]; reviewerUnknown?: boolean; refuseResumes?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'apos-auto-')); dirs.push(dir);
   const artifacts = mkdtempSync(join(tmpdir(), 'apos-auto-art-')); dirs.push(artifacts);
   execFileSync('git', ['init', '-q', dir]);
@@ -52,6 +52,8 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
   const acked: string[] = [];
   let inbox = options.inbox ?? [];
   let reviewKey: string | undefined;
+  let lostReviewer: RuntimeRef | undefined;
+  let refusals = 0;
   const ref = (n: number): RuntimeRef => ({ runId: 'run_1', taskId: `task_${n}`, dispatchId: `ctx_${n}`, owner: 'lead', repoPath: dir, terminal: 'term_1', worktreeId: `repo::${owner}`, baseCommit: base, requested: { agent: 'codex', model: 'gpt-6.1-terra' } });
   let base = '';
   const runOwner = () => {
@@ -68,7 +70,9 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
       git('worktree', 'add', '-q', '-b', 'owner', owner, base);
       const r = ref(1); runOwner(); return r;
     },
-    async resumeSolo(_ref, _checkpoint, _key, budget) { budgets.push(budget); dispatches.push('resume'); const r = ref(attempt + 1); runOwner(); return r; },
+    async resumeSolo(_ref, _checkpoint, _key, budget) {
+      if (refusals < (options.refuseResumes ?? 0)) { refusals += 1; throw new OrcaRefused('agent_unconfigured', 'agent_unconfigured'); }
+      budgets.push(budget); dispatches.push('resume'); const r = ref(attempt + 1); runOwner(); return r; },
     async inspect(r) { return settled.has(r.dispatchId) ? { state: 'settled', outcome: failedDispatches.has(r.dispatchId) ? 'failed' : 'completed', ref: r } : { state: 'live', ref: r }; },
     async deliveryHead(r) { return execFileSync('git', ['-C', r.worktreeId ? r.worktreeId.split('::')[1] : owner, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); },
     async launchReceipt() { return { agent: 'codex', model: options.launched ?? 'gpt-6.1-terra' }; },
@@ -78,9 +82,11 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
       git('worktree', 'add', '-q', '--detach', reviewWt, input.commit);
       options.reviewer?.(files => commitIn(reviewWt)(files, 'review'), input.idempotencyKey);
       settled.add('ctx_review');
+      if (options.reviewerUnknown) { lostReviewer = { runId: 'run_1', taskId: 'task_r', dispatchId: 'ctx_review', owner: 'lead', repoPath: dir, worktreeId: `repo::${reviewWt}` }; throw new Error('Orca orchestration worker-start failed: state=outcome_unknown'); }
       return { runId: 'run_1', taskId: 'task_r', dispatchId: 'ctx_review', owner: 'reviewer', repoPath: dir, worktreeId: `repo::${reviewWt}`, key: input.idempotencyKey, commit: input.commit };
     },
     async releaseWorker(dispatchId) { released.push(dispatchId); },
+    async recover(key) { return lostReviewer && key === reviewKey ? lostReviewer : undefined; },
     ...(options.inbox ? {
       async checkRun() { return inbox.length ? { deliveryId: 'delivery_1', messages: inbox } : { messages: [] }; },
       async ackRun(_run: string, deliveryId: string) { acked.push(deliveryId); inbox = []; },
@@ -159,6 +165,29 @@ describe('Solo autopilot', () => {
     expect(await tick()).toContain('review pass');
     expect(state().reviews[0]).toMatchObject({ reviewer: 'apos-reviewer', session: 'ctx_review', result: 'pass' });
     expect(state().status).toBe('verified');
+  }, 90_000);
+
+  it('recovers a reviewer Orca created but reported as outcome unknown (seen live on SQLFMT)', async () => {
+    const { tick, state } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), {
+      risks: ['auth regression'], reviewerUnknown: true,
+      reviewer: (commit, key) => commit({ [reviewResultPath(spec.id, key)]: JSON.stringify({ result: 'pass', note: 'Checked auth paths' }) })
+    });
+    expect(await tick()).toContain('reviewer start outcome unknown');
+    expect(state()).toMatchObject({ status: 'executing', reviewIntent: { commit: expect.any(String) } });
+    expect(await tick()).toContain('recovered reviewer ctx_review');
+    expect(await tick()).toContain('review pass');
+    expect(state().status).toBe('verified');
+  }, 90_000);
+
+  it('retries a refused resume after a review asks for changes on a green gate (seen live on SQLFMT)', async () => {
+    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`), {
+      risks: ['auth regression'], refuseResumes: 1,
+      reviewer: (commit, key) => commit({ [reviewResultPath(spec.id, key)]: JSON.stringify(dispatches.length === 1 ? { result: 'changes', note: 'Comma lands inside a comment' } : { result: 'pass', note: 'Fixed' }) })
+    });
+    await tick();
+    expect(await tick()).toContain('resume refused, will retry');
+    expect(await tick()).toContain('resumed owner');
+    expect(dispatches).toEqual(['start', 'resume']);
   }, 90_000);
 
   it('turns a reviewer request for changes into a finding for the same owner', async () => {

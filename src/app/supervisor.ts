@@ -60,7 +60,8 @@ export class SoloSupervisor {
     if (!outcome) {
       const noticed = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'overrun');
       if (overTime && !noticed) { this.record(goalId, 'human-notified', { kind: 'overrun', goalId, note: 'owner still running past the approved wall time' }); actions.push('notified overrun'); }
-      actions.push(...await this.unstick(goalId, ref));
+      const since = [...this.store.events(goalId)].reverse().find(item => ['execution-started', 'runtime-resumed'].includes(item.type));
+      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at }));
       return actions;
     }
     if (state.reviewDispatch) return this.collectReview(state, repoPath, actions);
@@ -135,29 +136,6 @@ export class SoloSupervisor {
     }, repoPath, actions);
   }
 
-  /**
-   * Seen live with Codex in Orca: the brief sat pasted in the composer, never submitted. After a few
-   * quiet minutes the controller presses Enter once; if the owner still has not started, the Human decides.
-   */
-  private async unstick(goalId: string, ref: RuntimeRef): Promise<string[]> {
-    if (!this.runtime.inputStalled || !this.runtime.nudge || !ref.terminal) return [];
-    const since = [...this.store.events(goalId)].reverse().find(item => ['execution-started', 'runtime-resumed'].includes(item.type));
-    const minutes = since ? (this.now() - Date.parse(since.at)) / 60_000 : 0;
-    if (minutes < 4 || !(await this.runtime.inputStalled(ref.dispatchId))) return [];
-    const marker = `nudge ${ref.dispatchId}`;
-    const nudged = this.store.events(goalId).filter(item => item.type === 'decision-logged' && String((item.data as { note?: string }).note).startsWith(marker));
-    if (!nudged.length) {
-      await this.runtime.nudge(ref.terminal);
-      this.record(goalId, 'decision-logged', { note: `${marker}: input accepted but the agent never started after ${Math.round(minutes)} min; controller pressed Enter once` });
-      return [`nudged ${ref.dispatchId}`];
-    }
-    if (minutes >= 10 && !this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string; dispatchId?: string }).kind === 'stalled' && (item.data as { dispatchId?: string }).dispatchId === ref.dispatchId)) {
-      this.record(goalId, 'human-notified', { kind: 'stalled', goalId, dispatchId: ref.dispatchId, note: 'owner never started after one nudge' });
-      return [`stalled ${ref.dispatchId}; Human notified`];
-    }
-    return [];
-  }
-
   /** The intent is recorded first: seen live, Orca created the reviewer but reported its start as outcome-unknown. */
   private async startReview(goalId: string, ref: RuntimeRef, head: string, repoPath: string, reasons: string[], actions: string[]): Promise<string[]> {
     const key = randomUUID();
@@ -208,7 +186,12 @@ export class SoloSupervisor {
     const goalId = state.spec.id;
     const pending = state.reviewDispatch!;
     const observation = await this.runtime.inspect({ ...(state.runtimeRef as RuntimeRef), dispatchId: pending.dispatchId, runId: pending.runId });
-    if (!observation.outcome) return actions;
+    if (!observation.outcome) {
+      // Seen live: the reviewer's brief sat in the composer like the owner's did.
+      const since = [...this.store.events(goalId)].reverse().find(item => item.type === 'review-dispatched');
+      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at }));
+      return actions;
+    }
     await this.recordTelemetry(state, { dispatchId: pending.dispatchId, worktreeId: pending.worktreeId } as RuntimeRef, 'reviewer');
     const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId });
     const raw = head && show(repoPath, head, reviewResultPath(goalId, pending.key));
@@ -242,6 +225,33 @@ export class SoloSupervisor {
       usage: usage ?? 'unknown', ...(started ? { wallMs: this.now() - Date.parse(started.at) } : {})
     });
   }
+}
+
+/**
+ * Seen live with Codex in Orca: a brief pasted but never submitted, for owners, resumes and reviewers.
+ * Orca never resends, so the controller owns this: from one quiet minute on, while the screen shows an
+ * unsent brief, press Enter up to three times a minute apart; then the Human is told. An agent that is
+ * visibly working is never reported.
+ */
+export async function unstickDispatch(store: GoalRepository, runtime: RuntimeAdapter, now: () => number, input: { goalId: string; dispatchId: string; terminal?: string; since?: string }): Promise<string[]> {
+  if (!runtime.nudge || !input.terminal || !input.since) return [];
+  if (now() - Date.parse(input.since) < 60_000) return [];
+  const pending = runtime.composerPending ? await runtime.composerPending(input.terminal) : await runtime.inputStalled?.(input.dispatchId);
+  if (!pending) return [];
+  const marker = `nudge ${input.dispatchId}`;
+  const events = store.events(input.goalId);
+  const nudges = events.filter(item => item.type === 'decision-logged' && String((item.data as { note?: string }).note).startsWith(marker));
+  const record = (type: GoalEventType, data: unknown) => store.append({ id: randomUUID(), goalId: input.goalId, type, data, at: new Date(now()).toISOString() });
+  if (nudges.length < 3) {
+    if (nudges.length && now() - Date.parse(nudges.at(-1)!.at) < 60_000) return [];
+    await runtime.nudge(input.terminal);
+    record('decision-logged', { note: `${marker}: brief unsent in the composer; controller pressed Enter (${nudges.length + 1}/3)` });
+    return [`nudged ${input.dispatchId} (${nudges.length + 1}/3)`];
+  }
+  const notified = events.some(item => item.type === 'human-notified' && (item.data as { kind?: string; dispatchId?: string }).kind === 'stalled' && (item.data as { dispatchId?: string }).dispatchId === input.dispatchId);
+  if (notified || now() - Date.parse(nudges.at(-1)!.at) < 60_000) return [];
+  record('human-notified', { kind: 'stalled', goalId: input.goalId, dispatchId: input.dispatchId, note: 'brief still unsent after three Enters' });
+  return [`stalled ${input.dispatchId}; Human notified`];
 }
 
 /**

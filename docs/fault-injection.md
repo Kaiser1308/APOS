@@ -33,7 +33,7 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | Runtime launched another model | needs-decision | `supervisor.test.ts` › stops for a decision when the runtime launched a different model |
 | Same failure after two repairs | needs-decision | `supervisor.test.ts` › sends the Goal to a Human decision when the same failure survives two repairs |
 | Owner commits into the managed checkout instead of its worktree (seen live) | needs-decision | `supervisor.test.ts` › stops for a decision when the owner commits into the managed checkout |
-| Codex leaves the brief pasted but unsubmitted (seen live) | one Enter after 4 quiet minutes, Human notified at 10 | `supervisor.test.ts` › stalled Codex input |
+| Codex leaves the brief pasted but unsubmitted (seen live, owners and reviewers) | the screen is read; Enter up to 3 times a minute apart from the first quiet minute; then the Human; a visibly working agent is never reported | `supervisor.test.ts` › stalled Codex input |
 | An owner runs a Human-only command (merge, approve, appetite, confirm, unblock) | refused from any agent terminal or worktree | `cli.test.ts` › refuses Human-only commands from an APOS agent terminal |
 | A Human commit on the managed checkout mid-attempt | not flagged | `supervisor.test.ts` › does not block a Goal for an ordinary Human commit |
 | Orca refuses a resume (`agent_unconfigured`, seen live) | intent abandoned, retried; needs-decision after 3 refusals | `supervisor.test.ts` › Orca refusing a resume |

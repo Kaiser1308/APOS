@@ -14,7 +14,7 @@ import { ProjectJournal } from '../store/journal.js';
 import { SqliteStore } from '../store/sqlite.js';
 import { SoloSupervisor } from './supervisor.js';
 import { SoloService } from './solo.js';
-import { OrcaRefused } from '../runtime/orca.js';
+import { OrcaRefused, composerHasUnsentBrief } from '../runtime/orca.js';
 import { approval } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -285,7 +285,7 @@ more
 });
 
 describe('stalled Codex input', () => {
-  it('presses Enter once after a few quiet minutes, then asks the Human if the owner still never started', async () => {
+  it('reads the screen: presses Enter up to three times a minute apart while the brief is unsent, then tells the Human', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'apos-stall-')); dirs.push(dir);
     const store = SqliteStore.open(join(dir, 'state.sqlite'));
     const t0 = Date.parse('2026-11-08T00:00:00.000Z');
@@ -295,17 +295,26 @@ describe('stalled Codex input', () => {
     const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_1' };
     add('dispatch-intended', 'k'); add('execution-started', ref);
     const nudges: string[] = [];
-    const runtime: RuntimeAdapter = { async startSolo() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; }, async inputStalled() { return true; }, async nudge(terminal) { nudges.push(terminal); } };
-    let now = t0 + 2 * 60_000;
+    let screen = ['› [Pasted Content 7848 chars]', '  GPT-6.1 Terra medium'];
+    const runtime: RuntimeAdapter = { async startSolo() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; }, async composerPending() { return composerHasUnsentBrief(screen); }, async nudge(terminal) { nudges.push(terminal); } };
+    let now = t0 + 30_000;
     const supervisor = new SoloSupervisor(store, runtime, { now: () => now });
     expect(await supervisor.step(spec.id, dir)).toEqual([]);
-    now = t0 + 5 * 60_000;
-    expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1']);
+    now = t0 + 70_000;
+    expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (1/3)']);
     expect(await supervisor.step(spec.id, dir)).toEqual([]);
-    now = t0 + 11 * 60_000;
-    expect(await supervisor.step(spec.id, dir)).toEqual(['stalled ctx_1; Human notified']);
-    expect(nudges).toEqual(['term_1']);
+    now = t0 + 140_000; expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (2/3)']);
+    now = t0 + 210_000; expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (3/3)']);
+    now = t0 + 280_000; expect(await supervisor.step(spec.id, dir)).toEqual(['stalled ctx_1; Human notified']);
+    expect(await supervisor.step(spec.id, dir)).toEqual([]);
+    expect(nudges).toHaveLength(3);
     store.close();
+  });
+
+  it('never reports an agent that is visibly working, whatever Orca says (seen live: false stalled notice)', () => {
+    expect(composerHasUnsentBrief(['• Working (50s • esc to interrupt)', '› Ask Codex to do anything'])).toBe(false);
+    expect(composerHasUnsentBrief(['› Ask Codex to do anything', '  GPT-6.1 Terra medium'])).toBe(false);
+    expect(composerHasUnsentBrief(['› [Pasted Content 1285 chars]  orca orchestration send --from term --type worker_done --subject', '  "<short status[Pasted Content 2313 chars]'])).toBe(true);
   });
 });
 

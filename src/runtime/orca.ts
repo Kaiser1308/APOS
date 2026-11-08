@@ -28,6 +28,11 @@ export interface RuntimeAdapter {
   launchReceipt?(dispatchId: string): Promise<LaunchReceipt | undefined>;
   /** True when Orca accepted the input but the agent never started (no heartbeat, still at input_accepted). */
   inputStalled?(dispatchId: string): Promise<boolean>;
+  /**
+   * Reads the agent terminal: true when a brief sits unsubmitted in the composer and the agent is not
+   * working. Orca's own stage was wrong both ways in the SQLFMT pilot, so the screen is the evidence.
+   */
+  composerPending?(terminal: string): Promise<boolean>;
   /** Presses Enter once in the owner's terminal. */
   nudge?(terminal: string): Promise<void>;
   startReviewer?(input: { repoPath: string; goalId: string; baseCommit: string; commit: string; reasons: string[]; idempotencyKey: string; runId: string }): Promise<ReviewerRef>;
@@ -261,6 +266,11 @@ export class OrcaRuntime implements RuntimeAdapter {
     return ['dispatched', 'pending'].includes(String(dispatch.status)) && !dispatch.lastHeartbeatAt && ['input_accepted', 'turn_start_unobserved'].includes(String(worker.stage));
   }
 
+  async composerPending(terminal: string): Promise<boolean> {
+    const tail = object(this.execute(['terminal', 'read', '--terminal', terminal]).terminal).tail;
+    return composerHasUnsentBrief(Array.isArray(tail) ? tail.map(String) : []);
+  }
+
   async nudge(terminal: string): Promise<void> {
     this.execute(['terminal', 'send', '--terminal', terminal, '--enter']);
   }
@@ -331,4 +341,13 @@ export class OrcaRuntime implements RuntimeAdapter {
     const baseCommit = /APOS base commit: ([0-9a-fA-F]{40,64})\./.exec(String(task.spec))?.[1];
     return { runId, taskId, dispatchId, owner: 'worker', repoPath: match[1], terminal: typeof dispatch.assignee_handle === 'string' ? dispatch.assignee_handle : undefined, worktreeId: typeof worker.worktreeId === 'string' ? worker.worktreeId : undefined, ...(baseCommit ? { baseCommit } : {}) };
   }
+}
+
+/** Pure check behind `composerPending`, on the visible tail of a Codex TUI. */
+export function composerHasUnsentBrief(lines: string[]): boolean {
+  if (lines.some(line => /esc to interrupt|^\s*[•◦]\s*Working\b/.test(line))) return false;
+  const prompt = lines.map((line, index) => ({ line, index })).filter(item => /^\s*›/.test(item.line)).at(-1);
+  if (!prompt) return false;
+  const composer = lines.slice(prompt.index, prompt.index + 4).join(' ');
+  return composer.includes('[Pasted Content') || prompt.line.replace(/^\s*›\s*/, '').length > 120;
 }

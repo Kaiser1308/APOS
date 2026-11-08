@@ -20,8 +20,11 @@ export class GoalRegistryService {
     for (const id of byId.keys()) walk(id);
   }
 
-  approve(goalId: string): void {
+  /** `currentSourceDigest` reads the committed snapshot; approval refuses a snapshot that differs from the spec. */
+  approve(goalId: string, currentSourceDigest?: (goalId: string) => string | undefined): void {
     this.assertAcyclic();
+    const state = this.store.getGoal(goalId);
+    if (currentSourceDigest && state && currentSourceDigest(goalId) !== state.spec.source.sha256) throw new Error(`Source snapshot for ${goalId} is missing or differs from the Goal sha256`);
     this.store.append({ id: randomUUID(), goalId, type: 'goal-approved', at: new Date().toISOString() });
   }
 

@@ -76,6 +76,7 @@ export class IntegrationService {
     for (const commit of prepared.commits) if (!this.inspector.contains(repoPath, commit, input.commitRef)) throw new Error(`Package commit not integrated: ${commit}`);
     if (input.regression?.result !== 'pass' || !input.regression.command?.trim() || !input.regression.artifactRef?.trim()) throw new Error('Passing regression evidence required');
     const state = this.store.getGoal(goalId)!;
+    if (state.gate?.deliveryCommit.toLowerCase() !== input.commitRef.toLowerCase() || state.gate.result !== 'green') throw new Error('Green controller gate on the integration commit required');
     if (requiresIndependentReview(state)) {
       const review = [...state.reviews].reverse().find(item => item.subject === 'goal');
       if (review?.result !== 'pass' || review.commitRef !== input.commitRef) throw new Error('Passing independent Goal review of integration commit required');

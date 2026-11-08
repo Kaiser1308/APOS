@@ -1,4 +1,5 @@
-import { parseExecutionProposal, parseGoalSpec, type ExecutionProposal, type GoalSpec } from './contracts.js';
+import { goalApprovalBlockers, parseExecutionProposal, parseGoalSpec, type ExecutionProposal, type GoalSpec } from './contracts.js';
+import { attemptKey, type GateReport, type ManualConfirmation } from './gate.js';
 import { parsePackageEvidence, parseWorkPackage, validatePackageGraph, type PackageEvidence, type WorkPackageSpec } from './packages.js';
 import { parseReview, type ReviewRecord } from './reviews.js';
 
@@ -6,7 +7,7 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'worker-settled'
+  | 'worker-settled' | 'gate-recorded' | 'check-confirmed'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -31,6 +32,9 @@ export type GoalState = {
   merge?: { sourceRef: string; targetBranch: string; mergeCommit: string };
   reviews: ReviewRecord[];
   settlements?: Record<string, 'completed' | 'failed'>;
+  /** Latest controller-run gate; owner-submitted evidence never replaces it. */
+  gate?: GateReport;
+  manualConfirmations?: ManualConfirmation[];
 };
 
 function requireThat(ok: unknown, message: string): asserts ok {
@@ -52,6 +56,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
   switch (event.type) {
     case 'goal-approved':
       requireThat(state.status === 'draft', 'Goal not awaiting approval');
+      { const blockers = goalApprovalBlockers(state.spec); requireThat(!blockers.length, `Goal not approvable: ${blockers.join('; ')}`); }
       return { ...state, status: 'approved', approvedGoalVersion: state.spec.version };
     case 'goal-selected':
       requireThat(state.approvedGoalVersion === state.spec.version, 'Goal must be approved');
@@ -67,7 +72,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const proposal = parseExecutionProposal(event.data);
       requireThat(proposal.goalId === state.spec.id && proposal.goalVersion === state.spec.version, 'Proposal Goal version mismatch');
       requireThat(!state.proposal || proposal.version > state.proposal.version, 'Proposal version must advance');
-      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined, reviews: [], settlements: {}, merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined };
+      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined, reviews: [], settlements: {}, merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined, gate: undefined, manualConfirmations: [] };
     }
     case 'proposal-approved':
       requireThat(state.status === 'planned' && state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
@@ -193,7 +198,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'runtime-resumed':
       requireThat(state.status === 'executing' && state.runtimeRef && state.resumeIntent && event.data, 'Existing resume intent required');
       requireThat((state.soloAttempts ?? 1) < attemptLimit(state), 'Solo retry budget exhausted');
-      return { ...state, runtimeRef: event.data, resumeIntent: undefined, evidence: [], reviews: [], soloAttempts: (state.soloAttempts ?? 1) + 1 };
+      return { ...state, runtimeRef: event.data, resumeIntent: undefined, evidence: [], reviews: [], gate: undefined, soloAttempts: (state.soloAttempts ?? 1) + 1 };
     case 'resume-intended':
       requireThat(state.status === 'executing' && state.runtimeRef && state.checkpoint && !state.resumeIntent && state.proposal?.mode.startsWith('solo'), 'Solo checkpoint and prior owner required');
       requireThat(typeof event.data === 'string' && event.data.length > 0, 'Resume key required');
@@ -229,6 +234,21 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(review.reviewer !== 'lead', 'Goal reviewer must differ from Lead owner');
       return { ...state, reviews: [...state.reviews, review] };
     }
+    case 'gate-recorded': {
+      requireThat(state.status === 'executing', 'Executing Goal required for gate');
+      const gate = event.data as GateReport;
+      requireThat(gate && gate.goalId === state.spec.id && gate.goalVersion === state.spec.version && Array.isArray(gate.checks) && /^[0-9a-fA-F]{40,64}$/.test(gate.deliveryCommit ?? '') && /^[0-9a-fA-F]{40,64}$/.test(gate.baseCommit ?? ''), 'Gate report for current Goal version and full commits required');
+      requireThat(['green', 'red', 'unverifiable', 'pending'].includes(gate.result), 'Gate result required');
+      requireThat(gate.attemptKey === attemptKey(state), 'Gate was started for an earlier owner attempt; rerun it');
+      return { ...state, gate };
+    }
+    case 'check-confirmed': {
+      requireThat(state.status === 'executing', 'Executing Goal required for manual confirmation');
+      const data = event.data as ManualConfirmation;
+      requireThat(state.spec.checks.some(item => item.id === data?.checkId && item.kind === 'manual'), 'Unknown manual check');
+      requireThat(/^[0-9a-fA-F]{40,64}$/.test(data.deliveryCommit ?? '') && data.by?.trim() && data.note?.trim(), 'Manual confirmation needs commit, confirmer and note');
+      return { ...state, manualConfirmations: [...(state.manualConfirmations ?? []), data] };
+    }
     case 'integration-completed': {
       requireThat(state.status === 'executing' && state.proposal?.mode === 'multi-wp', 'Executing Multi-WP Goal required');
       requireThat(Object.values(state.packages ?? {}).length >= 2 && Object.values(state.packages ?? {}).every(item => item.status === 'verified'), 'All packages must be verified');
@@ -251,7 +271,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, status: 'closed' };
     case 'outcome-revised':
       requireThat(state.status === 'verified', 'Technical verification required');
-      return { ...state, status: 'draft', selected: false, approvedGoalVersion: undefined, proposal: undefined, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined };
+      return { ...state, status: 'draft', selected: false, approvedGoalVersion: undefined, proposal: undefined, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined, gate: undefined, manualConfirmations: [] };
     case 'outcome-stopped':
       return { ...state, status: 'stopped' };
   }

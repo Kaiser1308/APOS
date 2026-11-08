@@ -66,11 +66,11 @@ export class SoloService {
     return observation.state;
   }
 
-  async verify(goalId: string): Promise<VerificationResult> {
+  async verify(goalId: string, deliveryCommit?: string): Promise<VerificationResult> {
     const state = this.store.getGoal(goalId);
     if (state?.status !== 'executing' || !state.proposal?.mode.startsWith('solo') || !state.runtimeRef) throw new Error('Executing Solo Goal required');
     const observation = await this.runtime.inspect(state.runtimeRef as RuntimeRef);
     if (observation.outcome !== 'completed') throw new Error('Orca Solo dispatch must complete successfully before verification');
-    return new VerificationService(this.store).verify(goalId);
+    return new VerificationService(this.store).verify(goalId, deliveryCommit);
   }
 }

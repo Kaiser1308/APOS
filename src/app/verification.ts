@@ -3,8 +3,9 @@ import type { Evidence, GoalId } from '../domain/contracts.js';
 import type { GoalEventType } from '../domain/transitions.js';
 import type { GoalRepository } from '../store/journal.js';
 import { requiresIndependentReview } from '../domain/reviews.js';
+import { gateShortfalls } from '../domain/gate.js';
 
-export type VerificationResult = { passed: true; acceptanceIds: string[] };
+export type VerificationResult = { passed: true; acceptanceIds: string[]; deliveryCommit: string };
 
 export class VerificationService {
   constructor(private readonly store: GoalRepository) {}
@@ -21,23 +22,24 @@ export class VerificationService {
     this.record(goalId, 'evidence-submitted', evidence);
   }
 
-  verify(goalId: GoalId): VerificationResult {
+  /**
+   * Owner-submitted evidence is a report, not proof. A Goal verifies only on a green controller gate whose
+   * delivery commit is the one under review (the integration commit for Multi-WP).
+   */
+  verify(goalId: GoalId, deliveryCommit?: string): VerificationResult {
     const state = this.store.getGoal(goalId);
     if (!state || state.status !== 'executing') throw new Error('Goal must be executing to verify');
-    const latest = new Map<string, Evidence>();
-    for (const item of state.evidence) {
-      const evidence = item as Evidence;
-      latest.set(evidence.acceptanceId, evidence);
-    }
-    const missing = state.spec.acceptance.filter(item => latest.get(item.id)?.result !== 'pass').map(item => item.id);
-    if (missing.length) throw new Error(`Acceptance evidence missing or failing: ${missing.join(', ')}`);
+    const expected = state.proposal?.mode === 'multi-wp' ? state.integration?.commitRef : deliveryCommit;
+    if (state.proposal?.mode === 'multi-wp' && !expected) throw new Error('Integrated Multi-WP commit required before verification');
+    const problems = gateShortfalls(state.spec, state.gate, expected);
+    if (problems.length) throw new Error(`Controller gate does not verify ${goalId}: ${problems.join('; ')}`);
+    const gated = state.gate!.deliveryCommit;
     if (requiresIndependentReview(state)) {
       const review = [...state.reviews].reverse().find(item => item.subject === 'goal');
-      const commitRef = state.proposal?.mode === 'multi-wp' ? state.integration?.commitRef : latest.get(state.spec.acceptance[0].id)?.commitRef;
-      if (!commitRef || review?.result !== 'pass' || review.commitRef !== commitRef) throw new Error('Passing independent Goal review of delivery commit required');
+      if (review?.result !== 'pass' || review.commitRef.toLowerCase() !== gated.toLowerCase()) throw new Error('Passing independent Goal review of the gated delivery commit required');
     }
-    this.record(goalId, 'verified', { acceptanceIds: state.spec.acceptance.map(item => item.id) });
-    return { passed: true, acceptanceIds: state.spec.acceptance.map(item => item.id) };
+    this.record(goalId, 'verified', { acceptanceIds: state.spec.acceptance.map(item => item.id), gateId: state.gate!.gateId, deliveryCommit: gated });
+    return { passed: true, acceptanceIds: state.spec.acceptance.map(item => item.id), deliveryCommit: gated };
   }
 
   recordOutcome(goalId: GoalId, decision: 'close' | 'revise' | 'stop'): void {

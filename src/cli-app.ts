@@ -16,12 +16,15 @@ import { assertExecutionSettled } from './app/replan.js';
 import { MetricsService } from './app/metrics.js';
 import { GoalRegistryService } from './app/registry.js';
 import { VerificationService } from './app/verification.js';
+import { GateService, committedSourceDigest, type GateOptions } from './app/gate.js';
+import { sourceDigest } from './domain/gate.js';
+import { execFileSync } from 'node:child_process';
 import { parseWorkPackage } from './domain/packages.js';
 import { OrcaRuntime, type RuntimeAdapter } from './runtime/orca.js';
 import { ProjectJournal } from './store/journal.js';
 import { SqliteStore } from './store/sqlite.js';
 
-export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; write?: (line: string) => void };
+export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; gate?: GateOptions; write?: (line: string) => void };
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<void> {
   const program = new Command();
@@ -47,30 +50,40 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     try { return await fn(new ProjectJournal(path, store)); } finally { store.close(); }
   };
   const event = (goalId: string, type: GoalEventType, data?: unknown) => ({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
+  /** Reads the Goal JSON and the verbatim source; fills `source` when absent, otherwise checks it matches. */
+  const goalWithSource = (file: string, sourcePath: string, origin: string) => {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    const text = readFileSync(sourcePath, 'utf8');
+    const digest = sourceDigest(text);
+    const given = raw.source as { sha256?: string } | undefined;
+    if (given?.sha256 && given.sha256 !== digest) throw new Error('Goal source sha256 does not match --source file');
+    const spec = parseGoalSpec({ ...raw, source: given ?? { path: sourcePath, sha256: digest, capturedAt: new Date().toISOString(), origin } });
+    return { spec, text };
+  };
 
   program.command('init').description('initialize .apos in a Git project').action(async () => { await initProject(repo()); write(`Initialized ${repo()}`); });
 
   const goal = program.command('goal');
-  goal.command('create').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournal(journal => {
-    const spec = parseGoalSpec(JSON.parse(readFileSync(file, 'utf8')));
-    journal.append(event(spec.id, 'goal-drafted', spec));
+  goal.command('create').requiredOption('--file <json>').requiredOption('--source <path>', 'verbatim source the Goal was shaped from').option('--origin <text>', 'who or what produced the source', 'human').action(({ file, source, origin }: { file: string; source: string; origin: string }) => withJournal(journal => {
+    const { spec, text } = goalWithSource(file, source, origin);
+    journal.appendWithSource(event(spec.id, 'goal-drafted', spec), text);
     write(`Drafted ${spec.id}`);
   }));
   goal.command('list').action(() => withJournal(journal => {
     for (const state of journal.listGoals()) write(`${state.spec.id}\t${state.status}\t${state.spec.outcome}`);
   }));
   goal.command('approve').argument('<id>').action((id: string) => withJournal(journal => {
-    new GoalRegistryService(journal).approve(id); write(`Approved ${id}`);
+    new GoalRegistryService(journal).approve(id, goalId => committedSourceDigest(repo(), goalId)); write(`Approved ${id}`);
   }));
   goal.command('select').argument('<id>').action((id: string) => withJournal(journal => {
     new GoalRegistryService(journal).select(id); write(`Selected ${id}`);
   }));
-  goal.command('revise').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournalAsync(async journal => {
-    const revised = parseGoalSpec(JSON.parse(readFileSync(file, 'utf8')));
+  goal.command('revise').requiredOption('--file <json>').requiredOption('--source <path>').option('--origin <text>', 'who or what produced the source', 'human').action(({ file, source, origin }: { file: string; source: string; origin: string }) => withJournalAsync(async journal => {
+    const { spec: revised, text } = goalWithSource(file, source, origin);
     const current = journal.getGoal(revised.id);
     if (!current || revised.version <= current.spec.version) throw new Error('Goal revision must advance the current version');
     await assertExecutionSettled(current, runtime);
-    journal.append(event(revised.id, 'goal-revised', revised));
+    journal.appendWithSource(event(revised.id, 'goal-revised', revised), text);
     write(`Revised ${revised.id} v${revised.version}; Human approval required`);
   }));
 
@@ -80,7 +93,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(candidate ? `${candidate.spec.id}: ${candidate.spec.outcome}` : 'No eligible Goal');
   }));
   lead.command('propose').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournalAsync(async journal => {
-    const proposal = parseExecutionProposal(JSON.parse(readFileSync(file, 'utf8')));
+    const parsed = parseExecutionProposal(JSON.parse(readFileSync(file, 'utf8')));
+    // The gate compares against the commit the Lead planned from unless the proposal names one.
+    const proposal = parsed.baseCommit ? parsed : { ...parsed, baseCommit: execFileSync('git', ['-C', repo(), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() };
     const state = journal.getGoal(proposal.goalId);
     if (!state || proposal.goalVersion !== state.spec.version) throw new Error('Proposal targets stale Goal version');
     const mapped = new Set(proposal.acceptanceMapping.map(item => item.acceptanceId));
@@ -136,9 +151,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     try { write(`${id}: ${await new SoloService(new ProjectJournal(path, store), runtime).reconcile(id)}`); }
     finally { store.close(); }
   });
-  execution.command('verify').argument('<id>').action((id: string) => withJournalAsync(async journal => {
-    const result = await new SoloService(journal, runtime).verify(id);
-    write(`Verified ${id}: ${result.acceptanceIds.join(', ')}`);
+  execution.command('verify').argument('<id>').option('--commit <sha>', 'delivery commit under review').action((id: string, { commit }: { commit?: string }) => withJournalAsync(async journal => {
+    const result = await new SoloService(journal, runtime).verify(id, commit);
+    write(`Verified ${id} at ${result.deliveryCommit}: ${result.acceptanceIds.join(', ')}`);
   }));
 
   const packages = program.command('package');
@@ -229,6 +244,15 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
       process.removeListener('SIGTERM', stop);
     }
   });
+  const gate = program.command('gate').description('controller-run checks on exact commits; owner claims are not evidence');
+  gate.command('run').argument('<goalId>').requiredOption('--commit <sha>', 'delivery or integration commit').option('--base <sha>', 'override the proposal base commit').action((goalId: string, { commit, base }: { commit: string; base?: string }) => withJournal(journal => {
+    const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(goalId, repo(), { deliveryCommit: commit, baseCommit: base });
+    write(JSON.stringify({ gateId: report.gateId, result: report.result, deliveryCommit: report.deliveryCommit, checks: report.checks.map(item => ({ checkId: item.checkId, status: item.status, reason: item.reason, newFailures: item.newFailures })) }));
+  }));
+  gate.command('confirm').argument('<goalId>').argument('<checkId>').requiredOption('--commit <sha>').requiredOption('--by <name>').requiredOption('--note <text>').action((goalId: string, checkId: string, { commit, by, note }: { commit: string; by: string; note: string }) => withJournal(journal => {
+    new GateService(journal, { inspector: options.inspector, ...options.gate }).confirmManual(goalId, { checkId, deliveryCommit: commit, by, note });
+    write(`Confirmed ${checkId} on ${commit}`);
+  }));
   const review = program.command('review');
   review.command('submit').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
     const result = new ReviewService(journal).submit(goalId, JSON.parse(readFileSync(file, 'utf8')));

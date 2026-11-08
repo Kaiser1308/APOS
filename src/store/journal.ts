@@ -2,7 +2,8 @@ import { applyEvent, type GoalEvent, type GoalState } from '../domain/transition
 import { parseExecutionProposal, parseGoalSpec } from '../domain/contracts.js';
 import { parseWorkPackage } from '../domain/packages.js';
 import { parseReview } from '../domain/reviews.js';
-import { ProjectHistory, committedGoalEvents, withHistoryLock } from './project-history.js';
+import { ProjectHistory, committedGoalEvents, withHistoryLock, type DocumentUpdate } from './project-history.js';
+import { sourceDigest } from '../domain/gate.js';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SqliteStore } from './sqlite.js';
@@ -34,11 +35,19 @@ export class ProjectJournal implements GoalRepository {
     withHistoryLock(this.repoPath, () => this.appendLocked(event));
   }
 
-  private appendLocked(event: GoalEvent): void {
+  /** Drafts or revises a Goal together with its verbatim source snapshot, committed as `source.md`. */
+  appendWithSource(event: GoalEvent, sourceText: string): void {
+    if (event.type !== 'goal-drafted' && event.type !== 'goal-revised') throw new Error('Source snapshots attach only to Goal drafts and revisions');
+    const spec = parseGoalSpec(event.data);
+    if (sourceDigest(sourceText) !== spec.source.sha256) throw new Error('Source text does not match the Goal source sha256');
+    withHistoryLock(this.repoPath, () => this.appendLocked(event, [{ path: 'source.md', content: sourceText }]));
+  }
+
+  private appendLocked(event: GoalEvent, attachments: DocumentUpdate[] = []): void {
     this.rebuildIndex();
     if (this.store.hasEvent(event.id)) return;
     applyEvent(this.store.getGoal(event.goalId), event);
-    const documents = [];
+    const documents: DocumentUpdate[] = [...attachments];
     if (event.type === 'goal-drafted' || event.type === 'goal-revised') {
       const spec = parseGoalSpec(event.data);
       documents.push({ path: 'goal.md', content: `# ${spec.id}: ${spec.outcome}\n\n\`\`\`json\n${JSON.stringify(spec, null, 2)}\n\`\`\`\n` });

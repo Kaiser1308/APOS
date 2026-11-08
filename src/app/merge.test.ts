@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal } from '../domain/fixtures.test-support.js';
+import { spec, proposal, gateReport } from '../domain/fixtures.test-support.js';
 import { initProject } from './init-project.js';
 import { MergeService } from './merge.js';
 
@@ -26,10 +26,13 @@ it('merges only an authorized, verified Solo commit backed by acceptance evidenc
   const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   add('goal-drafted', { ...spec, autoMergeAuthorized: true }); add('goal-approved'); add('goal-selected');
   add('proposal-drafted', proposal); add('proposal-approved'); add('execution-started', { runId: 'run_1' });
-  add('evidence-submitted', { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:goal', commitRef: source });
+  // The owner reports a different commit than the one the controller gated: only the gated one may merge.
+  const stale = '0'.repeat(40);
+  add('evidence-submitted', { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:goal', commitRef: stale });
+  add('gate-recorded', gateReport(source));
   add('verified');
   const service = new MergeService(store);
-  expect(() => service.merge(spec.id, dir, '0'.repeat(40), target)).toThrow(/evidence/i);
+  expect(() => service.merge(spec.id, dir, stale, target)).toThrow(/controller gate verified/i);
   const merged = service.merge(spec.id, dir, source, target);
   expect(merged).toBe(git(['rev-parse', 'HEAD']));
   expect(git(['merge-base', '--is-ancestor', source, merged])).toBe('');

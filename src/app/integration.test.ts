@@ -4,7 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal } from '../domain/fixtures.test-support.js';
+import { spec, proposal, gateReport as fixtureGate } from '../domain/fixtures.test-support.js';
+import { attemptKey } from '../domain/gate.js';
 import { GitCommitInspector, IntegrationService, type CommitInspector } from './integration.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { ReviewService } from './review.js';
@@ -26,14 +27,17 @@ const setup = (risks: string[] = []) => {
     add('package-started', { packageId: item.id, ref: { runId: 'run-1', taskId: item.id, dispatchId: item.id, owner: 'worker', repoPath: dir } });
     add('package-evidence-submitted', { packageId: item.id, packageVersion: 1, owner: item.owner, acceptanceId: item.acceptance[0].id, result: 'pass', command: 'npm test', artifactRef: `log:${item.id}`, commitRef });
   }
-  return { store, dir, add };
+  const gateReport = (commit: string, result?: 'green' | 'red') => ({ ...fixtureGate(commit, result), attemptKey: attemptKey(store.getGoal(spec.id)!) });
+  add('gate-recorded', gateReport(INTEGRATION));
+  return { store, dir, add, gateReport };
 };
 const inspector: CommitInspector = {
-  exists: (_repo, ref) => ['commit-a', 'commit-b', 'integration'].includes(ref),
+  exists: (_repo, ref) => ['commit-a', 'commit-b', INTEGRATION].includes(ref),
   files: (_repo, ref) => ref === 'commit-a' ? ['src/scanner.ts'] : ref === 'commit-b' ? ['src/history.ts'] : ['src/scanner.ts', 'src/history.ts'],
   contains: () => true
 };
-const evidence = { commitRef: 'integration', acceptance: [{ acceptanceId: 'AC-1', result: 'pass' as const, command: 'npm test', artifactRef: 'log:acceptance' }], regression: { result: 'pass' as const, command: 'npm test', artifactRef: 'log:regression' } };
+const INTEGRATION = 'c'.repeat(40);
+const evidence = { commitRef: INTEGRATION, acceptance: [{ acceptanceId: 'AC-1', result: 'pass' as const, command: 'npm test', artifactRef: 'log:acceptance' }], regression: { result: 'pass' as const, command: 'npm test', artifactRef: 'log:regression' } };
 
 it('waits for every package before preparing integration', () => {
   const { store, dir, add } = setup();
@@ -66,6 +70,15 @@ it('requires passing Goal acceptance and regression on a real integration commit
   store.close();
 });
 
+it('refuses integration when the controller gate on the integration commit is not green', () => {
+  const { store, dir, add, gateReport } = setup();
+  add('package-verified', { packageId: first.id }); add('package-verified', { packageId: second.id });
+  add('gate-recorded', gateReport(INTEGRATION, 'red'));
+  expect(() => new IntegrationService(store, inspector).complete(spec.id, dir, evidence)).toThrow(/green controller gate/i);
+  expect(store.getGoal(spec.id)?.integration).toBeUndefined();
+  store.close();
+});
+
 it('checks commit existence, changed files and ancestry against Git', () => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-commits-')); dirs.push(dir);
   const git = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
@@ -91,7 +104,7 @@ it('requires independent Goal review for a risky integration before recording co
   const service = new IntegrationService(store, inspector);
   expect(() => service.complete(spec.id, dir, evidence)).toThrow(/independent Goal review/i);
   expect(store.getGoal(spec.id)?.integration).toBeUndefined();
-  new ReviewService(store).submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', result: 'pass', commitRef: 'integration', note: 'Checked integrated auth flow' });
+  new ReviewService(store).submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', result: 'pass', commitRef: INTEGRATION, note: 'Checked integrated auth flow' });
   service.complete(spec.id, dir, evidence);
   expect(store.getGoal(spec.id)?.status).toBe('verified');
   store.close();

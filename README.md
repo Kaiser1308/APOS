@@ -17,10 +17,10 @@ node dist/cli.js --repo C:\path\to\project init
 
 ## Solo Goal flow
 
-Create JSON files matching the Goal and Execution contracts in `src/domain/contracts.ts`. The Lead proposal must map every Goal acceptance ID to a verification method. Run these commands with `--repo` before the subcommand:
+Create JSON files matching the Goal and Execution contracts in `src/domain/contracts.ts`. A Goal carries its verbatim source (`--source`, snapshotted to `.apos/goals/<id>/source.md` with a sha256), a requirement list where each item is covered by acceptance or excluded with a reason, acceptance criteria with examples, boundaries and `checkIds`, and the `checks` the controller will run. Approval refuses an unmapped requirement, an acceptance criterion with a `blocked` ambiguity, or a source snapshot that no longer matches its hash. The Lead proposal must map every Goal acceptance ID to a verification method; `lead propose` records the current HEAD as `baseCommit` unless the proposal names one. Run these commands with `--repo` before the subcommand:
 
 ```text
-apos goal create --file goal.json
+apos goal create --file goal.json --source brief.md
 apos goal approve GOAL-001
 apos lead recommend
 apos goal select GOAL-001
@@ -32,7 +32,8 @@ apos execution checkpoint GOAL-001 --file phase.json
 apos execution resume GOAL-001
 apos execution retry GOAL-001 --reason "Fix QR edge case"
 apos evidence add GOAL-001 --file evidence.json
-apos execution verify GOAL-001
+apos gate run GOAL-001 --commit <delivery-sha>
+apos execution verify GOAL-001 --commit <delivery-sha>
 apos outcome close GOAL-001
 ```
 
@@ -72,7 +73,14 @@ If the approved proposal names risks or the Goal permits automatic merge, APOS r
 
 Execution Proposals may set `maxAttempts` from 1 to 10 (default 3). APOS parks a Solo Goal or package when its budget is exhausted and records a blocker for Lead/Human decision; the controller does not retry it indefinitely.
 
-Evidence JSON has `acceptanceId`, `result` (`pass` or `fail`), `command`, and `artifactRef`. APOS requires the latest evidence for every acceptance criterion to pass before technical verification. Human outcome closure is a separate command. Solo and Multi-WP integration may use `integration merge` only when the Goal records explicit merge authorization and the merge gates pass.
+Evidence JSON has `acceptanceId`, `result` (`pass` or `fail`), `command`, and `artifactRef`. It is the owner's report and is **not** sufficient for verification.
+
+`gate run` is the controller's own check. For each check an acceptance criterion names, it creates a fresh detached Git worktree at the exact commit, runs the command through the recorded shell, and stores the log and its sha256 under `~/.apos/artifacts` (or `APOS_ARTIFACTS`), outside the managed repo:
+- `expect: "pass"` must exit 0 on the delivery commit;
+- `expect: "no-new-failures"` also runs the base commit and fails only on failure identities (from `failurePattern`, capture group 1) that are new at delivery;
+- a baseline that cannot run, a timeout, or repeated runs (`runs` > 1) that disagree make the check `unverifiable`, never green;
+- a delivery commit that does not descend from the base, or a source snapshot changed since approval, is refused.
+Manual checks stay pending until `gate confirm GOAL-001 <checkId> --commit <sha> --by <name> --note "..."` from someone other than the owner. `execution verify` (and `integration complete` for Multi-WP) requires a green gate for the current Goal version and source on the commit under review; resuming the owner discards the gate. Human outcome closure is a separate command. Solo and Multi-WP integration may use `integration merge` only when the Goal records explicit merge authorization and the merge gates pass.
 
 ## Local validation (2026-11-08)
 

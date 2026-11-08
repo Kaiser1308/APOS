@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal } from '../domain/fixtures.test-support.js';
+import { spec, proposal, gateReport } from '../domain/fixtures.test-support.js';
 import { SoloService } from './solo.js';
+import { attemptKey } from '../domain/gate.js';
 import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -89,6 +90,8 @@ describe('Solo dispatch', () => {
     runtime.state = 'settled'; runtime.outcome = 'failed';
     await expect(service.verify(spec.id)).rejects.toThrow(/complete successfully/);
     runtime.outcome = 'completed';
+    await expect(service.verify(spec.id)).rejects.toThrow(/no controller gate/);
+    add('gate-recorded', { ...gateReport(), attemptKey: attemptKey(store.getGoal(spec.id)!) });
     expect((await service.verify(spec.id)).passed).toBe(true);
     store.close();
   });

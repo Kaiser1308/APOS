@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal } from '../domain/fixtures.test-support.js';
+import { spec, proposal, gateReport, DELIVERY } from '../domain/fixtures.test-support.js';
 import { ReviewService } from './review.js';
 import { VerificationService } from './verification.js';
 
@@ -18,13 +18,14 @@ it('requires an independent review of the delivery commit for a risky Solo Goal'
   add('goal-drafted', spec); add('goal-approved'); add('goal-selected');
   add('proposal-drafted', { ...proposal, risks: ['Auth regression'] }); add('proposal-approved'); add('execution-started', { runId: 'run_1' });
   const verification = new VerificationService(store);
-  verification.submitEvidence(spec.id, { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:goal', commitRef: 'commit-a' });
+  verification.submitEvidence(spec.id, { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:goal', commitRef: DELIVERY });
+  add('gate-recorded', gateReport(DELIVERY));
   expect(() => verification.verify(spec.id)).toThrow(/independent Goal review/i);
   const reviews = new ReviewService(store);
-  expect(() => reviews.submit(spec.id, { subject: 'goal', reviewer: 'lead', result: 'pass', commitRef: 'commit-a', note: 'Self review' })).toThrow(/reviewer must differ/i);
+  expect(() => reviews.submit(spec.id, { subject: 'goal', reviewer: 'lead', result: 'pass', commitRef: DELIVERY, note: 'Self review' })).toThrow(/reviewer must differ/i);
   reviews.submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', result: 'pass', commitRef: 'wrong-commit', note: 'Looks good' });
   expect(() => verification.verify(spec.id)).toThrow(/independent Goal review/i);
-  reviews.submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', result: 'pass', commitRef: 'commit-a', note: 'Checked auth and tests' });
+  reviews.submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', result: 'pass', commitRef: DELIVERY, note: 'Checked auth and tests' });
   expect(verification.verify(spec.id).passed).toBe(true);
   store.close();
 });

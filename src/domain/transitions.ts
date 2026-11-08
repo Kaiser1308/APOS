@@ -7,7 +7,7 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken' | 'package-gate-recorded'
+  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken' | 'package-gate-recorded' | 'intent-abandoned'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -248,6 +248,14 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.status === 'executing' && state.runtimeRef && state.checkpoint && !state.resumeIntent && state.proposal?.mode.startsWith('solo'), 'Solo checkpoint and prior owner required');
       requireThat(typeof event.data === 'string' && event.data.length > 0, 'Resume key required');
       return { ...state, resumeIntent: event.data };
+    case 'intent-abandoned': {
+      // Only for an intent Orca explicitly refused, or one the Human confirmed has no dispatch.
+      const data = event.data as { key?: string; reason?: string };
+      requireThat(data?.key && data.reason?.trim(), 'Abandoning an intent needs its key and a reason');
+      if (state.resumeIntent === data.key) return { ...state, resumeIntent: undefined };
+      if (state.dispatchIntent === data.key && state.status === 'ready') return { ...state, dispatchIntent: undefined };
+      throw new Error('No pending dispatch or resume intent with that key');
+    }
     case 'checkpointed':
       requireThat(state.status === 'executing', 'Execution required');
       return { ...state, checkpoint: event.data };

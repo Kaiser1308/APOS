@@ -164,6 +164,10 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     const ref = await new SoloService(journal, runtime).resume(id);
     write(`Retried ${id}: ${ref.dispatchId}`);
   }));
+  execution.command('abandon-intent').argument('<id>').requiredOption('--key <key>').requiredOption('--reason <text>').description('Human: drop a dispatch/resume intent after confirming in Orca that it created nothing').action((id: string, flags: { key: string; reason: string }) => withJournal(journal => {
+    journal.append(event(id, 'intent-abandoned', { key: flags.key, reason: `human: ${flags.reason}` }));
+    write(`Abandoned intent ${flags.key} for ${id}`);
+  }));
   execution.command('status').argument('<id>').action((id: string) => withJournal(journal => {
     const state = journal.getGoal(id);
     if (!state) throw new Error(`Unknown Goal: ${id}`);

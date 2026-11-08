@@ -11,6 +11,8 @@ import { CORE_SKILL, activationLine, committedFileDigest, reviewResultPath, solo
 import { ProjectJournal } from '../store/journal.js';
 import { SqliteStore } from '../store/sqlite.js';
 import { SoloSupervisor } from './supervisor.js';
+import { SoloService } from './solo.js';
+import { OrcaRefused } from '../runtime/orca.js';
 import { approval } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -185,6 +187,33 @@ describe('stalled Codex input', () => {
     now = t0 + 11 * 60_000;
     expect(await supervisor.step(spec.id, dir)).toEqual(['stalled ctx_1; Human notified']);
     expect(nudges).toEqual(['term_1']);
+    store.close();
+  });
+});
+
+describe('Orca refusing a resume', () => {
+  it('drops a refused resume intent so the next try is a clean retry, but keeps an unknown outcome for recovery', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'apos-refuse-')); dirs.push(dir);
+    const store = SqliteStore.open(join(dir, 'state.sqlite'));
+    let n = 0;
+    const add = (type: GoalEventType, data?: unknown) => store.append({ id: `F-${++n}`, goalId: spec.id, type, data, at: '2026-11-08T00:00:00.000Z' });
+    add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_1', worktreeId: 'repo::wt' };
+    add('dispatch-intended', 'k'); add('execution-started', ref); add('checkpointed', { phase: 'repair', progress: 'fix', evidenceRefs: [] });
+    let mode: 'refuse' | 'unknown' | 'ok' = 'refuse';
+    const runtime: RuntimeAdapter = {
+      async startSolo() { return ref; },
+      async resumeSolo() { if (mode === 'refuse') throw new OrcaRefused('agent_unconfigured', 'agent_unconfigured'); if (mode === 'unknown') throw new Error('state=outcome_unknown'); return { ...ref, dispatchId: 'ctx_2' }; },
+      async inspect(r) { return { state: 'settled', outcome: 'completed', ref: r }; },
+      async recover() { return { ...ref, dispatchId: 'ctx_2' }; }
+    };
+    const solo = new SoloService(store, runtime);
+    await expect(solo.resume(spec.id)).rejects.toThrow(/agent_unconfigured/);
+    expect(store.getGoal(spec.id)?.resumeIntent).toBeUndefined();
+    mode = 'unknown';
+    await expect(solo.resume(spec.id)).rejects.toThrow(/outcome_unknown/);
+    expect(store.getGoal(spec.id)?.resumeIntent).toBeDefined();
+    expect((await solo.resume(spec.id)).dispatchId).toBe('ctx_2');
     store.close();
   });
 });

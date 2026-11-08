@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { attemptLimit, type GoalEventType } from '../domain/transitions.js';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { GoalRepository } from '../store/journal.js';
-import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
+import { OrcaRefused, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
 import { VerificationService, type VerificationResult } from './verification.js';
 
 export class SoloService {
@@ -25,7 +25,12 @@ export class SoloService {
       return recovered;
     }
     this.record(goalId, 'dispatch-intended', key);
-    const ref = await this.runtime.startSolo({ repoPath, goalId, proposalVersion: state.proposal.version, idempotencyKey: key });
+    let ref: RuntimeRef;
+    try { ref = await this.runtime.startSolo({ repoPath, goalId, proposalVersion: state.proposal.version, idempotencyKey: key }); }
+    catch (error) {
+      if (error instanceof OrcaRefused) this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
+      throw error;
+    }
     this.record(goalId, 'execution-started', ref);
     return ref;
   }
@@ -47,7 +52,12 @@ export class SoloService {
     if (!['completed', 'failed'].includes(observation.outcome ?? '')) throw new Error('Prior Orca dispatch must settle before Solo resume');
     const key = randomUUID();
     this.record(goalId, 'resume-intended', key);
-    const next = await this.runtime.resumeSolo(state.runtimeRef as RuntimeRef, state.checkpoint as PhaseCheckpoint, key);
+    let next: RuntimeRef;
+    try { next = await this.runtime.resumeSolo(state.runtimeRef as RuntimeRef, state.checkpoint as PhaseCheckpoint, key); }
+    catch (error) {
+      if (error instanceof OrcaRefused) this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
+      throw error;
+    }
     this.record(goalId, 'runtime-resumed', next);
     return next;
   }

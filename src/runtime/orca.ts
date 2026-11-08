@@ -46,14 +46,21 @@ export function parseOrcaResult(json: string): Record<string, unknown> {
   return result as Record<string, unknown>;
 }
 
+/** Orca answered with an explicit error: the mutation did not happen, so retrying cannot duplicate it. */
+export class OrcaRefused extends Error {
+  constructor(message: string, readonly code: string) { super(message); this.name = 'OrcaRefused'; }
+}
+
 function runOrca(args: string[]): Record<string, unknown> {
   try {
     return parseOrcaResult(execFileSync('orca', [...args, '--json'], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
   } catch (error) {
     const stdout = (error as { stdout?: string }).stdout;
     let detail = '';
-    try { const parsed = stdout ? JSON.parse(stdout) as { error?: { code?: string; message?: string } } : undefined; if (parsed?.error) detail = ` [${parsed.error.code}] ${parsed.error.message}`; } catch { detail = stdout ? ` ${stdout.slice(0, 500)}` : ''; }
-    throw new Error(`Orca ${args[0]} ${args[1] ?? ''} failed:${detail || ` ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`}`);
+    try { const parsed = stdout ? JSON.parse(stdout) as { error?: { code?: string; message?: string }; result?: { state?: string; stage?: string; failedStage?: string } } : undefined; if (parsed?.error) detail = ` [${parsed.error.code}] ${parsed.error.message}`; else if (parsed?.result) detail = ` state=${parsed.result.state} stage=${parsed.result.stage ?? ''} failedStage=${parsed.result.failedStage ?? ''}`; } catch { detail = stdout ? ` ${stdout.slice(0, 500)}` : ''; }
+    const code = /^ \[([a-z_]+)\]/.exec(detail)?.[1];
+    const message = `Orca ${args[0]} ${args[1] ?? ''} failed:${detail || ` ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`}`;
+    throw code ? new OrcaRefused(message, code) : new Error(message);
   }
 }
 

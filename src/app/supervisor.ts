@@ -66,7 +66,16 @@ export class SoloSupervisor {
     if (state.reviewDispatch) return this.collectReview(state, repoPath, actions);
     if (state.gate?.attemptKey && state.gate.result === 'green') return actions;
     const attempt = state.soloAttempts ?? 1;
-    if ((state.findings ?? []).some(item => item.attempt === attempt && item.by === 'controller')) return actions;
+    if ((state.findings ?? []).some(item => item.attempt === attempt && item.by === 'controller')) {
+      // A repair the controller already decided on but Orca refused to start: retry, bounded.
+      if (state.checkpoint && !state.resumeIntent) {
+        const refusals = this.store.events(goalId).filter(item => item.type === 'intent-abandoned').length;
+        if (refusals >= 3) { this.decide(goalId, `Orca refused to resume the owner ${refusals} times`, actions); return actions; }
+        try { actions.push(`resumed owner: ${(await new SoloService(this.store, this.runtime).resume(goalId)).dispatchId}`); }
+        catch (error) { actions.push(`resume refused, will retry: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+      return actions;
+    }
 
     await this.recordTelemetry(state, ref, 'lead');
     if (outcome === 'failed') { this.decide(goalId, `owner reported failed on attempt ${attempt}`, actions); return actions; }
@@ -150,8 +159,8 @@ export class SoloSupervisor {
     if (attempt >= attemptLimit(state)) { this.decide(goalId, `attempt budget ${attemptLimit(state)} spent`, actions); return actions; }
     if (state.appetite && this.wallMinutesUsed(goalId) > state.appetite.maxWallMinutes) { this.decide(goalId, `wall time ${state.appetite.maxWallMinutes} min spent`, actions); return actions; }
     this.record(goalId, 'checkpointed', { phase: 'controller finding', progress: finding.note, evidenceRefs: finding.logRefs ?? [], goalId, attempt: attempt + 1 });
-    const next = await new SoloService(this.store, this.runtime).resume(goalId);
-    actions.push(`resumed owner: ${next.dispatchId}`);
+    try { actions.push(`resumed owner: ${(await new SoloService(this.store, this.runtime).resume(goalId)).dispatchId}`); }
+    catch (error) { actions.push(`resume refused, will retry: ${error instanceof Error ? error.message : String(error)}`); }
     void repoPath;
     return actions;
   }

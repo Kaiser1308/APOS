@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { parseExecutionProposal, parseGoalSpec, type Evidence, type PhaseCheckpoint } from './domain/contracts.js';
+import { parseAppetite, parseExecutionProposal, parseGoalSpec, type Evidence, type PhaseCheckpoint } from './domain/contracts.js';
 import type { GoalEventType } from './domain/transitions.js';
 import { initProject } from './app/init-project.js';
 import { SoloService } from './app/solo.js';
@@ -75,8 +75,18 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   goal.command('list').action(() => withJournal(journal => {
     for (const state of journal.listGoals()) write(`${state.spec.id}\t${state.status}\t${state.spec.outcome}`);
   }));
-  goal.command('approve').argument('<id>').action((id: string) => withJournal(journal => {
-    new GoalRegistryService(journal).approve(id); write(`Approved ${id}`);
+  // Gate A: the Human approves WHAT, together with the appetite only the controller will see.
+  const appetiteOptions = <T extends Command>(command: T): T => command
+    .requiredOption('--size <S|M|L>').requiredOption('--max-spend <usd>').requiredOption('--max-minutes <n>')
+    .requiredOption('--max-attempts <n>').option('--overrun <stop|ask>', 'what to do when a limit is hit', 'ask') as T;
+  type AppetiteFlags = { size: string; maxSpend: string; maxMinutes: string; maxAttempts: string; overrun: string };
+  const appetiteOf = (flags: AppetiteFlags) => ({ size: flags.size, maxSpendUsd: Number(flags.maxSpend), maxWallMinutes: Number(flags.maxMinutes), maxAttempts: Number(flags.maxAttempts), overrunPolicy: flags.overrun });
+  appetiteOptions(goal.command('approve').argument('<id>')).action((id: string, flags: AppetiteFlags) => withJournal(journal => {
+    new GoalRegistryService(journal).approve(id, parseAppetite(appetiteOf(flags))); write(`Approved ${id}`);
+  }));
+  appetiteOptions(goal.command('appetite').argument('<id>')).requiredOption('--reason <text>').action((id: string, flags: AppetiteFlags & { reason: string }) => withJournal(journal => {
+    journal.append(event(id, 'appetite-set', { appetite: parseAppetite(appetiteOf(flags)), reason: flags.reason }));
+    write(`Appetite for ${id} updated`);
   }));
   goal.command('select').argument('<id>').action((id: string) => withJournal(journal => {
     new GoalRegistryService(journal).select(id); write(`Selected ${id}`);
@@ -98,8 +108,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   lead.command('propose').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournalAsync(async journal => {
     const parsed = parseExecutionProposal(JSON.parse(readFileSync(file, 'utf8')));
     // The gate compares against the commit the Lead planned from unless the proposal names one.
-    const proposal = parsed.baseCommit ? parsed : { ...parsed, baseCommit: execFileSync('git', ['-C', repo(), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() };
-    const state = journal.getGoal(proposal.goalId);
+    const planned = parsed.baseCommit ? parsed : { ...parsed, baseCommit: execFileSync('git', ['-C', repo(), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() };
+    const state = journal.getGoal(planned.goalId);
+    const proposal = planned.sourceSha256 || !state ? planned : { ...planned, sourceSha256: state.spec.source.sha256 };
     if (!state || proposal.goalVersion !== state.spec.version) throw new Error('Proposal targets stale Goal version');
     const mapped = new Set(proposal.acceptanceMapping.map(item => item.acceptanceId));
     if (state.spec.acceptance.some(item => !mapped.has(item.id))) throw new Error('Every Goal acceptance criterion needs a verification mapping');
@@ -109,11 +120,16 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   }));
 
   const execution = program.command('execution');
-  execution.command('approve').argument('<id>').action(async (id: string) => withJournalAsync(async journal => {
+  // No Human gate on HOW: the Lead commits its plan, the controller machine-checks it and dispatches.
+  // A Multi-WP plan only notifies the Human.
+  lead.command('commit').argument('<id>').description('Lead commits its plan; the controller checks it and dispatches').action(async (id: string) => withJournalAsync(async journal => {
       const state = journal.getGoal(id);
       if (!state?.proposal) throw new Error('Current proposal required');
-      journal.append(event(id, 'proposal-approved'));
+      journal.append(event(id, 'proposal-approved', { by: 'controller', proposalVersion: state.proposal.version }));
       if (state.proposal.mode === 'multi-wp') {
+        const notice = { kind: 'multi-wp', goalId: id, packages: Object.keys(state.packages ?? {}), splitRationale: state.proposal.splitRationale, estimatedCost: state.proposal.estimatedCost };
+        journal.append(event(id, 'human-notified', notice));
+        write(`NOTICE ${id}: Lead chose Multi-WP (${notice.packages.length} packages, est. ${notice.estimatedCost?.spendUsd} USD / ${notice.estimatedCost?.wallMinutes} min): ${notice.splitRationale}`);
         const refs = await new PackageService(journal, packageRuntime()).dispatchReady(id, repo());
         write(`Dispatched ${id}: ${refs.map(ref => ref.dispatchId).join(', ')}`);
       } else {
@@ -208,7 +224,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(`Integrated and verified ${goalId}`);
   }));
   integration.command('merge').argument('<goalId>').requiredOption('--source <commit>').requiredOption('--target <branch>').action((goalId: string, { source, target }: { source: string; target: string }) => withJournal(journal => {
-    write(`Merged ${goalId}: ${new MergeService(journal).merge(goalId, repo(), source, target)}`);
+    const mergeCommit = new MergeService(journal).merge(goalId, repo(), source, target);
+    const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(goalId, repo());
+    write(`Merged ${goalId}: ${mergeCommit}; post-merge gate ${report.result}`);
   }));
 
   const controller = program.command('controller');
@@ -283,16 +301,40 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(`Unblocked ${id}`);
   }));
   const outcome = program.command('outcome');
+  // Gate D: the Human reads the Verification Report, decides the outcome and, only here, whether to merge.
   for (const decision of ['close', 'revise', 'stop'] as const) {
-    outcome.command(decision).argument('<id>').action((id: string) => withJournalAsync(async journal => {
-      if (decision === 'close' && runtime.releaseWorker) {
-        const state = journal.getGoal(id);
+    const command = outcome.command(decision).argument('<id>');
+    if (decision === 'close') command.option('--merge-to <branch>', 'authorize and perform one merge of the gated commit').option('--by <name>', 'who decided', 'human');
+    command.action((id: string, flags: { mergeTo?: string; by?: string }) => withJournalAsync(async journal => {
+      const state = journal.getGoal(id);
+      if (decision === 'close') {
         if (state?.status !== 'verified') throw new Error('Verified Goal required before closing');
-        for (const dispatchId of Object.keys(state.settlements ?? {})) await runtime.releaseWorker(dispatchId);
+        if (flags.mergeTo) {
+          const merges = new MergeService(journal);
+          merges.authorize(id, flags.mergeTo, flags.by ?? 'human');
+          const mergeCommit = merges.merge(id, repo(), state.gate!.deliveryCommit, flags.mergeTo);
+          const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(id, repo());
+          write(`Merged ${id}: ${mergeCommit}; post-merge gate ${report.result}`);
+          if (report.result !== 'green') throw new Error(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
+        }
+        if (runtime.releaseWorker) for (const dispatchId of Object.keys(state.settlements ?? {})) await runtime.releaseWorker(dispatchId);
       }
       new VerificationService(journal).recordOutcome(id, decision);
       write(`${decision} ${id}`);
     }));
   }
+  program.command('inbox').description('what needs the Human: notices, blocked Goals, verified Goals awaiting outcome').action(() => withJournal(journal => {
+    for (const state of journal.listGoals()) {
+      const notices = journal.events(state.spec.id).filter(item => item.type === 'human-notified').map(item => item.data);
+      if (state.status === 'blocked') write(`${state.spec.id}\tneeds-decision\t${JSON.stringify(state.blocker)}`);
+      if (state.status === 'verified') write(`${state.spec.id}\tawaiting-outcome\tgate ${state.gate?.result} on ${state.gate?.deliveryCommit}`);
+      for (const notice of notices) write(`${state.spec.id}\tnotice\t${JSON.stringify(notice)}`);
+    }
+  }));
+  const finding = program.command('finding');
+  finding.command('record').argument('<id>').requiredOption('--kind <intent_gap|bad_plan|patch|defer>').requiredOption('--note <text>').option('--by <name>', 'who found it', 'lead').action((id: string, flags: { kind: string; note: string; by: string }) => withJournal(journal => {
+    journal.append(event(id, 'finding-recorded', { kind: flags.kind, note: flags.note, by: flags.by }));
+    write(`Recorded ${flags.kind} for ${id}`);
+  }));
   await program.parseAsync(argv, { from: 'user' });
 }

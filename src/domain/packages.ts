@@ -44,6 +44,8 @@ export function validatePackageGraph(goal: GoalSpec, proposal: ExecutionProposal
     byId.set(item.id, item);
   }
   for (const item of packages) {
+    const unversioned = item.interfaces.filter(entry => !/@v[0-9]+/.test(entry));
+    if (unversioned.length) throw new Error(`Package ${item.id} interface needs a version (name@vN): ${unversioned.join(', ')}`);
     for (const dep of item.dependencies) if (!byId.has(dep)) throw new Error(`Missing dependency ${dep} for ${item.id}`);
   }
   const visiting = new Set<string>();

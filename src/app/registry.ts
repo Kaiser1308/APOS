@@ -21,11 +21,12 @@ export class GoalRegistryService {
   }
 
   /** `currentSourceDigest` reads the committed snapshot; approval refuses a snapshot that differs from the spec. */
-  approve(goalId: string, currentSourceDigest: ((goalId: string) => string | undefined) | undefined = this.store.currentSourceDigest?.bind(this.store)): void {
+  /** The Human approves the Goal together with its appetite, which only the controller keeps. */
+  approve(goalId: string, appetite: unknown, currentSourceDigest: ((goalId: string) => string | undefined) | undefined = this.store.currentSourceDigest?.bind(this.store)): void {
     this.assertAcyclic();
     const state = this.store.getGoal(goalId);
     if (currentSourceDigest && state && currentSourceDigest(goalId) !== state.spec.source.sha256) throw new Error(`Source snapshot for ${goalId} is missing or differs from the Goal sha256`);
-    this.store.append({ id: randomUUID(), goalId, type: 'goal-approved', at: new Date().toISOString() });
+    this.store.append({ id: randomUUID(), goalId, type: 'goal-approved', data: { appetite }, at: new Date().toISOString() });
   }
 
   recommend(): GoalState | undefined {

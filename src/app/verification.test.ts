@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal, gateReport, DELIVERY } from '../domain/fixtures.test-support.js';
+import { spec, proposal, gateReport, DELIVERY, approval } from '../domain/fixtures.test-support.js';
 import { VerificationService } from './verification.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -18,7 +18,7 @@ const executing = () => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-verify-')); dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite')); stores.push(store);
   const add = (type: GoalEventType, data?: unknown) => store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
-  add('goal-drafted', spec); add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved'); add('execution-started', { runId: 'run_1' });
+  add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved'); add('execution-started', { runId: 'run_1' });
   return { store, add };
 };
 const pass = { acceptanceId: 'AC-1', result: 'pass', command: 'npm test -- checkin', artifactRef: 'commit:abc123' } as const;
@@ -71,11 +71,11 @@ describe('verification gate', () => {
     service.recordOutcome(spec.id, 'close');
     expect(store.getGoal(spec.id)?.status).toBe('closed');
   });
-  it('does not infer automatic merge from a gate or closure', () => {
+  it('does not infer merge permission from a green gate or verification', () => {
     const { store, add } = executing();
-    const service = new VerificationService(store);
     add('gate-recorded', gateReport(DELIVERY));
-    service.verify(spec.id);
-    expect(service.mayAutoMerge(spec.id)).toBe(false);
+    new VerificationService(store).verify(spec.id);
+    expect(store.getGoal(spec.id)?.mergeAuthorization).toBeUndefined();
+    expect(() => add('merge-completed', { sourceRef: DELIVERY, targetBranch: 'main', mergeCommit: DELIVERY })).toThrow(/Human merge authorization/);
   });
 });

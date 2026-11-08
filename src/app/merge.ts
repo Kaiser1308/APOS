@@ -8,17 +8,25 @@ const git = (repo: string, args: string[]): string => execFileSync('git', ['-C',
 export class MergeService {
   constructor(private readonly store: GoalRepository) {}
 
+  /** Records the Human's one-time permission to merge the gated commit into one branch. */
+  authorize(goalId: string, targetBranch: string, by: string): void {
+    const state = this.store.getGoal(goalId);
+    if (!state?.gate) throw new Error('Verified Goal with a controller gate required');
+    this.store.append({ id: randomUUID(), goalId, type: 'merge-authorized', data: { goalId, goalVersion: state.spec.version, integrationCommit: state.gate.deliveryCommit, targetBranch, scope: 'goal', once: true, by }, at: new Date().toISOString() });
+  }
+
+  /** Merges exactly the authorized, gated commit into the authorized branch; nothing else. */
   merge(goalId: string, repoPath: string, sourceRef: string, targetBranch: string): string {
     const state = this.store.getGoal(goalId);
-    if (state?.status !== 'verified' || !state.spec.autoMergeAuthorized || state.merge) throw new Error('Verified Goal with unused Human merge authorization required');
-    if (!sourceRef?.trim() || !targetBranch?.trim()) throw new Error('Source commit and target branch required');
-    if (!/^[0-9a-fA-F]{40,64}$/.test(sourceRef)) throw new Error('Full source commit hash required');
-    // Only the commit the controller gated green may merge; owner-reported commit refs do not count.
-    if (state.gate?.result !== 'green' || state.gate.deliveryCommit.toLowerCase() !== sourceRef.toLowerCase()) throw new Error('Source must be the commit the controller gate verified');
+    const auth = state?.mergeAuthorization;
+    if (state?.status !== 'verified' || !auth || state.merge) throw new Error('Verified Goal with unused Human merge authorization required');
+    if (!/^[0-9a-fA-F]{40,64}$/.test(sourceRef ?? '')) throw new Error('Full source commit hash required');
+    if (state.gate?.result !== 'green' || state.gate.deliveryCommit.toLowerCase() !== sourceRef.toLowerCase() || auth.integrationCommit.toLowerCase() !== sourceRef.toLowerCase()) throw new Error('Source must be the commit the controller gate verified');
+    if (auth.targetBranch !== targetBranch) throw new Error(`Authorization covers ${auth.targetBranch}, not ${targetBranch}`);
     if (state.proposal?.mode === 'multi-wp' && state.integration?.commitRef !== sourceRef) throw new Error('Source must be the verified integration commit');
     const repo = assertGitRoot(repoPath);
     if (git(repo, ['branch', '--show-current']) !== targetBranch) throw new Error('Checkout the authorized target branch before merge');
-    if (git(repo, ['status', '--porcelain'])) throw new Error('Working tree must be clean before merge');
+    if (git(repo, ['status', '--porcelain', '--untracked-files=no'])) throw new Error('Working tree must be clean before merge');
     try { git(repo, ['cat-file', '-e', `${sourceRef}^{commit}`]); }
     catch { throw new Error('Source commit does not exist'); }
     let commit = git(repo, ['rev-parse', 'HEAD']);

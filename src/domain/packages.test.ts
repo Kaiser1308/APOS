@@ -5,7 +5,7 @@ import { spec, proposal } from './fixtures.test-support.js';
 const a = {
   id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1,
   owner: 'worker-a', outcome: 'QR intake works', scope: ['scanner'], exclusions: ['reports'],
-  dependencies: [], interfaces: ['checkIn(token) -> result'],
+  dependencies: [], interfaces: ['checkIn(token) -> result@v1'],
   acceptance: [{ id: 'WP-AC-1', text: 'valid token checks in', goalAcceptanceId: 'AC-1' }],
   integration: 'Lead runs check-in flow'
 };
@@ -29,6 +29,9 @@ describe('Work Package graph', () => {
   });
   it('rejects a Goal criterion with no package or Goal-level mapping', () => {
     expect(() => validatePackageGraph(spec, multi, [{ ...a, acceptance: [{ id: 'WP-AC-1', text: 'valid token checks in' }] }, b])).toThrow(/AC-1/);
+  });
+  it('rejects a shared interface without a version', () => {
+    expect(() => validatePackageGraph(spec, multi, [{ ...a, interfaces: ['checkIn(token)'] }, b])).toThrow(/needs a version/);
   });
   it('rejects an empty package outcome', () => {
     expect(() => parseWorkPackage({ ...a, outcome: ' ' })).toThrow();

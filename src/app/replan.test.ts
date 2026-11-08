@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { applyEvent, type GoalEvent, type GoalEventType } from '../domain/transitions.js';
-import { spec, proposal } from '../domain/fixtures.test-support.js';
+import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
 import { assertExecutionSettled } from './replan.js';
 import type { RuntimeAdapter } from '../runtime/orca.js';
 
@@ -8,7 +8,7 @@ it('blocks product replanning while Solo ownership is still live, then resets st
   let n = 0;
   const event = (type: GoalEventType, data?: unknown): GoalEvent => ({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-08T00:00:00.000Z' });
   let state = applyEvent(undefined, event('goal-drafted', spec));
-  for (const type of ['goal-approved', 'goal-selected'] as const) state = applyEvent(state, event(type));
+  state = applyEvent(state, event('goal-approved', approval)); state = applyEvent(state, event('goal-selected'));
   state = applyEvent(state, event('proposal-drafted', proposal));
   state = applyEvent(state, event('proposal-approved'));
   state = applyEvent(state, event('execution-started', { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'lead', repoPath: 'C:/project' }));

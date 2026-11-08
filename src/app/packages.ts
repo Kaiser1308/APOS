@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { validatePackageGraph, parsePackageEvidence, parseWorkPackage, type PackageEvidence, type WorkPackageSpec } from '../domain/packages.js';
 import { attemptLimit, type GoalEventType } from '../domain/transitions.js';
 import type { PackageBlocker } from '../domain/transitions.js';
-import { requiresIndependentReview } from '../domain/reviews.js';
+
 import type { GoalRepository } from '../store/journal.js';
 
 export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string };
@@ -43,7 +43,7 @@ export class PackageService {
     const item = state?.packages?.[packageId];
     if (item?.status !== 'executing' || !item.runtimeRef) throw new Error('Executing package and Orca dispatch required');
     if (await this.runtime.inspectPackage?.(item.runtimeRef as PackageRuntimeRef) !== 'completed') throw new Error('Orca Worker must complete before package verification');
-    if (state && requiresIndependentReview(state)) {
+    if (state?.proposal?.risks.length) {
       const latest = [...state.reviews].reverse().find(review => review.subject === 'package' && review.packageId === packageId && review.packageVersion === item.spec.version);
       if (latest?.result !== 'pass' || !item.evidence.some(evidence => evidence.commitRef === latest.commitRef)) throw new Error('Passing independent package review required');
     }

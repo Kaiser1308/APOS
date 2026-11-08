@@ -24,6 +24,10 @@ export type GateReport = {
   deliveryCommit: string;
   /** Owner attempt the gate was started for; a gate that finishes after a resume is rejected. */
   attemptKey: string;
+  /** Files changed from base to delivery; drives the review requirement. */
+  changedFiles?: string[];
+  /** `post-merge` reruns the checks on the merge commit at the target branch. */
+  phase?: 'delivery' | 'post-merge';
   environment: GateEnvironment;
   checks: CheckResult[];
   result: GateResult;

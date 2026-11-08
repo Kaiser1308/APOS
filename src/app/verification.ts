@@ -47,8 +47,4 @@ export class VerificationService {
     this.record(goalId, type[decision]);
   }
 
-  mayAutoMerge(goalId: GoalId): boolean {
-    const state = this.store.getGoal(goalId);
-    return Boolean(state?.spec.autoMergeAuthorized && state.status === 'verified');
-  }
 }

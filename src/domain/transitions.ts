@@ -1,13 +1,13 @@
-import { goalApprovalBlockers, parseExecutionProposal, parseGoalSpec, type ExecutionProposal, type GoalSpec } from './contracts.js';
+import { goalApprovalBlockers, parseAppetite, parseExecutionProposal, parseGoalSpec, type Appetite, type ExecutionProposal, type GoalSpec } from './contracts.js';
 import { attemptKey, type GateReport, type ManualConfirmation } from './gate.js';
 import { parsePackageEvidence, parseWorkPackage, validatePackageGraph, type PackageEvidence, type WorkPackageSpec } from './packages.js';
-import { parseReview, type ReviewRecord } from './reviews.js';
+import { ownerIdentities, parseReview, type ReviewRecord } from './reviews.js';
 
 export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'worker-settled' | 'gate-recorded' | 'check-confirmed'
+  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -35,12 +35,22 @@ export type GoalState = {
   /** Latest controller-run gate; owner-submitted evidence never replaces it. */
   gate?: GateReport;
   manualConfirmations?: ManualConfirmation[];
+  /** Controller-only budget; never rendered into documents or briefs. */
+  appetite?: Appetite;
+  /** Created only when the Human chooses to merge after reading the Verification Report. */
+  mergeAuthorization?: MergeAuthorization;
+  /** Gate rerun at the target branch head after a merge. */
+  postMergeGate?: GateReport;
+  findings?: Finding[];
 };
+export type MergeAuthorization = { goalId: string; goalVersion: number; integrationCommit: string; targetBranch: string; scope: 'goal'; once: true; by: string };
+export type FindingKind = 'intent_gap' | 'bad_plan' | 'patch' | 'defer';
+export type Finding = { kind: FindingKind; note: string; checkIds?: string[]; commit?: string; logRefs?: string[]; by: string; signature?: string };
 
 function requireThat(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
 }
-export const attemptLimit = (state: GoalState): number => state.proposal?.maxAttempts ?? 3;
+export const attemptLimit = (state: GoalState): number => state.appetite?.maxAttempts ?? 3;
 
 export function applyEvent(state: GoalState | undefined, event: GoalEvent): GoalState {
   requireThat(event.id && event.goalId && !Number.isNaN(Date.parse(event.at)), 'Invalid event identity or timestamp');
@@ -57,14 +67,23 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'goal-approved':
       requireThat(state.status === 'draft', 'Goal not awaiting approval');
       { const blockers = goalApprovalBlockers(state.spec); requireThat(!blockers.length, `Goal not approvable: ${blockers.join('; ')}`); }
-      return { ...state, status: 'approved', approvedGoalVersion: state.spec.version };
+      {
+        const appetite = (event.data as { appetite?: unknown } | undefined)?.appetite;
+        requireThat(appetite, 'Goal approval must include the Human-approved appetite');
+        return { ...state, status: 'approved', approvedGoalVersion: state.spec.version, appetite: parseAppetite(appetite) };
+      }
     case 'goal-selected':
       requireThat(state.approvedGoalVersion === state.spec.version, 'Goal must be approved');
       return { ...state, status: 'selected', selected: true };
     case 'goal-revised': {
       const spec = parseGoalSpec(event.data);
       requireThat(spec.id === state.spec.id && spec.version > state.spec.version, 'Goal revision must advance version');
-      return { spec, status: 'draft', selected: false, evidence: [], packages: {}, reviews: [] };
+      return { spec, status: 'draft', selected: false, evidence: [], packages: {}, reviews: [], appetite: state.appetite };
+    }
+    case 'appetite-set': {
+      const data = event.data as { appetite?: unknown; reason?: unknown };
+      requireThat(typeof data?.reason === 'string' && data.reason.trim(), 'Appetite change needs the Human reason');
+      return { ...state, appetite: parseAppetite(data.appetite) };
     }
     case 'proposal-drafted':
     case 'proposal-revised': {
@@ -78,6 +97,14 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.status === 'planned' && state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');
       requireThat(state.spec.acceptance.every(item => state.proposal!.acceptanceMapping.some(mapping => mapping.acceptanceId === item.id)), 'Every Goal acceptance criterion needs a verification mapping');
       requireThat(state.proposal.acceptanceMapping.every(mapping => state.spec.acceptance.some(item => item.id === mapping.acceptanceId)), 'Proposal maps an unknown Goal acceptance criterion');
+      // The controller, not the Human, accepts the Lead's plan: these are its machine checks before dispatch.
+      requireThat(!state.proposal.sourceSha256 || state.proposal.sourceSha256 === state.spec.source.sha256, 'Proposal was planned against a different source snapshot');
+      { const blockers = goalApprovalBlockers(state.spec); requireThat(!blockers.length, `Goal has open questions: ${blockers.join('; ')}`); }
+      requireThat(state.appetite, 'Approved appetite required before dispatch');
+      if (state.proposal.estimatedCost) {
+        const cost = state.proposal.estimatedCost;
+        requireThat(cost.spendUsd <= state.appetite.maxSpendUsd && cost.wallMinutes <= state.appetite.maxWallMinutes, `needs-decision: estimated cost ${cost.spendUsd} USD / ${cost.wallMinutes} min exceeds the approved appetite`);
+      }
       if (state.proposal.mode === 'multi-wp') validatePackageGraph(state.spec, state.proposal, Object.values(state.packages ?? {}).map(item => item.spec));
       return { ...state, proposalApprovedVersion: state.proposal.version, status: 'ready' };
     case 'worker-settled': {
@@ -225,18 +252,28 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       if (review.subject === 'package') {
         const item = state.packages?.[review.packageId!];
         requireThat(item?.status === 'executing' && item.spec.version === review.packageVersion, 'Executing current package required for review');
-        requireThat(review.reviewer !== item.spec.owner, 'Reviewer must differ from package owner');
+        const owners = ownerIdentities(state, item.spec.id);
+        requireThat(!owners.names.includes(review.reviewer.toLowerCase()), 'Reviewer must differ from package owner');
+        requireThat(!owners.sessions.includes(review.session), 'Reviewer must use a session separate from the package owner');
         requireThat(item.evidence.some(evidence => evidence.commitRef === review.commitRef), 'Review commit must match package evidence');
         const packages = review.result === 'changes' ? { ...state.packages, [review.packageId!]: { ...item, status: 'stale' as const, evidence: [] } } : state.packages;
         return { ...state, packages, reviews: [...state.reviews, review] };
       }
       requireThat(state.proposal?.mode !== 'multi-wp' || Object.values(state.packages ?? {}).every(item => item.status === 'verified'), 'All packages must be verified before Goal review');
-      requireThat(review.reviewer !== 'lead', 'Goal reviewer must differ from Lead owner');
+      const owners = ownerIdentities(state);
+      requireThat(!owners.names.includes(review.reviewer.toLowerCase()), 'Goal reviewer must differ from Lead owner');
+      requireThat(!owners.sessions.includes(review.session), 'Goal reviewer must use a session separate from every owner');
+      requireThat(state.gate && review.commitRef.toLowerCase() === state.gate.deliveryCommit.toLowerCase(), 'Goal review must name the commit the controller gated');
       return { ...state, reviews: [...state.reviews, review] };
     }
     case 'gate-recorded': {
-      requireThat(state.status === 'executing', 'Executing Goal required for gate');
       const gate = event.data as GateReport;
+      if (gate?.phase === 'post-merge') {
+        requireThat(state.status === 'verified' && state.merge, 'Post-merge gate needs a completed merge');
+        requireThat(gate.goalId === state.spec.id && gate.goalVersion === state.spec.version && gate.deliveryCommit === state.merge.mergeCommit, 'Post-merge gate must run on the merge commit');
+        return { ...state, postMergeGate: gate };
+      }
+      requireThat(state.status === 'executing', 'Executing Goal required for gate');
       requireThat(gate && gate.goalId === state.spec.id && gate.goalVersion === state.spec.version && Array.isArray(gate.checks) && /^[0-9a-fA-F]{40,64}$/.test(gate.deliveryCommit ?? '') && /^[0-9a-fA-F]{40,64}$/.test(gate.baseCommit ?? ''), 'Gate report for current Goal version and full commits required');
       requireThat(['green', 'red', 'unverifiable', 'pending'].includes(gate.result), 'Gate result required');
       requireThat(gate.attemptKey === attemptKey(state), 'Gate was started for an earlier owner attempt; rerun it');
@@ -261,17 +298,37 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.proposal?.mode !== 'multi-wp' || state.integration, 'Integrated Multi-WP evidence required');
       return { ...state, status: 'verified' };
     case 'merge-completed': {
-      requireThat(state.status === 'verified' && state.spec.autoMergeAuthorized && !state.merge, 'Verified Goal with unused merge authorization required');
+      const auth = state.mergeAuthorization;
+      requireThat(state.status === 'verified' && auth && !state.merge, 'Verified Goal with unused Human merge authorization required');
       const data = event.data as GoalState['merge'];
       requireThat(data?.sourceRef && data.targetBranch && data.mergeCommit, 'Merge details required');
+      requireThat(data.sourceRef.toLowerCase() === auth.integrationCommit.toLowerCase() && data.targetBranch === auth.targetBranch && auth.goalVersion === state.spec.version, 'Merge does not match the Human authorization');
       return { ...state, merge: data };
     }
+    case 'merge-authorized': {
+      requireThat(state.status === 'verified' && !state.mergeAuthorization && !state.merge, 'Verified Goal without a prior authorization required');
+      const data = event.data as MergeAuthorization;
+      requireThat(state.gate?.result === 'green' && data?.integrationCommit?.toLowerCase() === state.gate.deliveryCommit.toLowerCase(), 'Authorization must name the commit the controller gated green');
+      requireThat(data.goalId === state.spec.id && data.goalVersion === state.spec.version && data.scope === 'goal' && data.once === true && data.targetBranch?.trim() && data.by?.trim(), 'Authorization needs Goal, version, target branch, scope, once and who');
+      return { ...state, mergeAuthorization: data };
+    }
+    case 'finding-recorded': {
+      const data = event.data as Finding;
+      requireThat(data && ['intent_gap', 'bad_plan', 'patch', 'defer'].includes(data.kind) && data.note?.trim() && data.by?.trim(), 'Finding needs kind, note and who');
+      const findings = [...(state.findings ?? []), data];
+      // A gap in intent cannot be fixed by retrying: it parks the Goal for PM and Human.
+      if (data.kind === 'intent_gap' && state.status === 'executing') return { ...state, findings, status: 'blocked', blocker: { kind: 'product', note: data.note } };
+      return { ...state, findings };
+    }
+    case 'human-notified':
+      requireThat(event.data && typeof event.data === 'object', 'Notification details required');
+      return state;
     case 'outcome-accepted':
       requireThat(state.status === 'verified', 'Technical verification required');
       return { ...state, status: 'closed' };
     case 'outcome-revised':
       requireThat(state.status === 'verified', 'Technical verification required');
-      return { ...state, status: 'draft', selected: false, approvedGoalVersion: undefined, proposal: undefined, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined, gate: undefined, manualConfirmations: [] };
+      return { ...state, status: 'draft', selected: false, approvedGoalVersion: undefined, proposal: undefined, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined, gate: undefined, manualConfirmations: [], mergeAuthorization: undefined, postMergeGate: undefined, findings: [] };
     case 'outcome-stopped':
       return { ...state, status: 'stopped' };
   }

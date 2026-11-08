@@ -9,11 +9,14 @@ export const spec: GoalSpec = {
   scope: ['QR'], exclusions: [],
   acceptance: [{ id: 'AC-1', text: 'valid QR works', requirementIds: ['R-1'], examples: [], boundaries: [], prohibited: [], checkIds: ['CHK-1'] }],
   checks: [{ id: 'CHK-1', kind: 'command', command: 'npm test', expect: 'pass', runs: 1, timeoutMs: 600_000, env: {} }],
-  appetite: '2 days', dependencies: [], priority: 1, autoMergeAuthorized: false
+  dependencies: [], priority: 1
 };
+/** Data of a `goal-approved` event: the Human approves the Goal together with its controller-only appetite. */
+export const approval = { appetite: { size: 'M', maxSpendUsd: 20, maxWallMinutes: 240, maxAttempts: 3, overrunPolicy: 'ask' } } as const;
 export const proposal: ExecutionProposal = {
   id: 'EXEC-001', version: 1, goalId: spec.id, goalVersion: 1,
-  mode: 'solo-direct', approach: 'reuse API', risks: [],
+  mode: 'solo-direct', approach: 'reuse API', risks: [], sharedPaths: [],
+  splitRationale: 'scanner and history change separate modules', estimatedCost: { spendUsd: 5, wallMinutes: 60 },
   acceptanceMapping: [{ acceptanceId: 'AC-1', verification: 'test' }],
   verificationStrategy: 'integration test'
 };

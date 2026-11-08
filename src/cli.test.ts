@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './cli.js';
 import { controllerHome } from './store/event-log.js';
-import { spec as baseSpec, proposal, sourceText } from './domain/fixtures.test-support.js';
+import { spec as baseSpec, proposal, sourceText, approval } from './domain/fixtures.test-support.js';
 import type { GoalSpec } from './domain/contracts.js';
 
 // The gate really runs this in a fresh worktree at the commit under test.
@@ -18,7 +18,7 @@ import type { PackageRuntime } from './app/packages.js';
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
 
-it('requires separate Goal approval, selection and Proposal approval before auto dispatch', async () => {
+it('dispatches a Solo plan the Lead commits after Human Goal approval and selection, with no Human plan gate', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-cli-')); dirs.push(dir);
   execFileSync('git', ['init', '-q', dir]);
   const git = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
@@ -43,14 +43,14 @@ it('requires separate Goal approval, selection and Proposal approval before auto
   const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, gate: { artifactRoot: artifacts }, write: line => output.push(line) });
   await invoke('init');
   await invoke('goal', 'create', '--file', goalFile, '--source', sourceFile);
-  await invoke('goal', 'approve', spec.id);
+  await invoke('goal', 'approve', spec.id, '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3');
   await invoke('lead', 'recommend');
   expect(starts).toBe(0);
   expect(output.join('\n')).toContain(spec.id);
   await invoke('goal', 'select', spec.id);
   await invoke('lead', 'propose', '--file', proposalFile);
   expect(starts).toBe(0);
-  await invoke('execution', 'approve', spec.id);
+  await invoke('lead', 'commit', spec.id);
   expect(starts).toBe(1);
   await invoke('execution', 'status', spec.id);
   expect(output.at(-1)).toContain('executing');
@@ -76,7 +76,8 @@ it('requires separate Goal approval, selection and Proposal approval before auto
   expect(JSON.parse(output.at(-1)!)).toMatchObject({ result: 'green', deliveryCommit: fixed });
   await expect(invoke('execution', 'verify', spec.id, '--commit', broken)).rejects.toThrow(/not [0-9a-f]{40}/);
   await invoke('execution', 'verify', spec.id, '--commit', fixed);
-  await invoke('outcome', 'close', spec.id);
+  await invoke('outcome', 'close', spec.id, '--merge-to', git(['branch', '--show-current']));
+  expect(output.find(line => line.startsWith('Merged'))).toMatch(/post-merge gate green/);
   expect(released).toEqual(['ctx_1']);
   await invoke('execution', 'status', spec.id);
   expect(output.at(-1)).toContain('closed');
@@ -87,7 +88,7 @@ it('runs an approved two-package Goal through dependency release, integration an
   execFileSync('git', ['init', '-q', dir]);
   const git = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   const input = (name: string, data: unknown) => { const path = join(dir, name); writeFileSync(path, JSON.stringify(data)); return path; };
-  const a: WorkPackageSpec = { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' };
+  const a: WorkPackageSpec = { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' };
   const b: WorkPackageSpec = { ...a, id: 'WP-02', owner: 'worker-b', outcome: 'History', scope: ['history'], dependencies: ['WP-01'], acceptance: [{ id: 'WP-AC-2', text: 'history works' }] };
   const starts: string[] = [];
   const runtime: RuntimeAdapter & PackageRuntime = {
@@ -103,13 +104,14 @@ it('runs an approved two-package Goal through dependency release, integration an
   writeFileSync(join(dir, 'brief.md'), sourceText);
   await invoke('init');
   await invoke('goal', 'create', '--file', input('goal.json', spec), '--source', join(dir, 'brief.md'));
-  await invoke('goal', 'approve', spec.id); await invoke('goal', 'select', spec.id);
+  await invoke('goal', 'approve', spec.id, '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3'); await invoke('goal', 'select', spec.id);
   await invoke('lead', 'propose', '--file', input('proposal.json', { ...proposal, mode: 'multi-wp' }));
   await invoke('package', 'add', '--file', input('wp-a.json', a));
   await invoke('package', 'add', '--file', input('wp-b.json', b));
   expect(starts).toEqual([]);
-  await invoke('execution', 'approve', spec.id);
+  await invoke('lead', 'commit', spec.id);
   expect(starts).toEqual(['WP-01']);
+  expect(output.find(line => line.startsWith('NOTICE'))).toMatch(/Multi-WP \(2 packages/);
   writeFileSync(join(dir, 'scanner.ts'), 'export const scan = true;'); git(['add', 'scanner.ts']);
   git(['-c', 'user.name=APOS', '-c', 'user.email=apos@local.invalid', 'commit', '-qm', 'scanner']);
   const commitA = git(['rev-parse', 'HEAD']);
@@ -128,6 +130,7 @@ it('runs an approved two-package Goal through dependency release, integration an
   const integrationCommit = git(['rev-parse', 'HEAD']);
   await invoke('gate', 'run', spec.id, '--commit', integrationCommit);
   expect(JSON.parse(output.at(-1)!)).toMatchObject({ result: 'green' });
+  await invoke('review', 'submit', spec.id, '--file', input('review.json', { subject: 'goal', reviewer: 'reviewer-agent', session: 'review-1', result: 'pass', commitRef: integrationCommit, note: 'Checked integrated flow' }));
   await invoke('integration', 'complete', spec.id, '--file', input('integration.json', { commitRef: integrationCommit, acceptance: [{ acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:goal' }], regression: { result: 'pass', command: 'npm test', artifactRef: 'log:regression' } }));
   await invoke('outcome', 'close', spec.id);
   await invoke('execution', 'status', spec.id);
@@ -148,10 +151,10 @@ it('refuses approval when the source snapshot was edited after drafting, or a re
   await expect(invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'tampered.md'))).rejects.toThrow(/sha256 does not match/);
   await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
   writeFileSync(join(controllerHome(dir), 'sources', spec.id, 'v1.md'), sourceText + 'Also accept expired codes.\n');
-  await expect(invoke('goal', 'approve', spec.id)).rejects.toThrow(/Source snapshot .* differs/);
+  await expect(invoke('goal', 'approve', spec.id, '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3')).rejects.toThrow(/Source snapshot .* differs/);
 
   const orphan = { ...spec, id: 'GOAL-002', requirements: [...spec.requirements, { id: 'R-2', sourceSpan: 'line 3', text: 'exactly one', disposition: 'acceptance' }] };
   writeFileSync(join(dir, 'goal2.json'), JSON.stringify(orphan));
   await invoke('goal', 'create', '--file', join(dir, 'goal2.json'), '--source', join(dir, 'brief.md'));
-  await expect(invoke('goal', 'approve', 'GOAL-002')).rejects.toThrow(/R-2 has no acceptance/);
+  await expect(invoke('goal', 'approve', 'GOAL-002', '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3')).rejects.toThrow(/R-2 has no acceptance/);
 }, 30_000);

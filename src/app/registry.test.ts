@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal } from '../domain/fixtures.test-support.js';
+import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
 import { GoalRegistryService } from './registry.js';
 
 const dirs: string[] = [];
@@ -17,7 +17,7 @@ it('recommends and selects only Goals whose dependencies have closed', () => {
   const second = { ...spec, id: 'GOAL-002', dependencies: [spec.id], priority: 0 };
   add(spec.id, 'goal-drafted', spec); add(second.id, 'goal-drafted', second);
   const registry = new GoalRegistryService(store);
-  registry.approve(spec.id); registry.approve(second.id);
+  registry.approve(spec.id, approval.appetite); registry.approve(second.id, approval.appetite);
   expect(registry.recommend()?.spec.id).toBe(spec.id);
   expect(() => registry.select(second.id)).toThrow(/dependencies not closed/);
   registry.select(spec.id);
@@ -32,7 +32,7 @@ it('rejects a dependency cycle before Goal approval', () => {
   const store = fixture();
   store.append({ id: 'EV-1', goalId: spec.id, type: 'goal-drafted', data: { ...spec, dependencies: ['GOAL-002'] }, at: '2026-11-08T00:00:00.000Z' });
   store.append({ id: 'EV-2', goalId: 'GOAL-002', type: 'goal-drafted', data: { ...spec, id: 'GOAL-002', dependencies: [spec.id] }, at: '2026-11-08T00:00:00.000Z' });
-  expect(() => new GoalRegistryService(store).approve(spec.id)).toThrow(/cycle/);
+  expect(() => new GoalRegistryService(store).approve(spec.id, approval.appetite)).toThrow(/cycle/);
   expect(store.getGoal(spec.id)?.status).toBe('draft');
   store.close();
 });

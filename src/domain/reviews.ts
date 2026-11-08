@@ -7,6 +7,8 @@ const schema = z.object({
   packageId: z.string().regex(/^WP-[A-Z0-9-]+$/).optional(),
   packageVersion: z.number().int().positive().optional(),
   reviewer: text,
+  /** The reviewer's own session: an Orca Dispatch ID, or `human:<name>`. A name alone is not enough. */
+  session: text,
   result: z.enum(['pass', 'changes']),
   commitRef: text,
   note: text
@@ -17,6 +19,31 @@ const schema = z.object({
 
 export type ReviewRecord = z.infer<typeof schema>;
 export function parseReview(value: unknown): ReviewRecord { return schema.parse(value); }
-export function requiresIndependentReview(state: GoalState): boolean {
-  return Boolean(state.spec.autoMergeAuthorized || state.proposal?.risks.length);
+
+/** Test, spec and fixture files: changing them can make a gate green without fixing behaviour. */
+const ORACLE = /(^|\/)(tests?|__tests__|spec|specs|fixtures?|testdata)\/|\.(test|spec)\.[A-Za-z0-9]+$|(^|\/)test_[^/]+\.py$|_test\.(go|py)$/i;
+
+/**
+ * Why an independent review is required, derived from the plan and the gated diff rather than only
+ * from risks the Lead chose to declare. Empty when the controller gate alone is enough.
+ */
+export function reviewReasons(state: GoalState): string[] {
+  const reasons: string[] = [];
+  if (state.proposal?.mode === 'multi-wp') reasons.push('Multi-WP integration');
+  if (state.proposal?.risks.length) reasons.push(`declared risks: ${state.proposal.risks.join('; ')}`);
+  const changed = state.gate?.changedFiles ?? [];
+  const oracle = changed.filter(file => ORACLE.test(file));
+  if (oracle.length) reasons.push(`tests or oracles changed: ${oracle.join(', ')}`);
+  const shared = changed.filter(file => (state.proposal?.sharedPaths ?? []).some(prefix => file === prefix || file.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`)));
+  if (shared.length) reasons.push(`shared interface paths changed: ${shared.join(', ')}`);
+  return reasons;
+}
+export function requiresIndependentReview(state: GoalState): boolean { return reviewReasons(state).length > 0; }
+
+/** Owner identities and sessions a reviewer must not share. */
+export function ownerIdentities(state: GoalState, packageId?: string): { names: string[]; sessions: string[] } {
+  const items = Object.values(state.packages ?? {}).filter(item => !packageId || item.spec.id === packageId);
+  const refs = [...(packageId ? [] : [state.runtimeRef]), ...items.map(item => item.runtimeRef)] as ({ dispatchId?: string; terminal?: string } | undefined)[];
+  const names = packageId ? items.map(item => item.spec.owner) : ['lead', ...items.map(item => item.spec.owner)];
+  return { names: names.map(name => name.toLowerCase()), sessions: refs.flatMap(ref => [ref?.dispatchId, ref?.terminal]).filter((value): value is string => Boolean(value)) };
 }

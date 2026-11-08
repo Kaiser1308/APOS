@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal, gateReport as fixtureGate } from '../domain/fixtures.test-support.js';
+import { spec, proposal, gateReport as fixtureGate, approval } from '../domain/fixtures.test-support.js';
 import { attemptKey } from '../domain/gate.js';
 import { GitCommitInspector, IntegrationService, type CommitInspector } from './integration.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
@@ -12,14 +12,14 @@ import { ReviewService } from './review.js';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const first: WorkPackageSpec = { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' };
+const first: WorkPackageSpec = { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' };
 const second: WorkPackageSpec = { ...first, id: 'WP-02', owner: 'worker-b', outcome: 'History view', scope: ['history'], acceptance: [{ id: 'WP-AC-2', text: 'view history' }] };
 const setup = (risks: string[] = []) => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-integration-')); dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
   const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
-  add('goal-drafted', spec); add('goal-approved'); add('goal-selected');
+  add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected');
   add('proposal-drafted', { ...proposal, mode: 'multi-wp', risks });
   add('package-added', first); add('package-added', second); add('proposal-approved');
   for (const [item, commitRef] of [[first, 'commit-a'], [second, 'commit-b']] as const) {
@@ -29,7 +29,8 @@ const setup = (risks: string[] = []) => {
   }
   const gateReport = (commit: string, result?: 'green' | 'red') => ({ ...fixtureGate(commit, result), attemptKey: attemptKey(store.getGoal(spec.id)!) });
   add('gate-recorded', gateReport(INTEGRATION));
-  return { store, dir, add, gateReport };
+  const review = () => new ReviewService(store).submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', session: 'review-1', result: 'pass', commitRef: INTEGRATION, note: 'Checked integrated flow' });
+  return { store, dir, add, gateReport, review };
 };
 const inspector: CommitInspector = {
   exists: (_repo, ref) => ['commit-a', 'commit-b', INTEGRATION].includes(ref),
@@ -47,8 +48,9 @@ it('waits for every package before preparing integration', () => {
 });
 
 it('detects overlapping changes and requires an integration resolution', () => {
-  const { store, dir, add } = setup();
+  const { store, dir, add, review } = setup();
   add('package-verified', { packageId: first.id }); add('package-verified', { packageId: second.id });
+  review();
   const overlapping: CommitInspector = { ...inspector, files: (_repo, ref) => ref === 'integration' ? ['src/shared.ts'] : ['src/shared.ts'] };
   const service = new IntegrationService(store, overlapping);
   expect(service.prepare(spec.id, dir).conflicts).toEqual(['src/shared.ts']);
@@ -59,8 +61,9 @@ it('detects overlapping changes and requires an integration resolution', () => {
 });
 
 it('requires passing Goal acceptance and regression on a real integration commit', () => {
-  const { store, dir, add } = setup();
+  const { store, dir, add, review } = setup();
   add('package-verified', { packageId: first.id }); add('package-verified', { packageId: second.id });
+  review();
   const service = new IntegrationService(store, inspector);
   expect(() => service.complete(spec.id, dir, { ...evidence, commitRef: 'missing' })).toThrow(/commit/i);
   expect(() => service.complete(spec.id, dir, { ...evidence, regression: { ...evidence.regression, result: 'fail' } })).toThrow(/regression/i);
@@ -98,13 +101,13 @@ it('checks commit existence, changed files and ancestry against Git', () => {
   expect(inspector.contains(dir, integrated, firstCommit)).toBe(false);
 });
 
-it('requires independent Goal review for a risky integration before recording completion', () => {
-  const { store, dir, add } = setup(['Authentication regression']);
+it('requires an independent Goal review for every Multi-WP integration before recording completion', () => {
+  const { store, dir, add } = setup();
   add('package-verified', { packageId: first.id }); add('package-verified', { packageId: second.id });
   const service = new IntegrationService(store, inspector);
   expect(() => service.complete(spec.id, dir, evidence)).toThrow(/independent Goal review/i);
   expect(store.getGoal(spec.id)?.integration).toBeUndefined();
-  new ReviewService(store).submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', result: 'pass', commitRef: INTEGRATION, note: 'Checked integrated auth flow' });
+  new ReviewService(store).submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', session: 'review-1', result: 'pass', commitRef: INTEGRATION, note: 'Checked integrated auth flow' });
   service.complete(spec.id, dir, evidence);
   expect(store.getGoal(spec.id)?.status).toBe('verified');
   store.close();

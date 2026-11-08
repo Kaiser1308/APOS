@@ -103,9 +103,22 @@ export class GateService {
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
+  /** Reruns the Goal's checks on the merge commit, against the target head the merge was made on. */
+  runPostMerge(goalId: string, repoPath: string): GateReport {
+    const state = this.store.getGoal(goalId);
+    if (state?.status !== 'verified' || !state.merge) throw new Error('Merged, verified Goal required for the post-merge gate');
+    const parent = execFileSync('git', ['-C', assertGitRoot(repoPath), 'rev-parse', `${state.merge.mergeCommit}^1`], { encoding: 'utf8' }).trim();
+    return this.execute(goalId, repoPath, { deliveryCommit: state.merge.mergeCommit, baseCommit: parent }, 'post-merge');
+  }
+
   run(goalId: string, repoPath: string, input: { deliveryCommit: string; baseCommit?: string }): GateReport {
     const state = this.store.getGoal(goalId);
     if (!state || state.status !== 'executing') throw new Error('Executing Goal required for gate');
+    return this.execute(goalId, repoPath, input, 'delivery');
+  }
+
+  private execute(goalId: string, repoPath: string, input: { deliveryCommit: string; baseCommit?: string }, phase: 'delivery' | 'post-merge'): GateReport {
+    const state = this.store.getGoal(goalId)!;
     const current = this.digest(repoPath, goalId);
     if (current !== state.spec.source.sha256) throw new Error('Source snapshot changed or missing since approval; revise the Goal before gating');
     const packageBase = Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.baseCommit).find(Boolean);
@@ -129,7 +142,9 @@ export class GateService {
     const environment: GateEnvironment = { platform: process.platform, shell: this.executor.shell, node: process.version };
     const report: GateReport = {
       gateId, goalId, goalVersion: state.spec.version, sourceSha256: state.spec.source.sha256,
-      baseCommit, deliveryCommit: input.deliveryCommit, attemptKey: attempt, environment, checks, result: summarizeGate(checks), at: this.now()
+      baseCommit, deliveryCommit: input.deliveryCommit, attemptKey: attempt, phase,
+      changedFiles: this.inspector.files(repoPath, input.deliveryCommit, baseCommit),
+      environment, checks, result: summarizeGate(checks), at: this.now()
     };
     writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
     this.store.append({ id: randomUUID(), goalId, type: 'gate-recorded', data: report, at: this.now() });

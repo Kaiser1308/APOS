@@ -65,10 +65,8 @@ const goalSchema = z.object({
   exclusions: z.array(namedText),
   acceptance: z.array(acceptanceSchema).min(1),
   checks: z.array(checkSchema).min(1),
-  appetite: namedText,
   dependencies: z.array(id),
-  priority: z.number().int().nonnegative(),
-  autoMergeAuthorized: z.boolean()
+  priority: z.number().int().nonnegative()
 }).superRefine((goal, ctx) => {
   const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
   const unique = (items: { id: string }[], label: string, path: string) => {
@@ -110,11 +108,35 @@ const proposalSchema = z.object({
   mode: z.enum(['solo-direct', 'solo-phased', 'multi-wp']),
   approach: namedText,
   risks: z.array(namedText),
-  maxAttempts: z.number().int().min(1).max(10).optional(),
   baseCommit: commit.optional(),
+  /** Hash of the source the Lead planned from; the controller refuses a plan made against another source. */
+  sourceSha256: sha256.optional(),
+  estimatedCost: z.object({ spendUsd: z.number().nonnegative(), wallMinutes: z.number().positive() }).optional(),
+  /** Why splitting beats one owner; required for Multi-WP. */
+  splitRationale: namedText.optional(),
+  /** Paths whose change forces an independent review (shared interfaces, schemas). */
+  sharedPaths: z.array(namedText).default([]),
   acceptanceMapping: z.array(z.object({ acceptanceId: id, verification: namedText, level: z.literal('goal').optional() })).min(1),
   verificationStrategy: namedText
+}).superRefine((proposal, ctx) => {
+  if (proposal.mode !== 'multi-wp') return;
+  if (!proposal.splitRationale) ctx.addIssue({ code: 'custom', path: ['splitRationale'], message: 'Multi-WP needs a split rationale compared with Solo' });
+  if (!proposal.estimatedCost) ctx.addIssue({ code: 'custom', path: ['estimatedCost'], message: 'Multi-WP needs a cost estimate covering packages, integration and review' });
 });
+
+/**
+ * Controller-only budget the Human approves with the Goal. It never appears in Goal documents or
+ * briefs; owners see scope and acceptance, and are stopped honestly when a limit is hit.
+ */
+const appetiteSchema = z.object({
+  size: z.enum(['S', 'M', 'L']),
+  maxSpendUsd: z.number().positive(),
+  maxWallMinutes: z.number().int().positive(),
+  maxAttempts: z.number().int().min(1).max(10),
+  overrunPolicy: z.enum(['stop', 'ask']).default('ask')
+});
+export type Appetite = z.infer<typeof appetiteSchema>;
+export function parseAppetite(value: unknown): Appetite { return appetiteSchema.parse(value); }
 
 export type GoalId = string;
 export type SpecVersion = number;

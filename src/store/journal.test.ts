@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProjectJournal } from './journal.js';
-import { spec, proposal, sourceText } from '../domain/fixtures.test-support.js';
+import { spec, proposal, sourceText, approval } from '../domain/fixtures.test-support.js';
 import { initProject } from '../app/init-project.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -39,12 +39,13 @@ it('keeps events in the controller home and commits nothing to the repo before a
 
 it('commits the readable Goal record with its source at approval', async () => {
   const { dir, git, draft, add, close } = await project();
-  draft(); add('goal-approved');
+  draft(); add('goal-approved', approval);
   expect(git('log', '-1', '--format=%s')).toBe(`apos: ${spec.id} goal-approved`);
   const files = git('show', '--pretty=format:', '--name-only', 'HEAD');
   expect(files).toContain(`.apos/goals/${spec.id}/goal.md`);
   expect(files).toContain(`.apos/goals/${spec.id}/source.md`);
   expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'source.md'), 'utf8')).toBe(sourceText);
+  expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'goal.md'), 'utf8')).not.toMatch(/maxSpend|appetite|maxWallMinutes/);
   close();
 });
 
@@ -57,7 +58,7 @@ it('does not log an event that fails its transition', async () => {
 
 it('rebuilds a lost SQLite index from the controller log', async () => {
   const { dir, home, draft, add, close } = await project();
-  draft(); add('goal-approved'); add('goal-selected');
+  draft(); add('goal-approved', approval); add('goal-selected');
   close();
   rmSync(join(home, 'state.sqlite'), { force: true });
   rmSync(join(home, 'state.sqlite-wal'), { force: true });
@@ -69,7 +70,7 @@ it('rebuilds a lost SQLite index from the controller log', async () => {
 
 it('ignores Goal events an owner commits into the repo', async () => {
   const { dir, git, draft, add, journal, close } = await project();
-  draft(); add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+  draft(); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
   const forged = { id: 'EV-forged', goalId: spec.id, type: 'verified', at };
   mkdirSync(join(dir, '.apos', 'goals', spec.id), { recursive: true });
   writeFileSync(join(dir, '.apos', 'goals', spec.id, 'events.jsonl'), `${JSON.stringify(forged)}\n`);
@@ -86,7 +87,7 @@ it('imports an APOS v1 history kept in the repo, once, and skips one that no lon
   close();
   const legacy = [
     { id: 'L-1', goalId: spec.id, type: 'goal-drafted', data: spec, at },
-    { id: 'L-2', goalId: spec.id, type: 'goal-approved', at }
+    { id: 'L-2', goalId: spec.id, type: 'goal-approved', data: approval, at }
   ];
   const goalDir = join(dir, '.apos', 'goals', spec.id);
   mkdirSync(goalDir, { recursive: true });

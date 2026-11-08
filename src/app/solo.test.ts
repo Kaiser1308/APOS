@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal, gateReport } from '../domain/fixtures.test-support.js';
+import { spec, proposal, gateReport, approval } from '../domain/fixtures.test-support.js';
 import { SoloService } from './solo.js';
 import { attemptKey } from '../domain/gate.js';
 import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
@@ -36,7 +36,7 @@ class FakeRuntime implements RuntimeAdapter {
 describe('Solo dispatch', () => {
   it('refuses dispatch before Goal selection and Execution approval', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved');
+    add('goal-approved', approval);
     const runtime = new FakeRuntime();
     await expect(new SoloService(store, runtime).start(spec.id, dir)).rejects.toThrow();
     expect(runtime.starts).toBe(0);
@@ -44,7 +44,7 @@ describe('Solo dispatch', () => {
   });
   it('starts once and returns the persisted attempt on repeated calls and reopen', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
     expect(await service.start(spec.id, dir)).toEqual(ref);
@@ -57,7 +57,7 @@ describe('Solo dispatch', () => {
   });
   it('resumes phased work with the prior owner and checkpoint', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved'); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
     await service.start(spec.id, dir);
@@ -70,7 +70,7 @@ describe('Solo dispatch', () => {
   });
   it('does not reuse a live terminal for phased resume', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved'); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
     await service.start(spec.id, dir);
@@ -81,7 +81,7 @@ describe('Solo dispatch', () => {
   });
   it('does not verify Solo evidence until Orca reports successful completion', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
     await service.start(spec.id, dir);
@@ -97,7 +97,7 @@ describe('Solo dispatch', () => {
   });
   it('recovers a lost phased resume response without starting another attempt', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved'); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
     await service.start(spec.id, dir);
@@ -112,7 +112,7 @@ describe('Solo dispatch', () => {
   });
   it('reuses a failed Solo Direct owner and invalidates prior evidence for the repair attempt', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved'); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
     await service.start(spec.id, dir);
@@ -126,7 +126,7 @@ describe('Solo dispatch', () => {
   });
   it('parks Solo after its approved attempt budget is exhausted', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved'); add('goal-selected'); add('proposal-drafted', { ...proposal, maxAttempts: 1 }); add('proposal-approved');
+    add('goal-approved', { appetite: { ...approval.appetite, maxAttempts: 1 } }); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
     await service.start(spec.id, dir);

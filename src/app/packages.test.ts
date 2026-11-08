@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal } from '../domain/fixtures.test-support.js';
+import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
 import { PackageService, type PackageRuntime } from './packages.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { ReviewService } from './review.js';
@@ -11,7 +11,7 @@ import { ReviewService } from './review.js';
 const a: WorkPackageSpec = {
   id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a',
   outcome: 'QR scanner works', scope: ['scanner'], exclusions: [], dependencies: [],
-  interfaces: ['checkIn(token) -> result'], acceptance: [{ id: 'WP-AC-1', text: 'scans valid QR', goalAcceptanceId: 'AC-1' }],
+  interfaces: ['checkIn(token) -> result@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scans valid QR', goalAcceptanceId: 'AC-1' }],
   integration: 'Lead verifies check-in'
 };
 const b: WorkPackageSpec = {
@@ -20,13 +20,13 @@ const b: WorkPackageSpec = {
 };
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const fixture = (risks: string[] = [], maxAttempts?: number) => {
+const fixture = (risks: string[] = [], maxAttempts = 3) => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-packages-')); dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
   for (const [type, data] of [
-    ['goal-drafted', spec], ['goal-approved', undefined], ['goal-selected', undefined],
-    ['proposal-drafted', { ...proposal, mode: 'multi-wp', risks, maxAttempts }]
+    ['goal-drafted', spec], ['goal-approved', { appetite: { ...approval.appetite, maxAttempts } }], ['goal-selected', undefined],
+    ['proposal-drafted', { ...proposal, mode: 'multi-wp', risks }]
   ] as const) store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   return { store, dir };
 };
@@ -130,8 +130,8 @@ describe('package scheduling', () => {
     service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:a', commitRef: 'commit-a' });
     await expect(service.verify(spec.id, a.id)).rejects.toThrow(/independent package review/i);
     const reviews = new ReviewService(store);
-    expect(() => reviews.submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: a.owner, result: 'pass', commitRef: 'commit-a', note: 'Self review' })).toThrow(/Reviewer must differ/);
-    reviews.submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: 'reviewer-agent', result: 'pass', commitRef: 'commit-a', note: 'Checked diff and tests' });
+    expect(() => reviews.submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: a.owner, session: 'self', result: 'pass', commitRef: 'commit-a', note: 'Self review' })).toThrow(/Reviewer must differ/);
+    reviews.submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: 'reviewer-agent', session: 'review-reviewer-agent', result: 'pass', commitRef: 'commit-a', note: 'Checked diff and tests' });
     await service.verify(spec.id, a.id);
     expect(service.ready(spec.id).map(item => item.id)).toEqual([b.id]);
     store.close();
@@ -143,7 +143,7 @@ describe('package scheduling', () => {
     service.add(spec.id, a); service.add(spec.id, b); approve(store);
     await service.dispatchReady(spec.id, dir);
     service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'fail', command: 'npm test', artifactRef: 'log:a', commitRef: 'commit-a' });
-    new ReviewService(store).submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: 'reviewer-agent', result: 'changes', commitRef: 'commit-a', note: 'Fix validation' });
+    new ReviewService(store).submit(spec.id, { subject: 'package', packageId: a.id, packageVersion: 1, reviewer: 'reviewer-agent', session: 'review-reviewer-agent', result: 'changes', commitRef: 'commit-a', note: 'Fix validation' });
     await expect(service.resumeStale(spec.id, a.id)).rejects.toThrow(/budget exhausted/);
     expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('blocked');
     expect(runtime.resumes).toEqual([]);
@@ -161,7 +161,7 @@ describe('package scheduling', () => {
     await service.dispatchReady(spec.id, dir);
     service.submitEvidence(spec.id, { packageId: b.id, packageVersion: 1, owner: b.owner, acceptanceId: 'WP-AC-2', result: 'pass', command: 'npm test', artifactRef: 'log:b', commitRef: 'def456' });
     await service.verify(spec.id, b.id);
-    service.revise(spec.id, { ...a, version: 2, interfaces: ['checkIn(token, device) -> result'] }, 'Contract now includes device');
+    service.revise(spec.id, { ...a, version: 2, interfaces: ['checkIn(token, device) -> result@v1'] }, 'Contract now includes device');
     const packages = store.getGoal(spec.id)?.packages;
     expect(packages?.[a.id]?.status).toBe('stale');
     expect(packages?.[b.id]?.status).toBe('stale');

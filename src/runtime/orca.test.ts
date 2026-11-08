@@ -31,7 +31,7 @@ it('starts a package Worker in a dedicated Orca worktree', async () => {
     return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', effects: [] };
   }, () => 'a'.repeat(40));
   const ref = await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-1', package: {
-    id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies'
+    id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies'
   } });
   expect(calls[0]).toEqual(['repo', 'add', '--path', 'C:/project']);
   const start = calls.find(args => args[1] === 'worker-start')!;
@@ -51,7 +51,7 @@ it('shares one Orca Run across independent packages in a dispatch wave', async (
     if (args[1] === 'run-create') return { run: { id: 'run_shared' } };
     return { runId: 'run_shared', taskId: 'task_1', dispatchId: `ctx_${calls.length}`, effects: [] };
   }, () => 'a'.repeat(40));
-  const a = { id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies' };
+  const a = { id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies' };
   const refs = await Promise.all([runtime.startPackage({ package: a, repoPath: 'C:/project', idempotencyKey: 'key-1' }), runtime.startPackage({ package: { ...a, id: 'WP-02' }, repoPath: 'C:/project', idempotencyKey: 'key-2' })]);
   expect(calls.filter(args => args[1] === 'run-create')).toHaveLength(1);
   expect(refs.map(ref => ref.runId)).toEqual(['run_shared', 'run_shared']);
@@ -66,7 +66,7 @@ it('rebinds an existing Goal Run before dispatching its next package wave', asyn
     if (args[1] === 'run-use') return { run: { id: 'run_shared' } };
     return { runId: 'run_shared', taskId: 'task_2', dispatchId: 'ctx_2', effects: [] };
   }, () => 'a'.repeat(40));
-  await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-2', package: { id: 'WP-02', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-b', outcome: 'History', scope: ['history'], exclusions: [], dependencies: [], interfaces: ['history()'], acceptance: [{ id: 'WP-AC-2', text: 'history' }], integration: 'Lead verifies' } });
+  await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-2', package: { id: 'WP-02', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-b', outcome: 'History', scope: ['history'], exclusions: [], dependencies: [], interfaces: ['history()@v1'], acceptance: [{ id: 'WP-AC-2', text: 'history' }], integration: 'Lead verifies' } });
   expect(calls.find(args => args[1] === 'run-use')).toEqual(['orchestration', 'run-use', '--id', 'run_shared']);
   expect(calls.some(args => args[1] === 'run-create')).toBe(false);
 });
@@ -101,7 +101,7 @@ it('resumes a revised package in its original terminal and worktree', async () =
     return { runId: 'run_1', taskId: 'task_2', dispatchId: 'ctx_2', effects: [{ kind: 'worktree', id: 'repo_1::C:/worktree' }] };
   });
   const ref = await runtime.resumePackage({ package: {
-    id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 2, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token, device)'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies'
+    id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 2, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token, device)@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies'
   }, prior: { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'worker', repoPath: 'C:/project', terminal: 'term_1', worktreeId: 'repo_1::C:/worktree' }, idempotencyKey: 'key-2' });
   const start = calls.find(args => args[1] === 'worker-start')!;
   expect(start).toContain('term_1');

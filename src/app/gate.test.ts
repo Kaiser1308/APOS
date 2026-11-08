@@ -8,7 +8,7 @@ import { ProjectJournal } from '../store/journal.js';
 import { initProject } from './init-project.js';
 import { GateService, GitWorktreeFactory, ShellExecutor } from './gate.js';
 import { VerificationService } from './verification.js';
-import { spec as baseSpec, proposal, sourceText } from '../domain/fixtures.test-support.js';
+import { spec as baseSpec, proposal, sourceText, approval } from '../domain/fixtures.test-support.js';
 import type { GoalSpec } from '../domain/contracts.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -46,7 +46,7 @@ async function project() {
   const add = (type: GoalEventType, data?: unknown) => journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   journal.appendWithSource({ id: `EV-${++n}`, goalId: spec.id, type: 'goal-drafted', data: spec, at: '2026-11-07T00:00:00.000Z' }, sourceText);
   const base = git('rev-parse', 'HEAD');
-  add('goal-approved'); add('goal-selected'); add('proposal-drafted', { ...proposal, baseCommit: base }); add('proposal-approved'); add('execution-started', { runId: 'run_1', owner: 'lead' });
+  add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', { ...proposal, baseCommit: base }); add('proposal-approved'); add('execution-started', { runId: 'run_1', owner: 'lead' });
   const commit = (files: Record<string, string>, message: string) => {
     for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
     git('add', '-A', '--', '.', ':!.apos'); git('-c', 'user.name=Owner', '-c', 'user.email=o@local.invalid', 'commit', '-qm', message);

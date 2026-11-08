@@ -23,8 +23,8 @@ import { loadProfiles } from './runtime/brief.js';
 import { controllerHome } from './store/event-log.js';
 import { sourceDigest } from './domain/gate.js';
 import { execFileSync } from 'node:child_process';
-import { parseWorkPackage } from './domain/packages.js';
-import { OrcaRuntime, worktreePath, type RuntimeAdapter } from './runtime/orca.js';
+import { assertMultiWpPlannable, parseWorkPackage } from './domain/packages.js';
+import { OrcaRuntime, terminalWorktree, worktreePath, type RuntimeAdapter } from './runtime/orca.js';
 import { ProjectJournal } from './store/journal.js';
 
 export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; gate?: GateOptions; telemetry?: TelemetryProbe; home?: string; write?: (line: string) => void };
@@ -145,6 +145,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     const state = journal.getGoal(planned.goalId);
     const proposal = planned.sourceSha256 || !state ? planned : { ...planned, sourceSha256: state.spec.source.sha256 };
     if (!state || proposal.goalVersion !== state.spec.version) throw new Error('Proposal targets stale Goal version');
+    assertMultiWpPlannable(proposal);
     const mapped = new Set(proposal.acceptanceMapping.map(item => item.acceptanceId));
     if (state.spec.acceptance.some(item => !mapped.has(item.id))) throw new Error('Every Goal acceptance criterion needs a verification mapping');
     if (state.proposal) await assertExecutionSettled(state, runtime);
@@ -161,9 +162,10 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     .action(async (id: string, flags: { terminal?: string; worktree?: string }) => withJournalAsync(async journal => {
       const state = journal.getGoal(id);
       if (!state?.proposal) throw new Error('Current proposal required');
+      assertMultiWpPlannable(state.proposal);
       journal.append(event(id, 'proposal-approved', { by: 'controller', proposalVersion: state.proposal.version }));
       if (state.proposal.mode === 'multi-wp') {
-        if (flags.terminal) journal.append(event(id, 'lead-woken', { events: [], terminal: flags.terminal, worktree: flags.worktree ?? `path:${repo()}` }));
+        if (flags.terminal) journal.append(event(id, 'lead-woken', { events: [], terminal: flags.terminal, worktree: flags.worktree ?? terminalWorktree(flags.terminal) }));
         const notice = { kind: 'multi-wp', goalId: id, packages: Object.keys(state.packages ?? {}), splitRationale: state.proposal.splitRationale, estimatedCost: state.proposal.estimatedCost };
         journal.append(event(id, 'human-notified', notice));
         write(`NOTICE ${id}: Lead chose Multi-WP (${notice.packages.length} packages, est. ${notice.estimatedCost?.spendUsd} USD / ${notice.estimatedCost?.wallMinutes} min): ${notice.splitRationale}`);

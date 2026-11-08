@@ -41,6 +41,12 @@ export interface RuntimeAdapter {
   startReviewer?(input: { repoPath: string; goalId: string; baseCommit: string; commit: string; reasons: string[]; idempotencyKey: string; runId: string }): Promise<ReviewerRef>;
   wakeLead?(input: { repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string }): Promise<{ dispatchId: string }>;
 }
+/** The worktree a terminal lives in, so a Lead wake targets the Lead's own worktree even when it passed only `--terminal`. */
+export function terminalWorktree(handle: string, execute: (args: string[]) => Record<string, unknown> = runOrca): string {
+  const worktreeId = object(object(execute(['terminal', 'show', '--terminal', handle])).terminal).worktreeId;
+  return `id:${id(worktreeId, 'terminal worktree')}`;
+}
+
 export const worktreePath = (worktreeId: string | undefined): string | undefined => worktreeId?.includes('::') ? worktreeId.slice(worktreeId.indexOf('::') + 2) : undefined;
 // Codex can take over a minute to become ready; Orca's 60 s default reported a dispatch that did start as failed (seen live).
 const launchArgs = (profile: RuntimeProfile): string[] => ['--timeout-ms', '240000', '--agent', profile.agent, ...(profile.model ? ['--model', profile.model] : []), ...(profile.model && profile.effort ? ['--effort', profile.effort] : [])];

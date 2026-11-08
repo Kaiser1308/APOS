@@ -33,6 +33,18 @@ export type PackageEvidence = z.infer<typeof packageEvidenceSchema>;
 export function parsePackageEvidence(value: unknown): PackageEvidence { return packageEvidenceSchema.parse(value); }
 export function parseWorkPackage(value: unknown): WorkPackageSpec { return packageSchema.parse(value); }
 
+/**
+ * A declared risk makes package verification wait for an independent package review, and APOS dispatches
+ * no package reviewer. Refuse the plan up front instead of letting packages finish and then deadlock,
+ * which forces a replan that resets them. Multi-WP always gets an independent Goal review, which also
+ * reads the plan's approach, so a concern can be written there instead of declared as a risk.
+ */
+export function assertMultiWpPlannable(proposal: ExecutionProposal): void {
+  if (proposal.mode === 'multi-wp' && proposal.risks.length) {
+    throw new Error('A Multi-WP plan cannot declare risks: they would require package reviews APOS does not dispatch. Put the concern in the approach; the Goal review is always independent.');
+  }
+}
+
 export function validatePackageGraph(goal: GoalSpec, proposal: ExecutionProposal, input: unknown[]): WorkPackageSpec[] {
   if (proposal.mode !== 'multi-wp' || proposal.goalId !== goal.id || proposal.goalVersion !== goal.version) throw new Error('Current Multi-WP proposal required');
   if (input.length < 2) throw new Error('Multi-WP requires at least two packages');

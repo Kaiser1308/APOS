@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractStartedRef, interpretWorkerShow, OrcaRuntime, parseOrcaResult } from './orca.js';
+import { extractStartedRef, terminalWorktree, interpretWorkerShow, OrcaRuntime, parseOrcaResult } from './orca.js';
 import { DEFAULT_PROFILES } from './brief.js';
 
 describe('Orca adapter result', () => {
@@ -195,4 +195,14 @@ it('writes a long repair finding to a note file and keeps the pasted brief short
   expect(spec).toMatch(/read it in full from .*key-1\.md \(sha256 [0-9a-f]{64}\)/);
   expect(readFileSync(join(notes, 'key-1.md'), 'utf8')).toContain(finding);
   rmSync(notes, { recursive: true, force: true });
+});
+
+describe('terminalWorktree', () => {
+  it('finds the Lead terminal worktree so a wake never targets the main checkout', () => {
+    const seen: string[][] = [];
+    const execute = (args: string[]) => { seen.push(args); return { terminal: { worktreeId: 'repo::C:/orca/lead' } }; };
+    expect(terminalWorktree('term_1', execute)).toBe('id:repo::C:/orca/lead');
+    expect(seen[0]).toEqual(['terminal', 'show', '--terminal', 'term_1']);
+    expect(() => terminalWorktree('term_1', () => ({ terminal: {} }))).toThrow(/terminal worktree/);
+  });
 });

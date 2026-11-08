@@ -178,3 +178,21 @@ it('treats a resume whose brief sits unsubmitted (pending, turn_start_unobserved
   expect(await shown('dispatched', 'turn_started', '2026-11-08T00:00:00Z').inputStalled('ctx')).toBe(false);
   expect(await shown('completed', 'settled').inputStalled('ctx')).toBe(false);
 });
+
+it('writes a long repair finding to a note file and keeps the pasted brief short (seen live: 7.8k chars never submitted)', async () => {
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const notes = mkdtempSync(join(tmpdir(), 'apos-notes-'));
+  let spec = '';
+  const runtime = new OrcaRuntime(args => {
+    if (args[1] === 'worker-start') { spec = args[args.indexOf('--spec') + 1]; return { taskId: 't', dispatchId: 'ctx_2', runId: 'r', worker: { worktreeId: 'repo::wt' } }; }
+    return {};
+  }, undefined, undefined, undefined, () => notes);
+  const finding = 'x'.repeat(5000);
+  await runtime.resumeSolo({ runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: 'C:/repo', terminal: 'term', worktreeId: 'repo::wt' }, { phase: 'controller finding', progress: finding, evidenceRefs: [], goalId: 'GOAL-X', attempt: 2 }, 'key-1');
+  expect(spec.length).toBeLessThan(1500);
+  expect(spec).toMatch(/read it in full from .*key-1\.md \(sha256 [0-9a-f]{64}\)/);
+  expect(readFileSync(join(notes, 'key-1.md'), 'utf8')).toContain(finding);
+  rmSync(notes, { recursive: true, force: true });
+});

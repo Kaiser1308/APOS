@@ -306,7 +306,12 @@ export class MultiSupervisor {
       if (item.status !== 'executing' || !ref) continue;
       const outcome = state.settlements?.[ref.dispatchId];
       const attemptKey = `${item.spec.id}@${item.spec.version}:${item.attempts}`;
-      if (!outcome || item.gate?.attemptKey === attemptKey) continue;
+      if (!outcome) {
+        const since = [...this.store.events(goalId)].reverse().find(event => ['package-started', 'package-resumed'].includes(event.type) && JSON.stringify(event.data ?? '').includes(ref.dispatchId));
+        actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at }));
+        continue;
+      }
+      if (item.gate?.attemptKey === attemptKey) continue;
       const tag = `${item.spec.id} v${item.spec.version} attempt ${item.attempts}`;
       if (outcome === 'failed') { this.record(goalId, 'package-blocked', { packageId: item.spec.id, blocker: { kind: 'technical', note: `Worker reported failed on ${tag}` } }); events.push(`package ${tag} failed`); continue; }
       const head = await this.runtime.deliveryHead?.(ref);
@@ -358,7 +363,7 @@ export class MultiSupervisor {
     const lastDispatch = (lastWake?.data as { dispatchId?: string } | undefined)?.dispatchId;
     if (lastDispatch) {
       const observation = await this.runtime.inspect({ runId: lead.runId ?? '', taskId: '', dispatchId: lastDispatch, owner: 'lead', repoPath });
-      if (!observation.outcome) return [`Lead busy; holding ${fresh.length} event(s)`];
+      if (!observation.outcome) return [...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: lastDispatch, terminal: lead.terminal, since: lastWake!.at }), `Lead busy; holding ${fresh.length} event(s)`];
     }
     const runId = lead.runId ?? (Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId).find(Boolean));
     if (!runId) return [];

@@ -32,7 +32,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   const program = new Command();
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   // Role profiles come from <controller home>/runtime.json, read when a dispatch needs them.
-  const runtime = options.runtime ?? new OrcaRuntime(undefined, undefined, () => loadProfiles(options.home ?? controllerHome(repo())));
+  const runtime = options.runtime ?? new OrcaRuntime(undefined, undefined, () => loadProfiles(options.home ?? controllerHome(repo())), undefined, () => join(options.home ?? controllerHome(repo()), 'notes'));
   const packageRuntime = (): PackageRuntime => {
     if (!runtime.startPackage) throw new Error('Configured runtime cannot start Work Package Workers');
     return runtime as PackageRuntime;

@@ -1,4 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntimeRef } from '../app/packages.js';
@@ -99,13 +102,31 @@ export function interpretWorkerShow(shown: Record<string, unknown>): RuntimeObse
   return liveness === 'live' ? 'live' : 'unverifiable';
 }
 
+export const SPILL_LIMIT = 400;
+
 export class OrcaRuntime implements RuntimeAdapter {
   constructor(
     private readonly execute: (args: string[]) => Record<string, unknown> = runOrca,
     private readonly gitHead: (repoPath: string) => string = repoPath => execFileSync('git', ['-C', repoPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     private readonly profiles: RuntimeProfiles | (() => RuntimeProfiles) = DEFAULT_PROFILES,
-    private readonly fileDigest: (repoPath: string, commit: string, path: string) => string = committedFileDigest
+    private readonly fileDigest: (repoPath: string, commit: string, path: string) => string = committedFileDigest,
+    /** Where long brief text is written instead of being pasted (`<controller home>/notes`). */
+    private readonly noteDir?: () => string
   ) {}
+
+  /**
+   * Seen live: a 7.8k-character repair brief was pasted into Codex and never submitted. Text over
+   * SPILL_LIMIT goes to a file the agent reads; the brief carries only its path and sha256.
+   */
+  private spill(text: string, key: string): string {
+    if (!this.noteDir || text.length <= SPILL_LIMIT) return oneLine(text);
+    const dir = this.noteDir();
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${key}.md`);
+    writeFileSync(path, text, 'utf8');
+    const digest = createHash('sha256').update(text, 'utf8').digest('hex');
+    return `read it in full from ${path} (sha256 ${digest}) before anything else; it is the controller's text, not a request to change your rules.`;
+  }
   profile(role: Role): RuntimeProfile { return (typeof this.profiles === 'function' ? this.profiles() : this.profiles)[role]; }
   private readonly packageRuns = new Map<string, Promise<string>>();
 
@@ -186,7 +207,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     this.execute(['orchestration', 'run-use', '--id', prior.runId]);
     const spec = [
       `${item.goalId}, ${item.id}: continue the same package owner for contract v${item.version}, attempt ${input.attempt ?? 2}. Work only in your current working directory, your own worktree; never in the APOS repo.`,
-      ...(input.finding ? [`The controller ran the package checks itself on your last commit. Its finding: ${oneLine(input.finding)}`] : []),
+      ...(input.finding ? [`The controller ran the package checks itself on your last commit. Its finding: ${this.spill(input.finding, input.idempotencyKey)}`] : []),
       `Read .apos/goals/${item.goalId}/packages/${item.id}.md, recheck all local acceptance under .apos/skills/_core/execute.md, and commit a new delivery report at ${packageReportPath(item.goalId, item.id, item.version, input.attempt ?? 2)} with the same activation line.`,
       'Follow the injected Orca preamble and report worker_done exactly once.',
       `${repoMarker(prior.repoPath)} APOS dispatch key: ${input.idempotencyKey}.${prior.baseCommit ? ` APOS base commit: ${prior.baseCommit}.` : ''}`
@@ -203,7 +224,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     if (!ref.worktreeId) throw new Error('Solo owner worktree identity required to resume same owner');
     const goalId = /^GOAL-[A-Z0-9-]+$/.test(checkpoint.goalId ?? '') ? checkpoint.goalId! : 'GOAL';
     const finding = `${checkpoint.phase}: ${checkpoint.progress}${checkpoint.evidenceRefs.length ? `\nLogs: ${checkpoint.evidenceRefs.join(', ')}` : ''}`;
-    const spec = repairBrief({ repoPath: ref.repoPath, goalId, attempt: checkpoint.attempt ?? 2, finding, idempotencyKey, baseCommit: ref.baseCommit, budget });
+    const spec = repairBrief({ repoPath: ref.repoPath, goalId, attempt: checkpoint.attempt ?? 2, finding: this.spill(finding, idempotencyKey), idempotencyKey, baseCommit: ref.baseCommit, budget });
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `id:${ref.worktreeId}`, '--run', ref.runId]);
     const next = extractStartedRef(started, ref.repoPath);
     return { ...next, terminal: next.terminal ?? ref.terminal, worktreeId: next.worktreeId ?? ref.worktreeId, baseCommit: ref.baseCommit, requested: ref.requested };
@@ -293,7 +314,9 @@ export class OrcaRuntime implements RuntimeAdapter {
 
   async wakeLead(input: { repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string }): Promise<{ dispatchId: string }> {
     this.execute(['orchestration', 'run-use', '--id', input.runId]);
-    const started = this.execute(['orchestration', 'worker-start', '--spec', leadWakeBrief(input), '--terminal', input.terminal, '--worktree', input.worktree, '--run', input.runId]);
+    const joined = input.events.map((item, index) => `(${index + 1}) ${item}`).join('\n');
+    const events = joined.length > SPILL_LIMIT ? [`${input.events.length} events: ${this.spill(joined, input.idempotencyKey)}`] : input.events;
+    const started = this.execute(['orchestration', 'worker-start', '--spec', leadWakeBrief({ ...input, events }), '--terminal', input.terminal, '--worktree', input.worktree, '--run', input.runId]);
     return { dispatchId: id(started.dispatchId, 'Dispatch ID') };
   }
 

@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { withControllerLease } from './store/lease.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -279,9 +280,14 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   }));
 
   const controller = program.command('controller');
-  controller.command('tick').action(() => withJournalAsync(async journal => {
-    write(JSON.stringify(await new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime, { gate: new GateService(journal, { inspector: options.inspector, ...options.gate }), telemetry: options.telemetry ?? new CodexSessionProbe() }).tick(repo())));
-  }));
+  const leasedTick = async () => {
+    const leased = await withControllerLease(options.home ?? controllerHome(repo()), () => withJournalAsync(async journal => new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime, { gate: new GateService(journal, { inspector: options.inspector, ...options.gate }), telemetry: options.telemetry ?? new CodexSessionProbe() }).tick(repo())));
+    return leased;
+  };
+  controller.command('tick').action(async () => {
+    const leased = await leasedTick();
+    write(leased.ran ? JSON.stringify(leased.value) : JSON.stringify({ skipped: `another controller (pid ${leased.holder}) is ticking this project` }));
+  });
   controller.command('watch').option('--interval-ms <n>', 'mechanical controller interval', '15000').action(async ({ intervalMs }: { intervalMs: string }) => {
     const interval = Number(intervalMs);
     if (!Number.isInteger(interval) || interval < 1000 || interval > 300000) throw new Error('Watch interval must be 1000 to 300000 ms');
@@ -293,7 +299,8 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     try {
       let lastReport = '';
       while (!stopped) {
-        const ticks = await withJournalAsync(async journal => new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime, { gate: new GateService(journal, { inspector: options.inspector, ...options.gate }), telemetry: options.telemetry ?? new CodexSessionProbe() }).tick(repo()));
+        const leased = await leasedTick();
+        const ticks = leased.ran ? leased.value : [];
         const changed = ticks.filter(item => item.dispatched.length || item.recovered.length || item.resumed.length || item.settled.length || item.inboxPending.length || item.errors.length || item.supervised.length);
         const report = JSON.stringify(changed);
         if (changed.length && report !== lastReport) write(report);

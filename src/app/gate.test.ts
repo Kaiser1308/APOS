@@ -20,7 +20,8 @@ afterEach(() => {
 });
 
 /** A test script whose failing tests are listed in fail.txt; prints "FAIL <name>" for each. */
-const runner = "const fs=require('fs');const f=fs.existsSync('fail.txt')?fs.readFileSync('fail.txt','utf8').split(/\\r?\\n/).filter(Boolean):[];for(const t of f)console.log('FAIL '+t);process.exit(f.length?1:0);";
+/** A line "once:<name>@<marker path>" fails only until the marker exists: a flaky test. */
+const runner = "const fs=require('fs');const f=(fs.existsSync('fail.txt')?fs.readFileSync('fail.txt','utf8').split(/\\r?\\n/).filter(Boolean):[]).filter(t=>{if(!t.startsWith('once:'))return true;const [n,m]=t.slice(5).split('@');if(fs.existsSync(m))return false;fs.writeFileSync(m,'');return true}).map(t=>t.startsWith('once:')?t.slice(5).split('@')[0]:t);for(const t of f)console.log('FAIL '+t);process.exit(f.length?1:0);";
 const spec: GoalSpec = {
   ...baseSpec,
   checks: [
@@ -78,6 +79,17 @@ describe('controller gate on real commits', () => {
     expect(report.result).toBe('red');
     expect(report.checks.find(item => item.checkId === 'CHK-REG')!.newFailures).toEqual(['checkout-total']);
     expect(() => new VerificationService(journal).verify(baseSpec.id, delivery)).toThrow(/gate is red/);
+  }, 60_000);
+
+  it('does not go red on a new failure that does not reproduce on a fresh rerun (seen live: concurrent gates, test_run_with_callback)', async () => {
+    const { dir, commit, gate } = await project();
+    const marker = join(mkdtempSync(join(tmpdir(), 'apos-flaky-')), 'seen'); dirs.push(join(marker, '..'));
+    const delivery = commit({ 'feature.js': 'process.exit(0);', 'fail.txt': `legacy-flaky-network\nonce:run-with-callback@${marker}\n` }, 'feature');
+    const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery });
+    const regression = report.checks.find(item => item.checkId === 'CHK-REG')!;
+    expect(report.result).toBe('green');
+    expect(regression.reason).toMatch(/did not reproduce on recheck \(flaky\): run-with-callback/);
+    expect(regression.delivery).toHaveLength(2);
   }, 60_000);
 
   it('runs in a clean checkout, so uncommitted files in the owner tree do not count', async () => {

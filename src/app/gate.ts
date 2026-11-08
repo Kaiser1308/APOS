@@ -125,7 +125,7 @@ export class GateService {
     const checks: CheckResult[] = state.spec.checks.filter(check => wanted.has(check.id)).map(check => {
       if (check.kind === 'manual') return evaluateManualCheck(check, head, state.manualConfirmations ?? []);
       const baseRuns = check.expect === 'no-new-failures' ? this.runMany(check, repoPath, base, 'base', artifacts) : [];
-      return evaluateCommandCheck(check, baseRuns, this.runMany(check, repoPath, head, 'delivery', artifacts));
+      return this.evaluate(check, repoPath, head, baseRuns, artifacts);
     });
     const changedFiles = this.inspector.files(repoPath, head, base);
     const guard = protectedCheck(goalId, changedFiles);
@@ -167,7 +167,7 @@ export class GateService {
     const checks: CheckResult[] = requiredChecks(state.spec).map(check => {
       if (check.kind === 'manual') return evaluateManualCheck(check, input.deliveryCommit, state.manualConfirmations ?? []);
       const base = check.expect === 'no-new-failures' ? this.runMany(check, repoPath, baseCommit, 'base', artifacts) : [];
-      return evaluateCommandCheck(check, base, this.runMany(check, repoPath, input.deliveryCommit, 'delivery', artifacts));
+      return this.evaluate(check, repoPath, input.deliveryCommit, base, artifacts);
     });
     const environment: GateEnvironment = { platform: process.platform, shell: this.executor.shell, node: process.version };
     const changedFiles = this.inspector.files(repoPath, input.deliveryCommit, baseCommit);
@@ -191,7 +191,23 @@ export class GateService {
     this.store.append({ id: randomUUID(), goalId, type: 'check-confirmed', data: input, at: this.now() });
   }
 
-  private runMany(check: CommandCheck, repoPath: string, commit: string, role: 'base' | 'delivery', artifacts: string): CheckRun[] {
+  /**
+   * Seen live: two gates ran the same commit at once and one saw a new failure the other did not
+   * (test_run_with_callback), which sent the owner to fix nothing. A new failure counts only if it
+   * reproduces on one fresh delivery rerun.
+   */
+  private evaluate(check: CommandCheck, repoPath: string, commit: string, base: CheckRun[], artifacts: string): CheckResult {
+    const first = evaluateCommandCheck(check, base, this.runMany(check, repoPath, commit, 'delivery', artifacts));
+    if (first.status !== 'fail' || check.expect !== 'no-new-failures' || !first.newFailures.length) return first;
+    const [again] = this.runMany({ ...check, runs: 1 }, repoPath, commit, 'recheck', artifacts);
+    const seen = new Set(again && !again.timedOut ? again.failures : first.newFailures);
+    const persistent = first.newFailures.filter(item => seen.has(item));
+    const delivery = again ? [...first.delivery, again] : first.delivery;
+    if (persistent.length) return { ...first, delivery, newFailures: persistent, reason: `${persistent.length} new failure(s) vs base, reproduced on recheck` };
+    return { ...first, delivery, status: 'pass', newFailures: [], reason: `new failure(s) did not reproduce on recheck (flaky): ${first.newFailures.join(', ')}` };
+  }
+
+  private runMany(check: CommandCheck, repoPath: string, commit: string, role: 'base' | 'delivery' | 'recheck', artifacts: string): CheckRun[] {
     const runs: CheckRun[] = [];
     for (let n = 1; n <= check.runs; n++) {
       const workspace = this.workspaces.checkout(repoPath, commit);

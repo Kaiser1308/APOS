@@ -48,6 +48,8 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | Long repair or wake-up text (seen live: 7.8k-char brief never submitted) | text over 400 chars goes to `<controller home>/notes/<key>.md`; the brief carries path and sha256 | `orca.test.ts` › writes a long repair finding to a note file |
 | Review JSON written with a UTF-8 BOM by PowerShell (seen live) | BOM stripped before parsing | `supervisor.ts` collectReview |
 | Goal idle with no agent running and no controller progress (seen live: 26 min, silent) | `human-notified` kind `idle` once per quiet spell after 15 min | `controller.test.ts` › idle watchdog |
+| A new failure that does not reproduce (seen live: two gates on one commit, `test_run_with_callback`) | one fresh delivery rerun; only failures seen twice count as new | `gate.test.ts` › does not go red on a new failure that does not reproduce |
+| Two controller loops on one project (seen live: a loop thought stopped kept ticking) | one tick at a time per controller home; a dead holder's lease is cleared | `lease.test.ts` |
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
 
 ## Not covered by automated tests

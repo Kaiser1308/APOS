@@ -1,10 +1,29 @@
-# APOS local CLI
+# APOS v2 local CLI
 
-APOS manages a project-local `.apos/` history and a local SQLite index. Orca runs Claude Code. The CLI supports Solo Goals and dependency-aware Work Packages. The dashboard remains under development.
+APOS runs AI agents on software Goals. The design follows what the Hard12 runs showed works:
+
+- one owner keeps the context of a whole block;
+- correctness comes from a source-backed contract and a gate the controller runs itself, not from the owner's report;
+- the Human decides WHAT and outcomes, not HOW.
+
+Design: `debates/2026-11-08-apos/FINAL-DESIGN.md` (v2.1). Safety cases: `docs/fault-injection.md`.
+
+## Roles and Human gates
+
+| Who | Decides | Command |
+| --- | --- | --- |
+| PM + Human | WHAT: which Goals next, outcome, acceptance, appetite | `goal create --source`, **gate A** `goal approve --size --max-spend --max-minutes --max-attempts` |
+| Human | which approved Goal runs next | **gate B** `lead recommend`, `goal select` |
+| Lead | HOW: Solo or Multi-WP, packages, interfaces. No Human approval | `lead propose`, `lead commit` |
+| Controller (no LLM) | machine checks, dispatch, gate, findings, retries, wake-ups, budget breakers | `controller tick` / `controller watch` |
+| Reviewer | independent review in its own session, when required | dispatched by the controller |
+| Human | outcome, and whether to merge | **gate D** `outcome close [--merge-to <branch>]`, `revise`, `stop` |
+
+When the Lead chooses Multi-WP, the controller only **notifies** the Human (`apos inbox`).
 
 ## Setup
 
-Requires Node.js 24+, Git, and an installed/running Orca CLI with Claude Code available.
+Requires Node.js 24+, Git, and the Orca CLI with Codex enabled (default runtime).
 
 ```powershell
 cd apos
@@ -13,77 +32,100 @@ npm run build
 node dist/cli.js --repo C:\path\to\project init
 ```
 
-`init` creates `.apos/` and installs APOS PM, Lead, Worker, and Reviewer entrypoint skills under the project's `.claude/skills/`. Existing skill files are preserved. APOS writes `state.sqlite` locally and excludes it from Git; important events, decisions, specs, and evidence references are committed under `.apos/goals/`.
+`init` commits `.apos/project.yaml`, the APOS-owned skills under `.apos/skills/` (the core discipline `_core/execute.md` plus `pm`, `lead`, `worker` and `reviewer`), and entrypoint copies under `.claude/skills/`.
 
-## Solo Goal flow
+Controller state lives **outside the repo**, in `~/.apos/projects/<repo>-<hash>/` (override with `APOS_HOME`):
 
-Create JSON files matching the Goal and Execution contracts in `src/domain/contracts.ts`. A Goal carries its verbatim source (`--source`, snapshotted to `.apos/goals/<id>/source.md` with a sha256), a requirement list where each item is covered by acceptance or excluded with a reason, acceptance criteria with examples, boundaries and `checkIds`, and the `checks` the controller will run. Approval refuses an unmapped requirement, an acceptance criterion with a `blocked` ambiguity, or a source snapshot that no longer matches its hash. The Lead proposal must map every Goal acceptance ID to a verification method; `lead propose` records the current HEAD as `baseCommit` unless the proposal names one. Run these commands with `--repo` before the subcommand:
+- `events/<GOAL>.jsonl`: an append-only, fsync'd, hash-chained event log; the source of truth;
+- `state.sqlite`: an index, rebuildable from the log;
+- `sources/<GOAL>/v<n>.md`: verbatim source snapshots;
+- `artifacts/`: gate logs;
+- `runtime.json`: optional role profiles.
+
+The repo gets readable Goal documents committed only at milestones: Goal approved, plan accepted, verified, merged, outcome. Events committed into the repo by anyone else are ignored. `apos migrate` imports APOS v1 histories that still fit the contract.
+
+## Goal contract
+
+A Goal JSON (see `src/domain/contracts.ts`) has:
+
+- `requirements[]`: every requirement lifted from the source, with its span, and `disposition: acceptance | excluded` (an excluded one needs a reason);
+- `acceptance[]`: `requirementIds`, `examples`, `boundaries`, `prohibited`, `checkIds`, and optional `ambiguity` (`resolved` or `blocked`);
+- `checks[]`: `{ kind: 'command', command, expect: 'pass' | 'no-new-failures', failurePattern?, runs, timeoutMs, env }` or `{ kind: 'manual', procedure, expectedResult }`.
+
+`goal create --file goal.json --source brief.md` snapshots the source with its sha256. Approval refuses:
+
+- an unmapped requirement;
+- a `blocked` ambiguity;
+- a missing appetite;
+- a source snapshot that no longer matches.
+
+The appetite is kept only by the controller. It never appears in documents or briefs.
+
+## Solo flow
 
 ```text
 apos goal create --file goal.json --source brief.md
-apos goal approve GOAL-001
+apos goal approve GOAL-001 --size M --max-spend 20 --max-minutes 240 --max-attempts 3
 apos lead recommend
 apos goal select GOAL-001
 apos lead propose --file execution.json
-apos execution approve GOAL-001
-apos execution status GOAL-001
-apos execution reconcile GOAL-001
-apos execution checkpoint GOAL-001 --file phase.json
-apos execution resume GOAL-001
-apos execution retry GOAL-001 --reason "Fix QR edge case"
-apos evidence add GOAL-001 --file evidence.json
-apos gate run GOAL-001 --commit <delivery-sha>
-apos execution verify GOAL-001 --commit <delivery-sha>
-apos outcome close GOAL-001
+apos lead commit GOAL-001          # controller checks the plan and dispatches
+apos controller watch              # or: apos controller tick
+apos inbox                         # needs-decision, notices, verified Goals awaiting outcome
+apos outcome close GOAL-001 --merge-to main
 ```
 
-`execution approve` starts the approved Solo Goal through Orca automatically. If dispatch outcome is unknown, inspect the existing Run/Task/Dispatch and use `execution reconcile`; do not create another worker. A usage-limited Claude session remains a live dispatch until Orca proves settlement. Use `blocker report|resolve` and `decision record` for exceptions.
+**What the controller checks before dispatch** (`lead commit`):
 
-For a product change, first settle or reconcile every active Orca dispatch, then use `apos goal revise --file goal-v2.json`. APOS resets the old execution plan and requires a fresh Human Goal approval and Lead proposal. `lead propose` also checks active dispatches before replacing a plan.
+- the plan's source hash and Goal version;
+- that there are no open questions;
+- that the estimate fits the appetite;
+- for Multi-WP: at least two packages, an acyclic graph, versioned interfaces (`name@vN`), acceptance coverage, and a split rationale.
 
-## Multi-Work-Package flow
+**Dispatch.** The owner runs in its own Orca worktree, created from an exact base commit. It uses the role profile: Codex `gpt-6.1-terra` for Lead and Worker, `gpt-6-sol` for Reviewer. Override them in `runtime.json`. The brief points at `.apos/skills/_core/execute.md` and the role skill by path and sha256, and names the activation line the delivery report must contain.
 
-After `lead propose --file execution.json` with `mode: "multi-wp"`, Lead drafts every package before Human approves the execution plan. Each package JSON names one owner, a cohesive outcome, scope, dependencies, interfaces, local acceptance criteria, and integration strategy. The approval gate checks at least two packages, the dependency graph, and coverage of Goal acceptance.
+**After the owner settles**, `controller tick` runs these steps:
 
-```text
-apos package add --file wp-01.json
-apos package add --file wp-02.json
-apos package list GOAL-001
-apos execution approve GOAL-001
-apos package ready GOAL-001
-apos package reconcile GOAL-001
-apos package evidence GOAL-001 --file wp-01-evidence.json
-apos package verify GOAL-001 WP-01
-apos integration prepare GOAL-001
-apos integration complete GOAL-001 --file integration-evidence.json
-apos outcome close GOAL-001
-```
+1. Compare the launch receipt with the requested model. A mismatch is `needs-decision`.
+2. Read the delivery head of the owner's worktree, and check that the committed report carries the activation line. If it does not, a finding resumes the same owner.
+3. Run the gate: a fresh detached worktree at that exact commit, with a tree-killing timeout, comparing base and delivery failures. Logs are hashed in the controller home.
+4. **Green.** If a review is required, a reviewer runs in a separate session. Review is required for Multi-WP, declared risks, changed tests or oracles, or shared paths changed. Otherwise the Goal is verified and waits for the Human.
+5. **Red.** The controller records a finding (check IDs, commit, logs) and resumes the same owner in the same terminal and worktree.
+6. **Stop** at `needs-decision` when:
+   - the cause is unknown or the gate is unverifiable;
+   - the same failure survives two repairs;
+   - the attempt budget or wall time is spent;
+   - the owner reports `failed`.
 
-`execution approve` dispatches the first dependency-ready wave automatically. Packages for one Goal share one Orca Run, while each Worker gets its own Task, Dispatch, and worktree. If an Orca response is unknown, `package reconcile` looks up the original Run, Task, and Dispatch; it does not start a duplicate Worker. `package verify` automatically dispatches newly ready dependents; `package dispatch` remains available after an interruption.
+`outcome close --merge-to <branch>` records a one-time authorization for the gated commit and merges it. It then reruns the gate on the merge commit. If that gate is red, the Goal stays open.
 
-Package evidence includes `packageId`, `packageVersion`, `owner`, `acceptanceId`, `result`, `command`, `artifactRef`, and `commitRef`. Lead can use `package revise GOAL-001 --file revised.json --reason "..."`; affected downstream evidence becomes stale. Use `package block`, `package unblock`, and `package resume` to continue a parked Worker in its original terminal and worktree. Product blockers require a revised Goal approval.
+**Manual checks** stay pending until someone other than the owner confirms them: `gate confirm GOAL-001 <checkId> --commit <sha> --by <name> --note "..."`.
 
-If the approved proposal names risks or the Goal permits automatic merge, APOS requires an independent review of each package and the Goal before verification. Record reviews with `apos review submit GOAL-001 --file review.json`. A package review names `subject: "package"`, `packageId`, `packageVersion`, a reviewer different from the owner, `result`, exact `commitRef`, and a note. A Goal review uses `subject: "goal"` and the delivery commit. `changes` sends a package back to its owner with stale evidence; `controller tick` can resume it after the prior Orca dispatch settles.
+**Findings** (`finding record --kind`):
 
-`integration prepare` checks that all packages are verified, source commits exist, and files do not overlap unnoticed. New dispatches capture their base commit so the overlap check covers all commits in each package, including multi-commit work. `integration complete` requires an integration commit containing every package commit, passing Goal acceptance evidence, passing regression evidence, and a conflict resolution note when files overlap. It records technical verification; Human outcome closure remains separate. APOS merges only through `integration merge GOAL-001 --source <commit> --target <branch>`, and only when that Goal has `autoMergeAuthorized: true`, technical verification passed, the source matches delivery evidence, the target branch is checked out, and the worktree is clean.
+- `intent_gap` parks the Goal for PM and the Human;
+- `bad_plan` is for the Lead to revise;
+- `patch` goes to the owner;
+- `defer` goes to the backlog.
 
-`apos controller tick` is a mechanical recovery pass: it reconciles uncertain Orca dispatches, starts dependency-ready packages, consumes Orca inbox deliveries, records authoritative Dispatch settlement, and resumes stale package owners whose prior dispatch has settled. A completed worker is retained for possible same-owner fixes before its Delivery is acknowledged; `outcome close` releases settled worker terminals after verification. Questions and escalations stay pending for a Lead or Human decision. Settlement remains distinct from acceptance and Goal closure. Use `apos controller watch --interval-ms 15000` to run this pass continuously without LLM polling, or run `tick` after a CLI interruption.
+## Multi-WP flow
 
-`apos metrics show GOAL-001` summarizes attempts, blockers, requested changes, package count and cycle time from the project event log. It does not estimate token usage or cost without Orca telemetry.
+The Lead adds packages (`package add`). Each package names its owner, dependencies, versioned interfaces and local acceptance, optionally with `checkIds` from the Goal's checks. Then the Lead runs `lead commit GOAL-001 --terminal $ORCA_TERMINAL_HANDLE`.
 
-Execution Proposals may set `maxAttempts` from 1 to 10 (default 3). APOS parks a Solo Goal or package when its budget is exhausted and records a blocker for Lead/Human decision; the controller does not retry it indefinitely.
+The controller then:
 
-Evidence JSON has `acceptanceId`, `result` (`pass` or `fail`), `command`, and `artifactRef`. It is the owner's report and is **not** sufficient for verification.
+- dispatches packages as their dependencies are verified;
+- gates each settled package on its own head against its base. Green verifies the package. Red sends it back to the same owner with the finding;
+- wakes the Lead's terminal once per batch of new events: package results, Worker questions, ready to integrate, a red integration gate. It only does so after the Lead's previous turn has settled.
 
-`gate run` is the controller's own check. For each check an acceptance criterion names, it creates a fresh detached Git worktree at the exact commit, runs the command through the recorded shell, and stores the log and its sha256 under `~/.apos/artifacts` (or `APOS_ARTIFACTS`), outside the managed repo:
-- `expect: "pass"` must exit 0 on the delivery commit;
-- `expect: "no-new-failures"` also runs the base commit and fails only on failure identities (from `failurePattern`, capture group 1) that are new at delivery;
-- a baseline that cannot run, a timeout, or repeated runs (`runs` > 1) that disagree make the check `unverifiable`, never green;
-- a delivery commit that does not descend from the base, or a source snapshot changed since approval, is refused.
-Manual checks stay pending until `gate confirm GOAL-001 <checkId> --commit <sha> --by <name> --note "..."` from someone other than the owner. `execution verify` (and `integration complete` for Multi-WP) requires a green gate for the current Goal version and source on the commit under review; resuming the owner discards the gate. Human outcome closure is a separate command. Solo and Multi-WP integration may use `integration merge` only when the Goal records explicit merge authorization and the merge gates pass.
+`integration complete` gates the integration commit itself. Every Multi-WP Goal needs an independent Goal review before it can verify.
 
-## Local validation (2026-11-08)
+## Telemetry
 
-- `npx vitest run --maxWorkers 2`: 84 tests passed; `npm run build` passed; `npm audit --audit-level=high`: 0 vulnerabilities.
-- Real Orca + Claude Code Solo Goal `GOAL-SOLO-SMOKE`: approval, auto-dispatch, committed implementation and report, inbox settlement, acceptance, Goal closure, terminal release.
-- Real Orca + Claude Code Multi-WP Goal `GOAL-SMOKE`: two independent workers in one Run and separate worktrees, committed reports, package acceptance, integration on a disposable branch, Goal closure, both terminals released. No APOS branch was merged into `main`.
+`telemetry-recorded` events hold, per dispatch and role: requested and launched model, token usage (input, cached, output) read from the owner's Codex session files, and wall time. When nothing matches, the usage is recorded as `unknown`, never estimated. `metrics show` summarizes a Goal.
+
+## Validation
+
+- `npm test`: 142 tests, covering every safety case in `docs/fault-injection.md`.
+- `npm run typecheck` and `npm run build`.
+- **The v2 path still needs a live smoke run with real Orca and Codex.** The v1 smokes ran Claude Code without a gate.

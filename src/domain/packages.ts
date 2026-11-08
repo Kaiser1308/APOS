@@ -14,7 +14,7 @@ const packageSchema = z.object({
   exclusions: z.array(text),
   dependencies: z.array(z.string().regex(/^WP-[A-Z0-9-]+$/)),
   interfaces: z.array(text).min(1),
-  acceptance: z.array(z.object({ id, text, goalAcceptanceId: id.optional() })).min(1),
+  acceptance: z.array(z.object({ id, text, goalAcceptanceId: id.optional(), checkIds: z.array(id).optional() })).min(1),
   integration: text
 });
 
@@ -63,5 +63,7 @@ export function validatePackageGraph(goal: GoalSpec, proposal: ExecutionProposal
   const goalLevel = new Set(proposal.acceptanceMapping.filter(item => item.level === 'goal').map(item => item.acceptanceId));
   for (const item of goal.acceptance) if (!covered.has(item.id) && !goalLevel.has(item.id)) throw new Error(`Unmapped Goal acceptance: ${item.id}`);
   for (const item of covered) if (!goal.acceptance.some(ac => ac.id === item)) throw new Error(`Unknown Goal acceptance: ${item}`);
+  const checks = new Set(goal.checks.map(item => item.id));
+  for (const item of packages) for (const criterion of item.acceptance) for (const checkId of criterion.checkIds ?? []) if (!checks.has(checkId)) throw new Error(`Package ${item.id} names unknown check ${checkId}`);
   return packages;
 }

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntimeRef } from '../app/packages.js';
-import { DEFAULT_PROFILES, committedFileDigest, leadWakeBrief, packageBrief, repairBrief, reviewBrief, soloBrief, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
+import { DEFAULT_PROFILES, committedFileDigest, leadWakeBrief, packageBrief, packageReportPath, repairBrief, reviewBrief, soloBrief, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
 
 export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string; requested?: RuntimeProfile };
 /** What Orca says actually launched; compared with the requested profile. */
@@ -158,11 +158,17 @@ export class OrcaRuntime implements RuntimeAdapter {
     return state === 'live' ? 'live' : 'unverifiable';
   }
 
-  async resumePackage(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string }): Promise<PackageRuntimeRef> {
+  async resumePackage(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string; finding?: string; attempt?: number }): Promise<PackageRuntimeRef> {
     const { prior, package: item } = input;
     if (!prior.terminal || !prior.worktreeId) throw new Error('Original Worker terminal and worktree required');
     this.execute(['orchestration', 'run-use', '--id', prior.runId]);
-    const spec = `Target: ${prior.repoPath}, ${item.goalId}, ${item.id}. Continue the same package owner for contract v${item.version}. Read .apos/goals/${item.goalId}/packages/${item.id}.md; recheck all local acceptance and report fresh evidence. Follow the injected Orca preamble and report worker_done exactly once. APOS dispatch key: ${input.idempotencyKey}.${prior.baseCommit ? ` APOS base commit: ${prior.baseCommit}.` : ''}`;
+    const spec = [
+      `Target: ${prior.repoPath}, ${item.goalId}, ${item.id}. Continue the same package owner for contract v${item.version}, attempt ${input.attempt ?? 2}.`,
+      ...(input.finding ? ['The controller ran the package checks itself on your last commit. Its finding:', input.finding] : []),
+      `Read .apos/goals/${item.goalId}/packages/${item.id}.md, recheck all local acceptance under .apos/skills/_core/execute.md, and commit a new delivery report at ${packageReportPath(item.goalId, item.id, item.version, input.attempt ?? 2)} with the same activation line.`,
+      'Follow the injected Orca preamble and report worker_done exactly once.',
+      `APOS dispatch key: ${input.idempotencyKey}.${prior.baseCommit ? ` APOS base commit: ${prior.baseCommit}.` : ''}`
+    ].join('\n');
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--run', prior.runId]);
     const ref = extractStartedRef(started, prior.repoPath);
     if (ref.runId !== prior.runId) throw new Error('Resumed Worker belongs to an unexpected Run');

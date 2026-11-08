@@ -5,12 +5,13 @@ import { attemptLimit } from '../domain/transitions.js';
 import { reviewReasons } from '../domain/reviews.js';
 import type { GateReport } from '../domain/gate.js';
 import type { GoalRepository } from '../store/journal.js';
-import { CORE_SKILL, activationLine, committedFileDigest, reviewResultPath, soloReportPath } from '../runtime/brief.js';
+import { CORE_SKILL, activationLine, committedFileDigest, packageReportPath, reviewResultPath, soloReportPath } from '../runtime/brief.js';
 import { worktreePath, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
 import type { TelemetryProbe } from '../runtime/telemetry.js';
 import { GateService } from './gate.js';
 import { SoloService } from './solo.js';
 import { VerificationService } from './verification.js';
+import { PackageService, type PackageRuntime, type PackageRuntimeRef } from './packages.js';
 
 const show = (repo: string, commit: string, path: string): string | undefined => {
   try { return execFileSync('git', ['-C', repo, 'show', `${commit}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
@@ -166,4 +167,93 @@ export class SoloSupervisor {
 
 function describe(gate: GateReport): string {
   return gate.checks.filter(item => item.status !== 'pass').map(item => `${item.checkId} ${item.status} (${item.reason}${item.newFailures.length ? `; new: ${item.newFailures.join(', ')}` : ''})`).join('; ');
+}
+
+/**
+ * The controller's loop for a Multi-WP Goal: gate each settled package on its own head, send red
+ * packages back to the same owner with the finding, and wake the Lead once per batch of new events
+ * (settled packages, Worker questions, ready-to-integrate, a red integration gate) on its terminal.
+ */
+export class MultiSupervisor {
+  private readonly gate: GateService;
+  private readonly now: () => number;
+  constructor(private readonly store: GoalRepository, private readonly runtime: RuntimeAdapter & PackageRuntime, private readonly options: SupervisorOptions = {}) {
+    this.gate = options.gate ?? new GateService(store);
+    this.now = options.now ?? Date.now;
+  }
+
+  private record(goalId: string, type: GoalEventType, data?: unknown): void {
+    this.store.append({ id: randomUUID(), goalId, type, data, at: new Date(this.now()).toISOString() });
+  }
+
+  async step(goalId: string, repoPath: string, questions: string[] = []): Promise<string[]> {
+    const actions: string[] = [];
+    let state = this.store.getGoal(goalId);
+    if (!state || state.status !== 'executing' || state.proposal?.mode !== 'multi-wp') return actions;
+    const events: string[] = questions.map(item => `question ${item}`);
+    for (const item of Object.values(state.packages ?? {})) {
+      const ref = item.runtimeRef as PackageRuntimeRef | undefined;
+      if (item.status !== 'executing' || !ref) continue;
+      const outcome = state.settlements?.[ref.dispatchId];
+      const attemptKey = `${item.spec.id}@${item.spec.version}:${item.attempts}`;
+      if (!outcome || item.gate?.attemptKey === attemptKey) continue;
+      const tag = `${item.spec.id} v${item.spec.version} attempt ${item.attempts}`;
+      if (outcome === 'failed') { this.record(goalId, 'package-blocked', { packageId: item.spec.id, blocker: { kind: 'technical', note: `Worker reported failed on ${tag}` } }); events.push(`package ${tag} failed`); continue; }
+      const head = await this.runtime.deliveryHead?.(ref);
+      const report = head && show(repoPath, head, packageReportPath(goalId, item.spec.id, item.spec.version, item.attempts));
+      const line = ref.baseCommit ? activationLine(committedFileDigest(repoPath, ref.baseCommit, CORE_SKILL)) : undefined;
+      if (!head || !report || !line || !report.includes(line)) {
+        // Not gated, so it cannot verify; the Lead decides whether to revise and resume the owner.
+        events.push(`package ${tag} settled without a delivery report carrying the core activation line`);
+        continue;
+      }
+      if (!item.spec.acceptance.some(criterion => criterion.checkIds?.length)) { events.push(`package ${tag} settled at ${head}; no controller checks, Lead must verify its evidence`); continue; }
+      const gate = this.gate.runPackage(goalId, item.spec.id, repoPath, head);
+      actions.push(`${item.spec.id} gate ${gate.result} on ${head}`);
+      if (gate.result === 'green') {
+        const service = new PackageService(this.store, this.runtime);
+        for (const criterion of item.spec.acceptance) service.submitEvidence(goalId, { packageId: item.spec.id, packageVersion: item.spec.version, owner: item.spec.owner, acceptanceId: criterion.id, result: 'pass', command: 'controller package gate', artifactRef: gate.gateId, commitRef: head });
+        if (!state.proposal.risks.length) { await service.verify(goalId, item.spec.id); events.push(`package ${tag} verified at ${head}`); }
+        else events.push(`package ${tag} green at ${head}; independent package review required`);
+        continue;
+      }
+      const latest = this.store.getGoal(goalId)!.packages![item.spec.id];
+      const signature = latest.findings?.at(-1);
+      const repeats = (latest.findings ?? []).filter(value => value === signature).length;
+      if (gate.result === 'unverifiable' || repeats >= 3) {
+        this.record(goalId, 'human-notified', { kind: 'needs-decision', goalId, packageId: item.spec.id, note: gate.result === 'unverifiable' ? 'package gate unverifiable' : 'same package failure after two repairs' });
+        events.push(`package ${tag} needs a decision: ${latest.finding}`);
+      } else events.push(`package ${tag} red, returned to its owner: ${latest.finding}`);
+    }
+    state = this.store.getGoal(goalId)!;
+    const packages = Object.values(state.packages ?? {});
+    if (packages.length && packages.every(item => item.status === 'verified') && !state.integration) events.push('all packages verified: ready to integrate');
+    if (state.gate && state.gate.result !== 'green') events.push(`integration gate ${state.gate.result} on ${state.gate.deliveryCommit}`);
+    actions.push(...await this.wakeLead(goalId, repoPath, events));
+    return actions;
+  }
+
+  /** One wake-up per batch of new events, only when the Lead's previous turn has settled. */
+  private async wakeLead(goalId: string, repoPath: string, events: string[]): Promise<string[]> {
+    const state = this.store.getGoal(goalId)!;
+    const fresh = [...new Set(events)].filter(item => !(state.wokenFor ?? []).includes(item));
+    if (!fresh.length) return [];
+    const lead = state.leadTerminal;
+    if (!lead || !this.runtime.wakeLead) {
+      const asked = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'lead-unreachable');
+      if (!asked) this.record(goalId, 'human-notified', { kind: 'lead-unreachable', goalId, events: fresh });
+      return [`Lead unreachable for: ${fresh.join('; ')}`];
+    }
+    const lastWake = [...this.store.events(goalId)].reverse().find(item => item.type === 'lead-woken' && (item.data as { dispatchId?: string }).dispatchId);
+    const lastDispatch = (lastWake?.data as { dispatchId?: string } | undefined)?.dispatchId;
+    if (lastDispatch) {
+      const observation = await this.runtime.inspect({ runId: lead.runId ?? '', taskId: '', dispatchId: lastDispatch, owner: 'lead', repoPath });
+      if (!observation.outcome) return [`Lead busy; holding ${fresh.length} event(s)`];
+    }
+    const runId = lead.runId ?? (Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId).find(Boolean));
+    if (!runId) return [];
+    const woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: lead.terminal, worktree: lead.worktree, runId, events: fresh, idempotencyKey: randomUUID() });
+    this.record(goalId, 'lead-woken', { dispatchId: woken.dispatchId, events: fresh, runId });
+    return [`woke Lead ${woken.dispatchId}: ${fresh.join('; ')}`];
+  }
 }

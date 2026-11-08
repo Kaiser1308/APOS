@@ -7,12 +7,12 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken'
+  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken' | 'package-gate-recorded'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
 export type PackageBlocker = { kind: 'technical' | 'product' | 'external'; note: string };
-export type PackageState = { spec: WorkPackageSpec; status: 'specified' | 'dispatching' | 'resuming' | 'executing' | 'blocked' | 'verified' | 'stale'; evidence: PackageEvidence[]; attempts: number; runtimeRef?: unknown; dispatchIntent?: string; blocker?: PackageBlocker };
+export type PackageState = { spec: WorkPackageSpec; status: 'specified' | 'dispatching' | 'resuming' | 'executing' | 'blocked' | 'verified' | 'stale'; evidence: PackageEvidence[]; attempts: number; runtimeRef?: unknown; dispatchIntent?: string; blocker?: PackageBlocker; gate?: GateReport; finding?: string; findings?: string[] };
 export type GoalState = {
   spec: GoalSpec;
   status: GoalStatus;
@@ -205,10 +205,21 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(typeof data.resolution === 'string' && data.resolution.trim(), 'Blocker resolution required');
       return { ...state, packages: { ...state.packages, [data.packageId!]: { ...item, status: 'stale', blocker: undefined, evidence: [] } }, reviews: state.reviews.filter(review => review.packageId !== data.packageId) };
     }
+    case 'package-gate-recorded': {
+      const data = event.data as { packageId?: string; report?: GateReport; signature?: string };
+      const item = data && state.packages?.[data.packageId ?? ''];
+      requireThat(item?.status === 'executing' && data.report && data.report.attemptKey === `${item.spec.id}@${item.spec.version}:${item.attempts}`, 'Package gate must be for the executing package attempt');
+      if (data.report.result === 'green') return { ...state, packages: { ...state.packages, [item.spec.id]: { ...item, gate: data.report, finding: undefined } } };
+      // A red package gate sends the package back to the same owner with the controller's finding.
+      const finding = data.report.checks.filter(check => check.status !== 'pass').map(check => `${check.checkId} ${check.status}: ${check.reason}${check.newFailures.length ? ` (new: ${check.newFailures.join(', ')})` : ''}`).join('; ');
+      return { ...state, packages: { ...state.packages, [item.spec.id]: { ...item, status: 'stale', gate: data.report, evidence: [], finding, findings: [...(item.findings ?? []), data.signature ?? finding] } } };
+    }
     case 'package-verified': {
       const data = event.data as { packageId?: string };
       const packageState = data && state.packages?.[data.packageId ?? ''];
       requireThat(packageState?.status === 'executing', 'Executing package required');
+      const gated = packageState.spec.acceptance.some(item => item.checkIds?.length);
+      requireThat(!gated || packageState.gate?.result === 'green', 'Green controller gate on the package head required');
       const latest = new Map(packageState.evidence.map(item => [item.acceptanceId, item]));
       requireThat(packageState.spec.acceptance.every(item => latest.get(item.id)?.result === 'pass'), 'Passing package evidence required');
       return { ...state, packages: { ...state.packages, [data.packageId!]: { ...packageState, status: 'verified' } } };

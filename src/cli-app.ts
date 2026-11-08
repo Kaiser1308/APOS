@@ -126,11 +126,15 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   const execution = program.command('execution');
   // No Human gate on HOW: the Lead commits its plan, the controller machine-checks it and dispatches.
   // A Multi-WP plan only notifies the Human.
-  lead.command('commit').argument('<id>').description('Lead commits its plan; the controller checks it and dispatches').action(async (id: string) => withJournalAsync(async journal => {
+  lead.command('commit').argument('<id>').description('Lead commits its plan; the controller checks it and dispatches')
+    .option('--terminal <handle>', 'Lead terminal to wake for Multi-WP events', process.env.ORCA_TERMINAL_HANDLE)
+    .option('--worktree <selector>', 'worktree selector of the Lead terminal')
+    .action(async (id: string, flags: { terminal?: string; worktree?: string }) => withJournalAsync(async journal => {
       const state = journal.getGoal(id);
       if (!state?.proposal) throw new Error('Current proposal required');
       journal.append(event(id, 'proposal-approved', { by: 'controller', proposalVersion: state.proposal.version }));
       if (state.proposal.mode === 'multi-wp') {
+        if (flags.terminal) journal.append(event(id, 'lead-woken', { events: [], terminal: flags.terminal, worktree: flags.worktree ?? `path:${repo()}` }));
         const notice = { kind: 'multi-wp', goalId: id, packages: Object.keys(state.packages ?? {}), splitRationale: state.proposal.splitRationale, estimatedCost: state.proposal.estimatedCost };
         journal.append(event(id, 'human-notified', notice));
         write(`NOTICE ${id}: Lead chose Multi-WP (${notice.packages.length} packages, est. ${notice.estimatedCost?.spendUsd} USD / ${notice.estimatedCost?.wallMinutes} min): ${notice.splitRationale}`);
@@ -224,6 +228,14 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(JSON.stringify(new IntegrationService(journal, options.inspector).prepare(goalId, repo())));
   }));
   integration.command('complete').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
+    const input = JSON.parse(readFileSync(file, 'utf8')) as { commitRef: string };
+    const current = journal.getGoal(goalId)?.gate;
+    // The controller gates the integration commit itself; a red result wakes the Lead on the next tick.
+    if (current?.deliveryCommit !== input.commitRef || current.result !== 'green') {
+      const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(goalId, repo(), { deliveryCommit: input.commitRef });
+      write(`Integration gate ${report.result} on ${input.commitRef}`);
+      if (report.result !== 'green') throw new Error(`Integration gate is ${report.result}`);
+    }
     new IntegrationService(journal, options.inspector).complete(goalId, repo(), JSON.parse(readFileSync(file, 'utf8')));
     write(`Integrated and verified ${goalId}`);
   }));

@@ -3,7 +3,7 @@ import { SoloService } from './solo.js';
 import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
 import type { GoalRepository } from '../store/journal.js';
 import { randomUUID } from 'node:crypto';
-import { SoloSupervisor, type SupervisorOptions } from './supervisor.js';
+import { MultiSupervisor, SoloSupervisor, type SupervisorOptions } from './supervisor.js';
 
 export type ControllerTick = { goalId: string; dispatched: string[]; recovered: string[]; unresolved: string[]; resumed: string[]; settled: string[]; inboxPending: string[]; errors: string[]; supervised: string[] };
 
@@ -98,10 +98,11 @@ export class ControllerService {
       }
       try { await this.consumeInbox(goalId, result); }
       catch (error) { result.errors.push(`inbox: ${error instanceof Error ? error.message : String(error)}`); }
-      if (snapshot.proposal.mode !== 'multi-wp') {
-        try { result.supervised.push(...await new SoloSupervisor(this.store, this.runtime, this.options).step(goalId, repoPath)); }
-        catch (error) { result.errors.push(`supervisor: ${error instanceof Error ? error.message : String(error)}`); }
-      }
+      try {
+        result.supervised.push(...(snapshot.proposal.mode === 'multi-wp'
+          ? await new MultiSupervisor(this.store, this.runtime, this.options).step(goalId, repoPath, result.inboxPending)
+          : await new SoloSupervisor(this.store, this.runtime, this.options).step(goalId, repoPath)));
+      } catch (error) { result.errors.push(`supervisor: ${error instanceof Error ? error.message : String(error)}`); }
       results.push(result);
     }
     return results;

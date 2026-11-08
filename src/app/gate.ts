@@ -111,6 +111,33 @@ export class GateService {
     return this.execute(goalId, repoPath, { deliveryCommit: state.merge.mergeCommit, baseCommit: parent }, 'post-merge');
   }
 
+  /** Runs the Goal checks a package's acceptance names, on the package head against its own base. */
+  runPackage(goalId: string, packageId: string, repoPath: string, head: string): GateReport {
+    const state = this.store.getGoal(goalId);
+    const item = state?.packages?.[packageId];
+    if (!state || item?.status !== 'executing') throw new Error('Executing package required for package gate');
+    const wanted = new Set(item.spec.acceptance.flatMap(criterion => criterion.checkIds ?? []));
+    const base = (item.runtimeRef as PackageRuntimeRef | undefined)?.baseCommit;
+    if (!base) throw new Error('Package base commit unknown');
+    if (!this.inspector.contains(repoPath, base, head)) throw new Error('Package head does not descend from its base commit');
+    const artifacts = join(this.artifactRoot, goalId, `${packageId}-${randomUUID()}`);
+    mkdirSync(artifacts, { recursive: true });
+    const checks: CheckResult[] = state.spec.checks.filter(check => wanted.has(check.id)).map(check => {
+      if (check.kind === 'manual') return evaluateManualCheck(check, head, state.manualConfirmations ?? []);
+      const baseRuns = check.expect === 'no-new-failures' ? this.runMany(check, repoPath, base, 'base', artifacts) : [];
+      return evaluateCommandCheck(check, baseRuns, this.runMany(check, repoPath, head, 'delivery', artifacts));
+    });
+    const report: GateReport = {
+      gateId: `GATE-${randomUUID()}`, goalId, goalVersion: state.spec.version, sourceSha256: state.spec.source.sha256,
+      baseCommit: base, deliveryCommit: head, attemptKey: `${item.spec.id}@${item.spec.version}:${item.attempts}`, phase: 'delivery',
+      changedFiles: this.inspector.files(repoPath, head, base),
+      environment: { platform: process.platform, shell: this.executor.shell, node: process.version }, checks, result: summarizeGate(checks), at: this.now()
+    };
+    writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
+    this.store.append({ id: randomUUID(), goalId, type: 'package-gate-recorded', data: { packageId, report, signature: checks.filter(c => c.status !== 'pass').map(c => `${c.checkId}[${c.newFailures.join(',')}]`).sort().join('|') }, at: this.now() });
+    return report;
+  }
+
   run(goalId: string, repoPath: string, input: { deliveryCommit: string; baseCommit?: string }): GateReport {
     const state = this.store.getGoal(goalId);
     if (!state || state.status !== 'executing') throw new Error('Executing Goal required for gate');

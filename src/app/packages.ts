@@ -9,7 +9,7 @@ export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: str
 export interface PackageRuntime {
   startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string }): Promise<PackageRuntimeRef>;
   inspectPackage?(ref: PackageRuntimeRef): Promise<'completed' | 'failed' | 'live' | 'unverifiable'>;
-  resumePackage?(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string }): Promise<PackageRuntimeRef>;
+  resumePackage?(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string; finding?: string; attempt?: number }): Promise<PackageRuntimeRef>;
   recoverPackage?(key: string, runId?: string): Promise<PackageRuntimeRef | undefined>;
 }
 
@@ -72,7 +72,7 @@ export class PackageService {
     if (!this.runtime.resumePackage) throw new Error('Runtime cannot resume package owner');
     const key = randomUUID();
     this.record(goalId, 'package-resume-intended', { packageId, key });
-    const ref = await this.runtime.resumePackage({ package: item.spec, prior, idempotencyKey: key });
+    const ref = await this.runtime.resumePackage({ package: item.spec, prior, idempotencyKey: key, finding: item.finding, attempt: item.attempts + 1 });
     this.record(goalId, 'package-resumed', { packageId, ref });
     return ref;
   }

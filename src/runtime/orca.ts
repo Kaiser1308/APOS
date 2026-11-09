@@ -80,6 +80,25 @@ function runOrca(args: string[]): Record<string, unknown> {
   }
 }
 
+/**
+ * A package that depends on others must see their delivered code. Builds (without touching any checkout)
+ * a commit whose parents are the repo head and the verified dependency commits, with their merged tree.
+ */
+export function composeBase(repoPath: string, head: string, commits: string[], packageId: string): string {
+  const git = (args: string[]) => execFileSync('git', ['-C', repoPath, ...args], { encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'APOS', GIT_AUTHOR_EMAIL: 'apos@localhost', GIT_COMMITTER_NAME: 'APOS', GIT_COMMITTER_EMAIL: 'apos@localhost' } }).trim();
+  let current = head;
+  for (const commit of [...new Set(commits)]) {
+    if (gitOk(repoPath, ['merge-base', '--is-ancestor', commit, current])) continue;
+    const tree = git(['merge-tree', '--write-tree', current, commit]).split(/\r?\n/)[0];
+    current = git(['commit-tree', tree, '-p', current, '-p', commit, '-m', `apos: base for ${packageId} with verified dependencies`]);
+  }
+  return current;
+}
+
+function gitOk(repoPath: string, args: string[]): boolean {
+  try { execFileSync('git', ['-C', repoPath, ...args], { stdio: 'ignore' }); return true; } catch { return false; }
+}
+
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
@@ -185,9 +204,10 @@ export class OrcaRuntime implements RuntimeAdapter {
     return { ...ref, baseCommit, requested: profile };
   }
 
-  async startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string }): Promise<PackageRuntimeRef> {
+  async startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string; dependencyCommits?: string[] }): Promise<PackageRuntimeRef> {
     const item = input.package;
-    const baseCommit = this.gitHead(input.repoPath);
+    const head = this.gitHead(input.repoPath);
+    const baseCommit = input.dependencyCommits?.length ? composeBase(input.repoPath, head, input.dependencyCommits, item.id) : head;
     if (!/^[0-9a-fA-F]{40,64}$/.test(baseCommit)) throw new Error('Full package base commit required');
     this.execute(['repo', 'add', '--path', input.repoPath]);
     const runId = await this.packageRun(input.repoPath, item.goalId, item.goalVersion);
@@ -218,7 +238,14 @@ export class OrcaRuntime implements RuntimeAdapter {
       'Follow the injected Orca preamble and report worker_done exactly once.',
       `${repoMarker(prior.repoPath)} APOS dispatch key: ${input.idempotencyKey}.${prior.baseCommit ? ` APOS base commit: ${prior.baseCommit}.` : ''}`
     ].join(' ');
-    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--run', prior.runId]);
+    let started: Record<string, unknown>;
+    try { started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--run', prior.runId]); }
+    catch (error) {
+      // Seen live: the old terminal had settled and Orca refused. Nothing was created, so the same owner continues
+      // in a fresh terminal on the same worktree, which holds all of its work.
+      if (!(error instanceof OrcaRefused)) throw error;
+      started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', `id:${prior.worktreeId}`, ...launchArgs(this.profile('worker')), '--run', prior.runId]);
+    }
     const ref = extractStartedRef(started, prior.repoPath);
     if (ref.runId !== prior.runId) throw new Error('Resumed Worker belongs to an unexpected Run');
     return { ...ref, owner: 'worker', worktreeId: ref.worktreeId ?? prior.worktreeId, baseCommit: prior.baseCommit };

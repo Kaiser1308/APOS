@@ -55,7 +55,9 @@ export class ControllerService {
         // inspects each current dispatch itself), so a worker_done for any other dispatch on this Run is
         // logged once and acked.
         const note = `stale worker_done ${message.id} for dispatch ${String(dispatchId ?? 'unknown')}: not a current dispatch of this Goal; acked`;
-        if (!this.store.events(goalId).some(item => item.type === 'decision-logged' && (item.data as { note?: string }).note === note)) {
+        // A reviewer's worker_done can arrive before its start is recorded (review intent pending): not stale, and not worth a note.
+        const startPending = Boolean(this.store.getGoal(goalId)?.reviewIntent || this.store.getGoal(goalId)?.resumeIntent);
+        if (!startPending && !this.store.events(goalId).some(item => item.type === 'decision-logged' && (item.data as { note?: string }).note === note)) {
           this.store.append({ id: randomUUID(), goalId, type: 'decision-logged', data: { note }, at: new Date().toISOString() });
         }
         result.settled.push(`stale ${message.id}`);

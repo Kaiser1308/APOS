@@ -1,5 +1,9 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { extractStartedRef, terminalWorktree, interpretWorkerShow, OrcaRuntime, parseOrcaResult } from './orca.js';
+import { composeBase, extractStartedRef, terminalWorktree, interpretWorkerShow, OrcaRuntime, parseOrcaResult } from './orca.js';
 import { DEFAULT_PROFILES } from './brief.js';
 
 describe('Orca adapter result', () => {
@@ -205,4 +209,23 @@ describe('terminalWorktree', () => {
     expect(seen[0]).toEqual(['terminal', 'show', '--terminal', 'term_1']);
     expect(() => terminalWorktree('term_1', () => ({ terminal: {} }))).toThrow(/terminal worktree/);
   });
+});
+
+it('composes a package base that contains the repo head and every verified dependency commit', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-compose-'));
+  const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+  try {
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(dir, 'a.txt'), 'base\n'); git('add', '.'); git('commit', '-qm', 'base');
+    const head = git('rev-parse', 'HEAD');
+    git('checkout', '-qb', 'wp-a'); writeFileSync(join(dir, 'slugify.js'), 'export const slugify = s => s;\n'); git('add', '.'); git('commit', '-qm', 'wp-a');
+    const dep = git('rev-parse', 'HEAD');
+    git('checkout', '-q', 'main');
+    const base = composeBase(dir, head, [dep, dep], 'WP-B');
+    expect(base).not.toBe(head);
+    expect(git('merge-base', '--is-ancestor', dep, base)).toBe('');
+    expect(git('merge-base', '--is-ancestor', head, base)).toBe('');
+    expect(git('show', `${base}:slugify.js`)).toContain('slugify');
+    expect(composeBase(dir, base, [dep], 'WP-B')).toBe(base);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

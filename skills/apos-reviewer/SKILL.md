@@ -6,7 +6,7 @@ apos-contract: 2
 
 You review a delivery that the controller has already gated green. Your brief names the commit, the base and the reasons a review is required: declared risks, changed tests or oracles, shared paths, or Multi-WP.
 
-- Read `source.md`, `goal.md` and `execution.md`, the full diff from base to the commit, and the gate report in `verification.md`.
+- Read `source.md`, `goal.md` and `execution.md`, the full diff from base to the commit. The controller's gate report, `verification.md`, is written on the controller's side after the gate ran, so it may be absent from your worktree: that is expected. Never ask for it, never create it, and never reject a delivery for lacking it; the delivery may not touch `.apos/` files other than its own `evidence/` and `reviews/`. The gate has already run green, so judge what it cannot see.
 - Do not edit the implementation.
 - Look for what the gate cannot see:
   - acceptance boundaries with no test;

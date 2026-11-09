@@ -256,6 +256,9 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(data?.key && data.reason?.trim(), 'Abandoning an intent needs its key and a reason');
       if (state.resumeIntent === data.key) return { ...state, resumeIntent: undefined };
       if (state.dispatchIntent === data.key && state.status === 'ready') return { ...state, dispatchIntent: undefined };
+      // Seen live: a refused package resume left the package 'resuming' forever. It goes back to 'stale' to be retried.
+      const resuming = Object.entries(state.packages ?? {}).find(([, item]) => item.status === 'resuming' && item.dispatchIntent === data.key);
+      if (resuming) return { ...state, packages: { ...state.packages, [resuming[0]]: { ...resuming[1], status: 'stale', dispatchIntent: undefined } } };
       throw new Error('No pending dispatch or resume intent with that key');
     }
     case 'checkpointed':

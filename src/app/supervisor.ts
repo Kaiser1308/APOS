@@ -376,7 +376,12 @@ export class MultiSupervisor {
     const inspector = this.options.inspector ?? new GitCommitInspector();
     try {
       const prepared = new IntegrationService(this.store, inspector).prepare(goalId, repoPath);
-      if (!prepared.commits.every(item => inspector.contains(repoPath, item, commit))) return actions;
+      const missing = prepared.commits.filter(item => !inspector.contains(repoPath, item, commit));
+      if (missing.length) {
+        // Seen live: this returned silently and the Goal stalled until the Lead found the cause itself.
+        events.push(`Goal review waiting: gated integration commit ${commit} does not contain package commit(s) ${missing.join(', ')} as ancestors; rebuild it with "git merge --no-ff" of every package commit (no squash or rebase), then run the gate again`);
+        return actions;
+      }
     } catch { return actions; }
     return this.startGoalReview(state, commit, repoPath, actions);
   }

@@ -3,11 +3,13 @@ import { validatePackageGraph, parsePackageEvidence, parseWorkPackage, type Pack
 import { attemptLimit, type GoalEventType } from '../domain/transitions.js';
 import type { PackageBlocker } from '../domain/transitions.js';
 
+import { OrcaRefused } from '../runtime/orca.js';
 import type { GoalRepository } from '../store/journal.js';
 
 export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string };
 export interface PackageRuntime {
-  startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string }): Promise<PackageRuntimeRef>;
+  /** `dependencyCommits`: the verified commits of the package's dependencies; its worktree must start from them. */
+  startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string; dependencyCommits?: string[] }): Promise<PackageRuntimeRef>;
   inspectPackage?(ref: PackageRuntimeRef): Promise<'completed' | 'failed' | 'live' | 'unverifiable'>;
   resumePackage?(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string; finding?: string; attempt?: number }): Promise<PackageRuntimeRef>;
   recoverPackage?(key: string, runId?: string): Promise<PackageRuntimeRef | undefined>;
@@ -72,7 +74,13 @@ export class PackageService {
     if (!this.runtime.resumePackage) throw new Error('Runtime cannot resume package owner');
     const key = randomUUID();
     this.record(goalId, 'package-resume-intended', { packageId, key });
-    const ref = await this.runtime.resumePackage({ package: item.spec, prior, idempotencyKey: key, finding: item.finding, attempt: item.attempts + 1 });
+    let ref: PackageRuntimeRef;
+    try { ref = await this.runtime.resumePackage({ package: item.spec, prior, idempotencyKey: key, finding: item.finding, attempt: item.attempts + 1 }); }
+    catch (error) {
+      // A refusal is definitive (nothing was created), so the package returns to stale instead of waiting on an intent that cannot resolve.
+      if (error instanceof OrcaRefused) this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
+      throw error;
+    }
     this.record(goalId, 'package-resumed', { packageId, ref });
     return ref;
   }
@@ -87,13 +95,16 @@ export class PackageService {
 
   async dispatchReady(goalId: string, repoPath: string): Promise<PackageRuntimeRef[]> {
     const ready = this.ready(goalId);
+    const packages = this.store.getGoal(goalId)?.packages ?? {};
     const wave = ready.map(spec => {
       const key = randomUUID();
       this.record(goalId, 'package-dispatch-intended', { packageId: spec.id, key });
-      return { spec, key };
+      // Seen live: a dependent package started from the repo HEAD without its dependency's code, so its gate failed.
+      const dependencyCommits = spec.dependencies.map(dep => packages[dep]?.gate?.deliveryCommit ?? packages[dep]?.evidence.at(-1)?.commitRef).filter((commit): commit is string => Boolean(commit));
+      return { spec, key, dependencyCommits };
     });
-    const results = await Promise.allSettled(wave.map(async ({ spec, key }) => {
-      const ref = await this.runtime.startPackage({ package: spec, repoPath, idempotencyKey: key });
+    const results = await Promise.allSettled(wave.map(async ({ spec, key, dependencyCommits }) => {
+      const ref = await this.runtime.startPackage({ package: spec, repoPath, idempotencyKey: key, dependencyCommits });
       this.record(goalId, 'package-started', { packageId: spec.id, ref });
       return ref;
     }));

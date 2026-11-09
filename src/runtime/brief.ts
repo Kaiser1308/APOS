@@ -57,7 +57,7 @@ function skillLines(input: BriefBase, role: Role): string[] {
   const core = digest(CORE_SKILL);
   const skill = digest(roleSkill(role));
   return [
-    `Read ${CORE_SKILL} (sha256 ${core}) and ${roleSkill(role)} (sha256 ${skill}) before anything else and follow them for the whole attempt.`,
+    `Read ${CORE_SKILL} (sha256 ${core}) and ${roleSkill(role)} (sha256 ${skill}) before anything else and follow them for the whole attempt (hashes are of the content with LF line endings; a CRLF checkout hashes differently and is not a finding).`,
     `Your delivery report must contain this activation line verbatim: ${activationLine(core)}`
   ];
 }
@@ -109,6 +109,7 @@ export function reviewBrief(input: BriefBase & { commit: string; reasons: string
     WORKSPACE,
     ...skillLines(input, 'reviewer').slice(0, 1),
     `Review is required because: ${input.reasons.join('; ')}.`,
+    'The controller gate already ran green on this commit; verification.md may be absent from your worktree and must not be requested, created or cited as a finding.',
     `Write {"result":"pass"|"changes","note":"..."} to ${reviewResultPath(input.goalId, input.idempotencyKey)} and commit only that file. Do not edit the implementation.`,
     'Report worker_done exactly once with succeeded when the review is written.',
     `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`

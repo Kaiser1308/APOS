@@ -36,8 +36,10 @@ class FakeRuntime implements PackageRuntime {
   resumes: string[] = [];
   inspectState: 'completed' | 'failed' | 'live' | 'unverifiable' = 'completed';
   recovered = new Map<string, Awaited<ReturnType<PackageRuntime['startPackage']>>>();
-  async startPackage(input: { package: WorkPackageSpec; repoPath: string }) {
+  deps = new Map<string, string[] | undefined>();
+  async startPackage(input: { package: WorkPackageSpec; repoPath: string; dependencyCommits?: string[] }) {
     this.starts.push(input.package.id);
+    this.deps.set(input.package.id, input.dependencyCommits);
     return { runId: 'run_1', taskId: `task_${input.package.id}`, dispatchId: `ctx_${input.package.id}`, owner: 'worker' as const, repoPath: input.repoPath };
   }
   async recoverPackage(key: string) { return this.recovered.get(key); }
@@ -91,6 +93,20 @@ describe('package scheduling', () => {
     service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:test', commitRef: 'abc123' });
     await service.verify(spec.id, a.id);
     expect(service.ready(spec.id).map(item => item.id)).toEqual(['WP-02']);
+    store.close();
+  });
+  it('starts a dependent package from its verified dependency commits (seen live: it started without them)', async () => {
+    const { store, dir } = fixture();
+    const runtime = new FakeRuntime();
+    const service = new PackageService(store, runtime);
+    service.add(spec.id, a); service.add(spec.id, b);
+    approve(store);
+    await service.dispatchReady(spec.id, dir);
+    service.submitEvidence(spec.id, { packageId: a.id, packageVersion: 1, owner: a.owner, acceptanceId: 'WP-AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:test', commitRef: 'abc123' });
+    await service.verify(spec.id, a.id);
+    await service.dispatchReady(spec.id, dir);
+    expect(runtime.deps.get('WP-01')).toEqual([]);
+    expect(runtime.deps.get('WP-02')).toEqual(['abc123']);
     store.close();
   });
   it('requires current-owner passing evidence for every local criterion', async () => {

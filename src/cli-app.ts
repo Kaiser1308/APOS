@@ -293,6 +293,8 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   controller.command('watch').option('--interval-ms <n>', 'mechanical controller interval', '15000').action(async ({ intervalMs }: { intervalMs: string }) => {
     const interval = Number(intervalMs);
     if (!Number.isInteger(interval) || interval < 1000 || interval > 300000) throw new Error('Watch interval must be 1000 to 300000 ms');
+    // Seen live: started detached, every Orca call failed with no_active_sender_terminal and the Goal stalled.
+    if (!options.runtime && !process.env.ORCA_TERMINAL_HANDLE) throw new Error('controller watch must run inside a live Orca terminal (ORCA_TERMINAL_HANDLE is not set); Orca refuses orchestration calls from a process with no sender terminal');
     let stopped = false;
     const abort = new AbortController();
     const stop = () => { stopped = true; abort.abort(); };

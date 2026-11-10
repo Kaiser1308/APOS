@@ -1,4 +1,10 @@
 import { Command } from 'commander';
+
+/** PowerShell's `Set-Content -Encoding utf8` writes a BOM, which JSON.parse rejects. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function readJsonFile(file: string): any {
+  return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+}
 import { withControllerLease } from './store/lease.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -82,7 +88,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   };
   /** Reads the Goal JSON and the verbatim source; fills `source` when absent, otherwise checks it matches. */
   const goalWithSource = (file: string, sourcePath: string, origin: string) => {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    const raw = readJsonFile(file) as Record<string, unknown>;
     const text = readFileSync(sourcePath, 'utf8');
     const digest = sourceDigest(text);
     const given = raw.source as { sha256?: string } | undefined;
@@ -139,7 +145,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(candidate ? `${candidate.spec.id}: ${candidate.spec.outcome}` : 'No eligible Goal');
   }));
   lead.command('propose').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournalAsync(async journal => {
-    const parsed = parseExecutionProposal(JSON.parse(readFileSync(file, 'utf8')));
+    const parsed = parseExecutionProposal(readJsonFile(file));
     // The gate compares against the commit the Lead planned from unless the proposal names one.
     const planned = parsed.baseCommit ? parsed : { ...parsed, baseCommit: execFileSync('git', ['-C', repo(), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() };
     const state = journal.getGoal(planned.goalId);
@@ -180,7 +186,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write((await new SoloService(journal, runtime).start(id, repo())).dispatchId);
   }));
   execution.command('checkpoint').argument('<id>').requiredOption('--file <json>').action((id: string, { file }: { file: string }) => withJournal(journal => {
-    const checkpoint = JSON.parse(readFileSync(file, 'utf8')) as PhaseCheckpoint;
+    const checkpoint = readJsonFile(file) as PhaseCheckpoint;
     if (typeof checkpoint.phase !== 'string' || !checkpoint.phase.trim() || typeof checkpoint.progress !== 'string' || !checkpoint.progress.trim() || !Array.isArray(checkpoint.evidenceRefs) || !checkpoint.evidenceRefs.every(item => typeof item === 'string')) throw new Error('Phase checkpoint requires phase, progress and evidenceRefs');
     journal.append(event(id, 'checkpointed', checkpoint));
     write(`Checkpointed ${id}: ${checkpoint.phase}`);
@@ -215,7 +221,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   const packages = program.command('package');
   packages.command('add').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournal(journal => {
-    const spec = parseWorkPackage(JSON.parse(readFileSync(file, 'utf8')));
+    const spec = parseWorkPackage(readJsonFile(file));
     new PackageService(journal, packageRuntime()).add(spec.goalId, spec);
     write(`Drafted ${spec.id}`);
   }));
@@ -233,7 +239,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(JSON.stringify(await new PackageService(journal, packageRuntime()).reconcile(goalId)));
   }));
   packages.command('evidence').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
-    const evidence = new PackageService(journal, packageRuntime()).submitEvidence(goalId, JSON.parse(readFileSync(file, 'utf8')));
+    const evidence = new PackageService(journal, packageRuntime()).submitEvidence(goalId, readJsonFile(file));
     write(`Recorded ${evidence.packageId} ${evidence.acceptanceId}`);
   }));
   packages.command('verify').argument('<goalId>').argument('<packageId>').action((goalId: string, packageId: string) => withJournalAsync(async journal => {
@@ -243,7 +249,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(`Verified ${packageId}; dispatched ${refs.map(ref => ref.dispatchId).join(', ') || 'none'}`);
   }));
   packages.command('revise').argument('<goalId>').requiredOption('--file <json>').requiredOption('--reason <text>').action((goalId: string, { file, reason }: { file: string; reason: string }) => withJournal(journal => {
-    const spec = new PackageService(journal, packageRuntime()).revise(goalId, JSON.parse(readFileSync(file, 'utf8')), reason);
+    const spec = new PackageService(journal, packageRuntime()).revise(goalId, readJsonFile(file), reason);
     write(`Revised ${spec.id} v${spec.version}`);
   }));
   packages.command('block').argument('<goalId>').argument('<packageId>').requiredOption('--kind <kind>').requiredOption('--note <text>').action((goalId: string, packageId: string, { kind, note }: { kind: 'technical' | 'product' | 'external'; note: string }) => withJournal(journal => {
@@ -264,7 +270,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(JSON.stringify(new IntegrationService(journal, options.inspector).prepare(goalId, repo())));
   }));
   integration.command('complete').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
-    const input = JSON.parse(readFileSync(file, 'utf8')) as { commitRef: string };
+    const input = readJsonFile(file) as { commitRef: string };
     const current = journal.getGoal(goalId)?.gate;
     // The controller gates the integration commit itself; a red result wakes the Lead on the next tick.
     if (current?.deliveryCommit !== input.commitRef || current.result !== 'green') {
@@ -272,7 +278,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
       write(`Integration gate ${report.result} on ${input.commitRef}`);
       if (report.result !== 'green') throw new Error(`Integration gate is ${report.result}`);
     }
-    new IntegrationService(journal, options.inspector).complete(goalId, repo(), JSON.parse(readFileSync(file, 'utf8')));
+    new IntegrationService(journal, options.inspector).complete(goalId, repo(), readJsonFile(file));
     write(`Integrated and verified ${goalId}`);
   }));
   integration.command('merge').argument('<goalId>').requiredOption('--source <commit>').requiredOption('--target <branch>').action((goalId: string, { source, target }: { source: string; target: string }) => withJournal(journal => {
@@ -332,7 +338,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   const review = program.command('review');
   review.command('submit').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
     assertHuman(journal, 'review submit'); // the controller dispatches and reads reviewers itself; no agent may post a verdict
-    const result = new ReviewService(journal).submit(goalId, JSON.parse(readFileSync(file, 'utf8')));
+    const result = new ReviewService(journal).submit(goalId, readJsonFile(file));
     write(`Reviewed ${result.subject}${result.packageId ? ` ${result.packageId}` : ''}: ${result.result}`);
   }));
   const metrics = program.command('metrics');
@@ -340,7 +346,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   const evidence = program.command('evidence');
   evidence.command('add').argument('<id>').requiredOption('--file <json>').action((id: string, { file }: { file: string }) => withJournal(journal => {
-    new VerificationService(journal).submitEvidence(id, JSON.parse(readFileSync(file, 'utf8')) as Evidence);
+    new VerificationService(journal).submitEvidence(id, readJsonFile(file) as Evidence);
     write(`Recorded evidence for ${id}`);
   }));
   evidence.command('show').argument('<id>').action((id: string) => withJournal(journal => write(JSON.stringify(journal.getGoal(id)?.evidence ?? []))));

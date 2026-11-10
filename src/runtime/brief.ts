@@ -17,7 +17,7 @@ export const DEFAULT_PROFILES: RuntimeProfiles = {
 export function loadProfiles(home: string | undefined): RuntimeProfiles {
   const path = home && join(home, 'runtime.json');
   if (!path || !existsSync(path)) return DEFAULT_PROFILES;
-  const custom = JSON.parse(readFileSync(path, 'utf8')) as Partial<RuntimeProfiles>;
+  const custom = JSON.parse(readFileSync(path, 'utf8').replace(/^﻿/, '')) as Partial<RuntimeProfiles>;
   return { ...DEFAULT_PROFILES, ...custom };
 }
 

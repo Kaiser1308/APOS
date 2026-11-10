@@ -67,9 +67,12 @@ export class OrcaRefused extends Error {
   constructor(message: string, readonly code: string) { super(message); this.name = 'OrcaRefused'; }
 }
 
+// Orca 1.4.254 answers worker-show and worker-start with a concise view by default; APOS reads the full record.
+const fullFlag = (args: string[]): string[] => args[0] === 'orchestration' && ['worker-show', 'worker-start'].includes(args[1] ?? '') && !args.includes('--full') ? ['--full'] : [];
+
 function runOrca(args: string[]): Record<string, unknown> {
   try {
-    return parseOrcaResult(execFileSync('orca', [...args, '--json'], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
+    return parseOrcaResult(execFileSync('orca', [...args, ...fullFlag(args), '--json'], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
   } catch (error) {
     const stdout = (error as { stdout?: string }).stdout;
     let detail = '';
@@ -103,6 +106,11 @@ function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
+/** run-create answers `{ run: { id } }` in older Orca and `{ runId }` in 1.4.254. */
+function runIdOf(created: Record<string, unknown>): string {
+  return id(created.runId ?? object(created.run).id, 'Run ID');
+}
+
 function id(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value) throw new Error(`Orca response missing ${label}`);
   return value;
@@ -112,11 +120,13 @@ export function extractStartedRef(started: Record<string, unknown>, repoPath: st
   const effects = Array.isArray(started.effects) ? started.effects.map(object) : [];
   const terminal = effects.find(effect => effect.kind === 'terminal' && effect.role === 'agent');
   const worktree = effects.find(effect => effect.kind === 'worktree');
+  const terminalId = typeof terminal?.id === 'string' ? terminal.id : typeof started.terminal === 'string' ? started.terminal : undefined;
+  const worktreeId = typeof worktree?.id === 'string' ? worktree.id : typeof started.workspace === 'string' ? started.workspace : undefined;
   return {
     runId: id(started.runId, 'Run ID'), taskId: id(started.taskId, 'Task ID'),
     dispatchId: id(started.dispatchId, 'Dispatch ID'), owner: 'lead', repoPath,
-    terminal: typeof terminal?.id === 'string' ? terminal.id : undefined,
-    ...(typeof worktree?.id === 'string' ? { worktreeId: worktree.id } : {})
+    terminal: terminalId,
+    ...(worktreeId ? { worktreeId } : {})
   };
 }
 
@@ -178,7 +188,7 @@ export class OrcaRuntime implements RuntimeAdapter {
       pending = Promise.resolve().then(() => {
         const existing = this.listRuns().find(row => row.objective === objective);
         if (existing) return id(existing.id, 'Run ID');
-        return id(object(this.execute(['orchestration', 'run-create', '--objective', objective]).run).id, 'Run ID');
+        return runIdOf(this.execute(['orchestration', 'run-create', '--objective', objective]));
       });
       this.packageRuns.set(objective, pending);
     }
@@ -192,7 +202,7 @@ export class OrcaRuntime implements RuntimeAdapter {
   async startSolo(input: SoloInput): Promise<RuntimeRef> {
     this.execute(['repo', 'add', '--path', input.repoPath]);
     const run = this.execute(['orchestration', 'run-create', '--objective', `APOS ${input.goalId} proposal v${input.proposalVersion} key ${input.idempotencyKey}`]);
-    const runId = id(object(run.run).id, 'Run ID');
+    const runId = runIdOf(run);
     // Solo runs in its own worktree from an exact base commit, never in the managed checkout.
     const baseCommit = this.gitHead(input.repoPath);
     if (!/^[0-9a-fA-F]{40,64}$/.test(baseCommit)) throw new Error('Full Solo base commit required');
@@ -239,7 +249,7 @@ export class OrcaRuntime implements RuntimeAdapter {
       `${repoMarker(prior.repoPath)} APOS dispatch key: ${input.idempotencyKey}.${prior.baseCommit ? ` APOS base commit: ${prior.baseCommit}.` : ''}`
     ].join(' ');
     let started: Record<string, unknown>;
-    try { started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--run', prior.runId]); }
+    try { started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', prior.terminal, '--worktree', `id:${prior.worktreeId}`, '--timeout-ms', '240000', '--run', prior.runId]); }
     catch (error) {
       // Seen live: the old terminal had settled and Orca refused. Nothing was created, so the same owner continues
       // in a fresh terminal on the same worktree, which holds all of its work.
@@ -258,7 +268,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     const goalId = /^GOAL-[A-Z0-9-]+$/.test(checkpoint.goalId ?? '') ? checkpoint.goalId! : 'GOAL';
     const finding = `${checkpoint.phase}: ${checkpoint.progress}${checkpoint.evidenceRefs.length ? `\nLogs: ${checkpoint.evidenceRefs.join(', ')}` : ''}`;
     const spec = repairBrief({ repoPath: ref.repoPath, goalId, attempt: checkpoint.attempt ?? 2, finding: this.spill(finding, idempotencyKey), idempotencyKey, baseCommit: ref.baseCommit, budget });
-    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `id:${ref.worktreeId}`, '--run', ref.runId]);
+    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `id:${ref.worktreeId}`, '--timeout-ms', '240000', '--run', ref.runId]);
     const next = extractStartedRef(started, ref.repoPath);
     return { ...next, terminal: next.terminal ?? ref.terminal, worktreeId: next.worktreeId ?? ref.worktreeId, baseCommit: ref.baseCommit, requested: ref.requested };
   }
@@ -349,7 +359,7 @@ export class OrcaRuntime implements RuntimeAdapter {
     this.execute(['orchestration', 'run-use', '--id', input.runId]);
     const joined = input.events.map((item, index) => `(${index + 1}) ${item}`).join('\n');
     const events = joined.length > SPILL_LIMIT ? [`${input.events.length} events: ${this.spill(joined, input.idempotencyKey)}`] : input.events;
-    const started = this.execute(['orchestration', 'worker-start', '--spec', leadWakeBrief({ ...input, events }), '--terminal', input.terminal, '--worktree', input.worktree, '--run', input.runId]);
+    const started = this.execute(['orchestration', 'worker-start', '--spec', leadWakeBrief({ ...input, events }), '--terminal', input.terminal, '--worktree', input.worktree, '--timeout-ms', '240000', '--run', input.runId]);
     return { dispatchId: id(started.dispatchId, 'Dispatch ID') };
   }
 

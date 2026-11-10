@@ -12,6 +12,9 @@ export class MergeService {
   authorize(goalId: string, targetBranch: string, by: string): void {
     const state = this.store.getGoal(goalId);
     if (!state?.gate) throw new Error('Verified Goal with a controller gate required');
+    // Seen live: the merge failed (wrong branch, dirty tree) after this was recorded, and the re-run was refused. The same authorization stands.
+    const prior = state.mergeAuthorization;
+    if (prior && !state.merge && prior.targetBranch === targetBranch && prior.integrationCommit.toLowerCase() === state.gate.deliveryCommit.toLowerCase()) return;
     this.store.append({ id: randomUUID(), goalId, type: 'merge-authorized', data: { goalId, goalVersion: state.spec.version, integrationCommit: state.gate.deliveryCommit, targetBranch, scope: 'goal', once: true, by }, at: new Date().toISOString() });
   }
 

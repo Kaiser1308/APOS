@@ -100,7 +100,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const proposal = parseExecutionProposal(event.data);
       requireThat(proposal.goalId === state.spec.id && proposal.goalVersion === state.spec.version, 'Proposal Goal version mismatch');
       requireThat(!state.proposal || proposal.version > state.proposal.version, 'Proposal version must advance');
-      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: {}, integration: undefined, reviews: [], settlements: {}, merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined, gate: undefined, manualConfirmations: [] };
+      return { ...state, proposal, proposalApprovedVersion: undefined, status: 'planned', evidence: [], packages: event.type === 'proposal-revised' && state.status === 'planned' ? state.packages ?? {} : {}, integration: undefined, reviews: [], settlements: {}, merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined, gate: undefined, manualConfirmations: [] };
     }
     case 'proposal-approved':
       requireThat(state.status === 'planned' && state.proposal && state.selected && state.proposal.goalVersion === state.spec.version, 'Current proposal required');

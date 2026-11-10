@@ -194,7 +194,7 @@ export class SoloSupervisor {
       return actions;
     }
     await this.recordTelemetry(state, { dispatchId: pending.dispatchId, worktreeId: pending.worktreeId } as RuntimeRef, 'reviewer');
-    const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId });
+    const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId, dispatchId: pending.dispatchId });
     const raw = head && show(repoPath, head, reviewResultPath(goalId, pending.key));
     let result: { result?: string; note?: string } | undefined;
     // PowerShell writes a UTF-8 BOM (seen live: a valid review was rejected).
@@ -437,7 +437,7 @@ export class MultiSupervisor {
       actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at }));
       return actions;
     }
-    const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId });
+    const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId, dispatchId: pending.dispatchId });
     const raw = head && show(repoPath, head, reviewResultPath(goalId, pending.key));
     let result: { result?: string; note?: string } | undefined;
     try { result = raw ? JSON.parse(raw.replace(/^\uFEFF/, '')) : undefined; } catch { result = undefined; }

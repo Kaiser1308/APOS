@@ -229,3 +229,13 @@ it('composes a package base that contains the repo head and every verified depen
     expect(composeBase(dir, base, [dep], 'WP-B')).toBe(base);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+it('reads the Orca 1.4.254 shapes: run-create answers runId, a start receipt names terminal and workspace', async () => {
+  const runtime = new OrcaRuntime(args => {
+    if (args[0] === 'repo') return { repo: { id: 'repo_1' } };
+    if (args[1] === 'run-create') return { runId: 'run_1', objective: 'x' };
+    return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', terminal: 'term_1', workspace: 'wt::C:/w' };
+  }, () => 'a'.repeat(40), DEFAULT_PROFILES, () => 'd'.repeat(64));
+  const ref = await runtime.startSolo({ repoPath: 'C:/project', goalId: 'GOAL-001', proposalVersion: 1, idempotencyKey: 'key-1' });
+  expect(ref).toMatchObject({ runId: 'run_1', terminal: 'term_1', worktreeId: 'wt::C:/w' });
+});

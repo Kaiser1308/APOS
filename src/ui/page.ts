@@ -67,6 +67,13 @@ svg rect { stroke:var(--line); }
 .tl .ev.finding::before, .tl .ev.review::before { background:var(--warn); }
 .tl .when { color:var(--mute); font-size:12px; }
 details > summary { cursor:pointer; color:var(--accent); }
+.act .a { padding:3px 0 6px 10px; border-left:3px solid var(--line); margin:2px 0; }
+.act .a.say { border-color:var(--accent); }
+.act .a.plan { border-color:var(--warn); }
+.act .a.error { border-color:var(--bad); }
+.act .a.file-change { border-color:var(--ok); }
+.act .a.command, .act .a.result { font-family:ui-monospace, Consolas, monospace; font-size:12px; }
+.act .lab { font-family:system-ui, sans-serif; font-size:12px; color:var(--mute); }
 .back { cursor:pointer; color:var(--accent); display:inline-block; margin-bottom:8px; }
 </style>
 </head>
@@ -86,7 +93,7 @@ details > summary { cursor:pointer; color:var(--accent); }
 (function () {
   var HOLDERS = [["human", "Human"], ["lead", "Lead"], ["controller", "Controller / agent"], ["done", "Done"]];
   var STEPS = ["draft", "approved", "selected", "planned", "ready", "executing", "verified", "closed"];
-  var state = { snap: null, goal: null, tab: "story", story: null, lastGood: null, failed: false, doneOpen: false, timeline: [], nextBefore: null };
+  var state = { snap: null, goal: null, tab: "story", story: null, open: {}, act: {}, lastGood: null, failed: false, doneOpen: false, timeline: [], nextBefore: null };
 
   function h(tag, attrs, kids) {
     var el = document.createElement(tag);
@@ -118,7 +125,7 @@ details > summary { cursor:pointer; color:var(--accent); }
       return r.text().then(function (body) { if (!r.ok) throw new Error(path + " -> " + r.status + " " + body.slice(0, 200)); return body; });
     });
   }
-  function select(id) { state.goal = id; state.detail = null; state.detailError = null; state.story = null; state.tab = "story"; state.timeline = []; state.nextBefore = null; location.hash = id || ""; render(); if (id) loadDetail(); }
+  function select(id) { state.goal = id; state.detail = null; state.detailError = null; state.story = null; state.open = {}; state.act = {}; state.tab = "story"; state.timeline = []; state.nextBefore = null; location.hash = id || ""; render(); if (id) loadDetail(); }
 
   function renderHeader() {
     var s = state.snap;
@@ -273,6 +280,10 @@ details > summary { cursor:pointer; color:var(--accent); }
     var max = state.detail && state.detail.appetite ? "/" + state.detail.appetite.maxAttempts : "";
     c.appendChild(h("div", { class: "ct" }, [h("span", { text: o.label }), o.status ? chip(o.status) : null, h("span", { class: "mute", text: "lần thử " + o.attempts + max + (o.dependencies.length ? " · sau " + o.dependencies.join(", ") : "") })]));
     if (o.outcome) c.appendChild(h("div", { class: "mute", text: o.outcome }));
+    o.dispatches.forEach(function (d) {
+      c.appendChild(h("div", null, [h("a", { href: "#", text: (state.open[d.dispatchId] ? "Ẩn" : "Xem") + " hoạt động của " + d.role + " " + d.dispatchId, onclick: function (e) { e.preventDefault(); toggleAct(d.dispatchId); } })]));
+      if (state.open[d.dispatchId]) c.appendChild(actView(d));
+    });
     if (!o.entries.length) { c.appendChild(h("div", { class: "mute", text: "Chưa ghi gì vào APOS." })); return c; }
     var tl = h("div", { class: "tl" });
     o.entries.slice().reverse().forEach(function (e) {
@@ -281,12 +292,36 @@ details > summary { cursor:pointer; color:var(--accent); }
     c.appendChild(tl);
     return c;
   }
+  var ACT_LABEL = { say: "Agent nói", plan: "Kế hoạch", command: "Chạy lệnh", "file-change": "Sửa file", result: "Kết quả", error: "Lỗi" };
+  function actView(d) {
+    var box = h("div", { class: "act" }), a = state.act[d.dispatchId];
+    if (!a) { box.appendChild(h("div", { class: "mute", text: "đang tải..." })); return box; }
+    if (!a.found) { box.appendChild(h("div", { class: "mute", text: a.reason || "Không có transcript." })); return box; }
+    box.appendChild(h("div", { class: "mute", text: "Nguồn: " + a.matched.map(function (m) { return m.agent; }).join(", ") + " (ghép theo worktree + giờ; agent tự báo cáo, đã che mẫu khóa/token) · " + a.total + " mục" }));
+    a.items.slice().reverse().forEach(function (it) {
+      var row = h("div", { class: "a " + it.kind }, [h("div", { class: "lab", text: (ACT_LABEL[it.kind] || it.kind) + "  " + new Date(it.at).toLocaleTimeString() + (it.truncated ? "  (cắt bớt)" : "") })]);
+      if (it.kind === "result" && it.text.length > 240) row.appendChild(h("details", null, [h("summary", { text: it.text.slice(0, 120).replace(/[ \t\r\n]+/g, " ") + "..." }), h("pre", { text: it.text })]));
+      else row.appendChild(h("div", { text: it.text, style: "white-space:pre-wrap; overflow-wrap:anywhere" }));
+      box.appendChild(row);
+    });
+    return box;
+  }
+  function toggleAct(id) { state.open[id] = !state.open[id]; if (state.open[id]) loadAct(id); render(); }
+  function loadAct(id) {
+    var goal = state.goal, cur = state.act[id];
+    var url = "/api/goals/" + encodeURIComponent(goal) + "/activity/" + encodeURIComponent(id) + (cur && cur.found ? "?after=" + cur.total : "");
+    return get(url).then(function (b) {
+      if (state.goal !== goal) return; var r = JSON.parse(b);
+      if (cur && cur.found && r.found) { r.items = cur.items.concat(r.items); r.offset = cur.offset; }
+      state.act[id] = r;
+    }).catch(function (e) { state.act[id] = { found: false, reason: String(e.message), matched: [], total: 0, items: [] }; }).then(render);
+  }
   function storyView() {
     var s = state.story, box = h("div");
     if (!s) { box.appendChild(h("div", { class: "mute", text: "đang tải..." })); return box; }
     box.appendChild(giveCard(s)); box.appendChild(leadCard(s));
     box.appendChild(h("h3", { text: "3. Owner làm gì" }));
-    box.appendChild(h("div", { class: "mute", text: "Những gì đã ghi vào log APOS (mới nhất ở trên). Việc chi tiết của agent hiện ở mục Hoạt động khi có transcript." }));
+    box.appendChild(h("div", { class: "mute", text: "Những gì đã ghi vào log APOS (mới nhất ở trên). Bấm «Xem hoạt động» để đọc việc chi tiết của agent (lệnh, file, kết quả) từ transcript." }));
     s.owners.forEach(function (o) { box.appendChild(ownerCard(s, o)); });
     return box;
   }
@@ -308,7 +343,11 @@ details > summary { cursor:pointer; color:var(--accent); }
   function loadDetail() {
     var id = state.goal; if (!id) return Promise.resolve();
     return get("/api/goals/" + encodeURIComponent(id)).then(function (b) { if (state.goal === id) { state.detail = JSON.parse(b); state.detailError = null; } })
-      .then(function () { return get("/api/goals/" + encodeURIComponent(id) + "/story"); }).then(function (b) { if (state.goal === id) state.story = JSON.parse(b); })
+      .then(function () { return get("/api/goals/" + encodeURIComponent(id) + "/story"); }).then(function (b) {
+        if (state.goal !== id) return; state.story = JSON.parse(b);
+        // What a running owner is doing now is the first thing worth seeing, so its latest dispatch opens by itself once.
+        state.story.owners.forEach(function (o) { var d = o.dispatches[o.dispatches.length - 1]; if (d && o.status === "executing" && state.open[d.dispatchId] === undefined) { state.open[d.dispatchId] = true; loadAct(d.dispatchId); } });
+      })
       .catch(function (e) { if (state.goal === id) { state.detail = null; state.detailError = String(e.message); } }).then(render);
   }
   function loadOlder(before) {
@@ -320,7 +359,7 @@ details > summary { cursor:pointer; color:var(--accent); }
   function poll() {
     if (document.hidden) return;
     get("/api/snapshot").then(function (b) { state.snap = JSON.parse(b); state.lastGood = state.snap.readAt; state.failed = false; })
-      .catch(function () { state.failed = true; }).then(function () { render(); if (state.goal && !state.failed && state.tab !== "timeline") loadDetail(); });
+      .catch(function () { state.failed = true; }).then(function () { render(); if (state.goal && !state.failed && state.tab !== "timeline") { loadDetail(); Object.keys(state.open).forEach(function (id) { if (state.open[id] && state.act[id] && state.act[id].found) loadAct(id); }); } });
   }
   window.addEventListener("hashchange", function () { var id = location.hash.slice(1); if (id !== (state.goal || "")) select(id || null); });
   document.addEventListener("visibilitychange", poll);

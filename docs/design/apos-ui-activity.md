@@ -147,9 +147,9 @@ Trước khi trả ra, thay các mẫu: `sk-…`, `ghp_…`/`github_pat_…`, `A
 
 | ID | Nội dung | Cách xác minh | Ai quyết | Chặn? |
 |---|---|---|---|---|
-| U1 | Phiên Worker do APOS dispatch có ghép đúng transcript theo worktree + giờ không; `worktreeId` có nằm trong event để UI đọc | Chạy một Goal thật nhỏ qua controller và Orca, đối chiếu. **Em chưa chạy**: tốn quota agent (README ghi Claude từng chạm giới hạn tuần) và làm dispatch agent thật | Anh duyệt chạy | Chặn phần ghép (bước 2 và 3 của mục 7), không chặn bước 1 |
-| U2 | Tên thư mục dự án của Claude Code (`C--Users-...`) mã hóa cwd ra sao trên mọi đường dẫn | Đối chiếu với `cwd` trong bản ghi; dùng `cwd` trong bản ghi làm chuẩn | Em | Không |
-| U3 | Công cụ lập kế hoạch của Codex và Claude Code gọi là gì trong transcript | Quét mẫu thật; mục "Kế hoạch" ẩn nếu không thấy | Em | Không |
+| U1 | `worktreeId` có nằm trong event: **Đã xác minh** (`RuntimeRef.worktreeId` là dữ liệu của `execution-started`, `package-started`/`package-resumed` qua `ref`, và `review-dispatched`, `orca.ts:10-13`). Bộ đọc đã chạy trên transcript Codex và Claude Code thật của máy này (672 và 17 mục). Chưa xác minh: một phiên Worker do controller APOS dispatch trên Orca có ghép đúng bằng worktree + giờ không | Chạy một Goal thật nhỏ qua `controller watch` | Anh | Không chặn |
+| U2 | Tên thư mục dự án của Claude Code: **Đã xác minh** `cwd` thay mọi ký tự không phải chữ số với `-`; bộ đọc vẫn kiểm `cwd` trong bản ghi | — | Em | Không |
+| U3 | Công cụ kế hoạch: Claude là `TodoWrite` (đã thấy trong code, test bằng mẫu giả lập); Codex: tên chứa `plan` được nhận là kế hoạch, chưa thấy trong mẫu thật | Quét mẫu Codex có `update_plan` | Em | Không |
 | U4 | Mức che dữ liệu | Anh xem mẫu sau khi làm | Anh | Không |
 
 ## 9. Bàn giao

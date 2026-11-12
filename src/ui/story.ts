@@ -1,10 +1,11 @@
 import type { ExecutionProposal } from '../domain/contracts.js';
 import type { GoalEvent, GoalState } from '../domain/transitions.js';
+import { dispatchesOf } from './activity.js';
 import type { ReadOnlyJournal } from '../store/readonly-journal.js';
 
 /** One thing an owner or the Lead put on record. Only structured sources: nothing here is inferred from prose. */
 export type StoryEntry = { at: string; type: string; kind: 'decision' | 'report' | 'blocker' | 'finding' | 'review'; text: string; by?: string };
-export type StoryOwner = { id: string; label: string; status?: string; attempts: number; outcome?: string; dependencies: string[]; entries: StoryEntry[] };
+export type StoryOwner = { id: string; label: string; status?: string; attempts: number; outcome?: string; dependencies: string[]; entries: StoryEntry[]; dispatches: { dispatchId: string; role: string; at: string }[] };
 export type Story = {
   goal: {
     outcome: string; scope: string[]; exclusions: string[];
@@ -51,15 +52,16 @@ export function buildStory(repo: ReadOnlyJournal, id: string): Story | undefined
   const proposal = state.proposal;
   const owners = new Map<string, StoryOwner>();
   const multi = proposal?.mode === 'multi-wp' || Object.keys(state.packages ?? {}).length > 0;
-  owners.set('goal', { id: 'goal', label: multi ? 'Goal (Lead / chung)' : 'Owner (Solo)', status: state.status, attempts: state.soloAttempts ?? 0, dependencies: [], entries: [] });
+  owners.set('goal', { id: 'goal', label: multi ? 'Goal (Lead / chung)' : 'Owner (Solo)', status: state.status, attempts: state.soloAttempts ?? 0, dependencies: [], entries: [], dispatches: [] });
   for (const item of Object.values(state.packages ?? {})) {
-    owners.set(item.spec.id, { id: item.spec.id, label: item.spec.id, status: item.status, attempts: item.attempts, outcome: item.spec.outcome, dependencies: item.spec.dependencies, entries: [] });
+    owners.set(item.spec.id, { id: item.spec.id, label: item.spec.id, status: item.status, attempts: item.attempts, outcome: item.spec.outcome, dependencies: item.spec.dependencies, entries: [], dispatches: [] });
   }
   for (const event of repo.events(id)) {
     const hit = entryOf(event);
     if (!hit) continue;
     (owners.get(hit.owner) ?? owners.get('goal')!).entries.push(hit.entry);
   }
+  for (const d of dispatchesOf(repo.events(id))) (owners.get(d.owner) ?? owners.get('goal')!).dispatches.push({ dispatchId: d.dispatchId, role: d.role, at: d.at });
   const ordered = [...owners.values()].filter(item => item.id !== 'goal' || item.entries.length || !multi);
   return {
     goal: {

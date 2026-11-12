@@ -141,6 +141,10 @@ The controller then:
 
 `integration complete` gates the integration commit itself. Every Multi-WP Goal needs an independent Goal review before it can verify. Once the integration gate is green on a commit that contains every package, the controller dispatches that reviewer itself (one per gated commit) and wakes the Lead with the verdict and the next step. A Multi-WP plan must not declare `risks`: they would demand package reviews APOS does not dispatch.
 
+## UI
+
+`apos ui [--port 4343]` serves a read-only web view of the project on `127.0.0.1`: what needs the Human (gates A and B, `needs-decision`, notices, Goals awaiting outcome), Goals grouped by who holds them (Human, Lead, Controller/agent, Done), and per Goal the lifecycle, Work Package graph, findings, gate results with logs, reviews, telemetry, appetite use and the event timeline. It reads the event logs without writing: no lock, no index rebuild, a torn final line is ignored, and a Goal whose hash chain is broken is flagged while the others still show. It never runs the controller; start `controller watch` separately. Only the local machine can reach it, and it has no login: anything running as your OS user can also read the appetite it shows. Spend in USD is not shown because APOS has no price table; tokens, attempts and wall time are. Design: `docs/design/apos-ui.md`.
+
 ## Telemetry
 
 `telemetry-recorded` events hold, per dispatch and role: requested and launched model, token usage (input, cached, output) read from the owner's Codex session files, and wall time. When nothing matches, the usage is recorded as `unknown`, never estimated. `metrics show` summarizes a Goal.

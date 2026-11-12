@@ -1,424 +1,349 @@
-# APOS v2 — AI Project Orchestration System
+# APOS
 
-<p align="center">
-  <strong>Autonomous AI agent orchestration and governance platform for software engineering goals.</strong><br>
-  Built on empirical multi-agent research: single-owner context retention, deterministic machine-verified gates, and strict human governance.
-</p>
+**AI Project Orchestration System.** APOS runs AI coding agents on software Goals. A Human decides *what* to build and whether to accept it; a Lead agent decides *how*; a controller with no LLM in it dispatches the work, checks the result itself and keeps an auditable record of everything that happened.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/node-%3E%3D24.0.0-brightgreen.svg" alt="Node.js version" />
-  <img src="https://img.shields.io/badge/typescript-5.9+-blue.svg" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/tests-190%2B%20passing-success.svg" alt="Tests" />
-  <img src="https://img.shields.io/badge/architecture-event--sourced-orange.svg" alt="Architecture" />
-  <img src="https://img.shields.io/badge/controller-zero--LLM%20deterministic-purple.svg" alt="Controller" />
-  <img src="https://img.shields.io/badge/docs-FINAL--DESIGN.md%20(vi)-informational.svg" alt="Vietnamese Design Spec" />
-</p>
+![node](https://img.shields.io/badge/node-%E2%89%A5%2024-339933) ![typescript](https://img.shields.io/badge/typescript-5.9-3178c6) ![runtime](https://img.shields.io/badge/runtime%20deps-commander%20%2B%20zod-informational) ![state](https://img.shields.io/badge/state-append--only%20hash--chained%20log-orange)
 
 ---
 
-## Table of Contents
+## Contents
 
-- [Overview & Core Philosophy](#overview--core-philosophy)
-- [Governance & Responsibility Matrix](#governance--responsibility-matrix)
-- [Architecture & Lifecycle](#architecture--lifecycle)
-- [Installation & Setup](#installation--setup)
-- [Execution Workflows](#execution-workflows)
-  - [1. Solo Flow (Default)](#1-solo-flow-default)
-  - [2. Multi-WorkPackage (Multi-WP) Flow](#2-multi-workpackage-multi-wp-flow)
-- [The Goal Contract](#the-goal-contract)
-- [Local Web UI (`apos ui`)](#local-web-ui-apos-ui)
-- [Anti-Tamper & Security Model](#anti-tamper--security-model)
-- [CLI Reference](#cli-reference)
-- [Validation & Fault Injection](#validation--fault-injection)
-- [Operational Notes & Roadmap](#operational-notes--roadmap)
-
----
-
-## Overview & Core Philosophy
-
-APOS (AI Project Orchestration System) coordinates autonomous coding agents (Codex, Claude Code via Orca) to deliver software goals safely. Rather than relying on agent self-reports or loose conversational prompts, APOS enforces software engineering rigor through lessons learned from the Hard12 multi-agent benchmark:
-
-1. **One Owner Keeps the Context:** Every task block belongs to a single primary owner operating inside a dedicated, isolated worktree. If a machine check fails, APOS resumes the **exact same owner session**, preserving full cognitive context rather than spinning up cold, amnesic agents.
-2. **Correctness via Deterministic Machine Gates:** An AI agent's self-declaration of completion is treated as a claim, never as evidence. The APOS Controller (a zero-LLM, deterministic state engine) checks out clean code in fresh temporary worktrees and runs automated verification gates independently.
-3. **Strict Separation of Concerns:**
-   - **Human + PM:** Decides **WHAT** to build, acceptance criteria, exclusions, and resource appetite (Budget, Wall Time, Attempts).
-   - **Lead AI:** Autonomously plans **HOW** to implement (Solo vs. Multi-WP, architecture, interface schemas). No human bottleneck on technical planning.
-   - **Controller:** Mechanically supervises dispatch, executes gates, logs structured findings, auto-resumes repairs, and halts on budget breaches.
-
-> [!NOTE]
-> For the comprehensive mathematical and behavioral specification, see [FINAL-DESIGN.md](docs/FINAL-DESIGN.md) (v2.1, in Vietnamese) and [fault-injection.md](docs/fault-injection.md).
+1. [Why APOS](#why-apos)
+2. [How it works](#how-it-works)
+3. [Install](#install)
+4. [Quick start](#quick-start)
+5. [The Goal contract](#the-goal-contract)
+6. [Execution flows](#execution-flows)
+7. [Web UI](#web-ui)
+8. [Telemetry](#telemetry)
+9. [Configuration and state](#configuration-and-state)
+10. [Trust model](#trust-model)
+11. [CLI reference](#cli-reference)
+12. [Development](#development)
+13. [Status and known limits](#status-and-known-limits)
 
 ---
 
-## Governance & Responsibility Matrix
+## Why APOS
 
-APOS enforces explicit decision boundaries. Human-only commands **strictly refuse to run** from any terminal or worktree dispatched by APOS, preventing autonomous agents from approving their own work or granting themselves merge rights.
+The design follows what the Hard12 multi-agent runs showed works:
 
-| Role | Authority Scope | Responsibilities | Key Commands |
-| :--- | :--- | :--- | :--- |
-| **Human & PM** | **WHAT** | Selects target goals, locks verbatim source requirements, sets acceptance criteria & appetite limits. | `apos goal create`<br>`apos goal approve` (**Gate A**)<br>`apos goal select` (**Gate B**) |
-| **Lead AI** | **HOW** | Decides execution mode (Solo vs Multi-WP), designs packages, dependencies & versioned interfaces. Commits directly without human gating. | `apos lead recommend`<br>`apos lead propose`<br>`apos lead commit` |
-| **Controller** | **SUPERVISION** | Non-LLM mechanical engine. Dispatches Orca workers, verifies delivery hashes, runs isolated gates, logs findings, manages timeouts. | `apos controller tick`<br>`apos controller watch` |
-| **Owner / Worker** | **EXECUTION** | Implements code in dedicated worktrees following the `_core/execute.md` skill discipline. | Handled via Orca sessions |
-| **Reviewer** | **INSPECTION** | Independent AI session dispatched by the controller for risky, multi-package, or test-modifying deliveries. | Dispatched automatically |
-| **Human** | **OUTCOME & MERGE** | Inspects verification reports, decides outcome, grants one-time merge authorization to the protected branch. | `apos outcome close` (**Gate D**)<br>`apos outcome revise`<br>`apos outcome stop` |
+- **One owner keeps the context** of a whole block of work. When a check fails, the controller resumes the *same* owner session instead of starting a cold one.
+- **Correctness comes from a source-backed contract and a gate the controller runs itself.** An owner's report that it is done is a claim, never evidence.
+- **The Human decides what and what counts as done, not how.** Technical planning belongs to the Lead and needs no Human approval.
 
-### Human-Only Guardrails (`assertHuman`)
-The following commands immediately abort if executed from within an agent terminal (`$ORCA_TERMINAL_HANDLE`) or an APOS worker worktree:
-- **Governance:** `goal approve`, `goal appetite`, `goal select`
-- **Closure:** `outcome close`, `outcome revise`, `outcome stop`
-- **Overrides:** `gate confirm` (manual check verification), `blocker resolve`, `execution abandon-intent`
-- **Reviews:** `review submit` (review verdicts are strictly controller-managed)
+Design notes: [`docs/FINAL-DESIGN.md`](docs/FINAL-DESIGN.md) (v2.1, in Vietnamese). Safety cases: [`docs/fault-injection.md`](docs/fault-injection.md).
 
----
+## How it works
 
-## Architecture & Lifecycle
+| Who | Decides | Commands |
+| --- | --- | --- |
+| **PM + Human** | WHAT: which Goals, outcome, acceptance, appetite (budget) | `goal create --source`, **gate A** `goal approve` |
+| **Human** | Which approved Goal runs next | **gate B** `lead recommend`, `goal select` |
+| **Lead** (agent) | HOW: Solo or Multi-WP, packages, interfaces. No Human approval | `lead propose`, `lead commit` |
+| **Controller** (no LLM) | Machine checks, dispatch, gates, findings, retries, wake-ups, budget breakers | `controller tick` / `controller watch` |
+| **Owner / Worker** (agent) | Implements in its own Orca worktree | dispatched by the controller |
+| **Reviewer** (agent) | Independent review in a separate session, when required | dispatched by the controller |
+| **Human** | Outcome, and whether to merge | **gate D** `outcome close [--merge-to <branch>]`, `revise`, `stop` |
 
-The following diagram illustrates how a Goal moves from initial drafting to human-authorized merge:
+When the Lead chooses Multi-WP, the controller only **notifies** the Human (`apos inbox`); it does not wait for approval.
 
 ```mermaid
 flowchart TD
-    subgraph HumanPhase1["1. Human & PM: Scope & Appetite"]
-        A["Verbatim Source Brief (.md)"] --> B["apos goal create<br/>(Hash-locked Source Snapshot)"]
-        B --> C["apos goal approve (Gate A)<br/>[Size, Max-Spend, Max-Minutes, Max-Attempts]"]
-        C --> D["apos goal select (Gate B)"]
+    subgraph Human1["Human and PM"]
+        A[Source brief] --> B[goal create<br/>source snapshot + sha256]
+        B --> C[goal approve<br/>gate A: scope + appetite]
+        C --> D[goal select<br/>gate B]
     end
-
-    subgraph LeadPhase["2. Autonomous Lead AI: Technical Planning"]
-        D --> E["apos lead propose<br/>(Solo or Multi-WP DAG)"]
-        E --> F["apos lead commit<br/>(Machine-checked proposal)"]
+    subgraph Lead["Lead"]
+        D --> E[lead propose<br/>Solo or Multi-WP]
+        E --> F[lead commit<br/>controller checks the plan]
     end
-
-    subgraph ControllerPhase["3. Deterministic Controller Supervision"]
-        F --> G["Controller Dispatches Worker<br/>(Isolated Orca Worktree)"]
-        G --> H["Worker Executes & Reports<br/>(_core/execute.md contract)"]
-        H --> I["apos controller tick / watch"]
-        I --> J{"Machine Gate<br/>(Clean Detached Checkout)"}
-        
-        J -- "RED (Failures Found)" --> K["Record Finding (patch/bad_plan)<br/>Resume Same Worker Session"]
+    subgraph Ctl["Controller"]
+        F --> G[Dispatch owner<br/>own Orca worktree, exact base commit]
+        G --> H[Owner delivers a commit]
+        H --> I{Gate<br/>fresh detached checkout}
+        I -- red --> K[Record finding<br/>resume same owner]
         K --> H
-        
-        J -- "GREEN & Review Required" --> L["Dispatch Independent Reviewer<br/>(Fresh Session)"]
-        L -- "Changes Requested" --> K
-        L -- "Review Passed" --> M["Goal Verified"]
-        
-        J -- "GREEN (No Review Needed)" --> M
+        I -- green + review required --> L[Independent reviewer]
+        L -- changes --> K
+        L -- pass --> M[Goal verified]
+        I -- green --> M
     end
-
-    subgraph HumanPhase2["4. Human: Final Outcome & Integration"]
-        M --> N["apos inbox<br/>(Verified & Ready for Review)"]
-        N --> O["apos outcome close --merge-to main (Gate D)<br/>(One-time Merge Authorization)"]
-        O --> P["Post-Merge Gate Verification"]
-        P --> Q["Terminal Released & Goal Closed"]
+    subgraph Human2["Human"]
+        M --> N[apos inbox]
+        N --> O[outcome close --merge-to<br/>gate D]
+        O --> P[Post-merge gate]
     end
-
-    style C fill:#2563eb,stroke:#1d4ed8,color:#ffffff
-    style D fill:#2563eb,stroke:#1d4ed8,color:#ffffff
-    style F fill:#059669,stroke:#047857,color:#ffffff
-    style J fill:#d97706,stroke:#b45309,color:#ffffff
-    style O fill:#7c3aed,stroke:#6d28d9,color:#ffffff
 ```
 
----
+### Human-only commands
 
-## Installation & Setup
+These refuse to run from any terminal or worktree APOS dispatched an agent into, so an agent cannot approve its own work:
 
-### Prerequisites
-- **Node.js**: `v24.0.0` or higher
-- **Git**: `2.40+`
-- **Orca CLI** with Codex/Claude enabled (standard runtime execution engine)
+- `goal approve`, `goal appetite`, `goal select`
+- `outcome close`, `outcome revise`, `outcome stop`
+- `gate confirm`, `blocker resolve`, `execution abandon-intent`
+- `review submit` (the controller dispatches and reads reviewers itself, so no agent may post a verdict)
 
-### Environment Configuration
-Ensure your `~/.codex/config.toml` includes:
-```toml
-check_for_update_on_startup = false   # Prevents interactive update prompts from blocking workers
-[features]
-multi_agent = false                   # Workers must not autonomously spawn rogue sub-agents
-```
+`goal appetite` is the Human's overrun decision: it changes only the controller-held budget, never the scope.
 
-### Build & Initialize
-```bash
-# Clone and install dependencies
-git clone https://github.com/your-org/apos.git
-cd APOS
+## Install
+
+Requirements: **Node.js 24+**, **Git**, and the **Orca CLI** with Codex enabled (the default runtime).
+
+In `~/.codex/config.toml`, set `check_for_update_on_startup = false` (an update prompt blocks Orca workers) and `multi_agent = false` under `[features]` (owners must not spawn sub-agents).
+
+```powershell
 npm ci
 npm run build
-
-# Link CLI globally (optional) or run via dist/cli.js
-npm link
+node dist/cli.js --repo C:\path\to\project init
 ```
 
-### Initializing a Project
-Initialize APOS within your target repository:
-```powershell
-# Using stable skills bundled with APOS
-apos --repo C:\path\to\your\project init
+`init` commits `.apos/project.yaml`, copies of the role skills under `.apos/skills/` (`apos-core` as `_core/execute.md`, plus `pm`, `lead`, `worker`, `reviewer`) and entrypoint copies under `.claude/skills/`. Briefs pin these copies by sha256, so a later change to the skills reaches a project only when `init` runs again. `init` refuses a missing skill or one written for another contract version (`apos-contract: 2`).
 
-# Using skills from a custom development directory
-apos --repo C:\path\to\your\project init --skills C:\path\to\Custom-Skills
+**Skills: two copies.** `skills/` in this repo is the stable copy and the default. The copy under development lives in the Custom-Skills repo; try it with `init --skills <dir>` or `APOS_SKILLS`. To bring it over:
+
+```powershell
+npm run skills:check   -- C:\path\to\Custom-Skills   # report differences, change nothing
+npm run skills:promote -- C:\path\to\Custom-Skills   # copy into skills/, then run the tests and commit
 ```
 
-`apos init` sets up:
-- `.apos/project.yaml`: Repository tracking configuration.
-- `.apos/skills/`: Pinned copies of `_core/execute.md`, `apos-pm`, `apos-lead`, `apos-worker`, and `apos-reviewer`.
-- `.claude/skills/`: Mirrored entrypoint skills.
-- Pinning validation: Briefs pin committed skills by SHA256 to prevent silent prompt drift.
+`APOS_DEV_SKILLS` can replace the path argument.
 
-### Synchronizing Skills
-APOS maintains a strict contract version (`apos-contract: 2`) between runtime code and agent skills:
-```powershell
-# Check for differences without touching local files
-npm run skills:check -- C:\path\to\Custom-Skills
+## Quick start
 
-# Promote and copy development skills into the stable skills/ directory
-npm run skills:promote -- C:\path\to\Custom-Skills
-```
-
----
-
-## Execution Workflows
-
-### 1. Solo Flow (Default)
-Recommended for all standard goals with a unified scope. A single worker takes end-to-end responsibility.
+A Solo Goal from brief to merge. `--repo` defaults to the current directory; it is omitted below.
 
 ```powershell
-# 1. Draft the Goal from a verbatim requirements document
+# 1. Capture the brief, then draft the Goal from it (see the contract below)
 apos goal create --file goal.json --source brief.md
 
-# 2. Gate A: Human approves scope and establishes controller appetite
+# 2. Gate A: the Human approves the Goal and sets the controller's appetite
 apos goal approve GOAL-001 --size M --max-spend 20 --max-minutes 240 --max-attempts 3
 
-# 3. Gate B: Human selects the Goal for active development
+# 3. Gate B: choose what runs next
 apos lead recommend
 apos goal select GOAL-001
 
-# 4. Lead AI prepares execution proposal and commits (No Human plan gate required)
+# 4. The Lead proposes a plan; the controller checks it and dispatches the owner
 apos lead propose --file execution.json
 apos lead commit GOAL-001
 
-# 5. Start the mechanical controller supervisor
-apos controller watch
+# 5. Supervise (inside an Orca terminal), or run one pass at a time
+apos controller watch            # or: apos controller tick
 
-# 6. Check status and alerts
+# 6. Watch from a browser, and see what needs you
+apos ui                          # http://127.0.0.1:4343
 apos inbox
 
-# 7. Gate D: Inspect verification and authorize merge
+# 7. Gate D: accept the outcome and merge the gated commit
 apos outcome close GOAL-001 --merge-to main
 ```
 
-#### What the Controller Checks Upon Settlement:
-1. **Model Receipt Verification:** Ensures the launched model matches the planned profile (e.g. `gpt-6.1-terra`). Mismatches flag `needs-decision`.
-2. **Delivery Contract Integrity:** Checks that the delivery commit contains the mandatory activation phrase from `_core/execute.md`.
-3. **Clean Worktree Gate Execution:** Spawns a clean detached worktree at the delivery commit, runs regression checks against base commit failures, and hashes execution logs.
-4. **Automated Repair Loop:** On a red gate, logs an exact finding (`patch`) with failure logs and re-wakes the *same* worker session in its existing worktree.
-5. **Circuit Breakers:** Escalates to `needs-decision` in `apos inbox` if identical failures persist through 2 repair cycles or limits expire.
+A minimal `execution.json` for a Solo plan:
 
----
-
-### 2. Multi-WorkPackage (Multi-WP) Flow
-Designed for large-scale features with independent modules, clear interface boundaries, and minimal code overlap.
-
-```mermaid
-graph LR
-    WP1["WorkPackage 1<br/>(Core Schema @v1)"] --> WP2["WorkPackage 2<br/>(API Layer)"]
-    WP1 --> WP3["WorkPackage 3<br/>(Client UI)"]
-    WP2 --> INT["Integration Commit<br/>(Gated by Controller)"]
-    WP3 --> INT
-    INT --> REV["Independent Reviewer Session"]
-    REV --> MERGE["Gate D: Human Outcome & Merge"]
-```
-
-1. **Package Graph:** The Lead decomposes the Goal into work packages using `apos package add --file wp.json`. Each package specifies versioned interfaces (`name@vN`), local acceptance criteria, and explicit dependencies.
-2. **Autonomous Dispatch:** The controller automatically dispatches workers for packages whose dependencies have verified.
-3. **Lead Orchestration:** As packages finish, the controller wakes the Lead AI's terminal with aggregated event batches to handle integration.
-4. **Mandatory Review:** Multi-WP integrations require a fresh, independent reviewer AI session before the Goal can enter `verified` status.
-
----
-
-## The Goal Contract
-
-Every Goal is backed by a strictly typed contract (`src/domain/contracts.ts`):
-
-```jsonc
+```json
 {
-  "id": "GOAL-001",
-  "version": 1,
-  "problem": "Brief description of the problem statement",
-  "outcome": "Measurable end-state definition",
-  "source": {
-    "path": "docs/briefs/feature-brief.md",
-    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "capturedAt": "2026-11-12T10:00:00.000Z",
-    "origin": "human"
-  },
-  "requirements": [
-    {
-      "id": "REQ-1",
-      "sourceSpan": "Lines 12-18",
-      "text": "CLI must support --json output flag",
-      "disposition": "acceptance",
-      "acceptanceIds": ["ACC-1"]
-    }
-  ],
-  "acceptance": [
-    {
-      "id": "ACC-1",
-      "requirementIds": ["REQ-1"],
-      "expected": "Valid JSON output emitted to stdout when --json is provided",
-      "examples": [{ "input": "apos goal list --json", "expected": "[{...}]" }],
-      "boundaries": ["Empty list returns '[]' with exit code 0"],
-      "prohibited": ["Do not write debug logs to stdout when --json is active"],
-      "checkIds": ["CHK-CLI-JSON"],
-      "ambiguity": { "status": "resolved", "decision": "Strict JSON array" }
-    }
-  ],
-  "checks": [
-    {
-      "id": "CHK-CLI-JSON",
-      "kind": "command",
-      "command": "npm test -- tests/cli-json.test.ts",
-      "expect": "pass",
-      "timeoutMs": 30000
-    }
-  ]
+  "id": "EXEC-1", "version": 1, "goalId": "GOAL-001", "goalVersion": 1,
+  "mode": "solo-direct",
+  "approach": "Implement slugify: lowercase, strip punctuation, split on whitespace, join with dashes",
+  "risks": [], "sharedPaths": [],
+  "estimatedCost": { "spendUsd": 1, "wallMinutes": 15 },
+  "acceptanceMapping": [{ "acceptanceId": "AC-1", "verification": "node --test" }],
+  "verificationStrategy": "Run npm test"
 }
 ```
 
-> [!IMPORTANT]
-> **Source Immutability:** `goal approve` fails if any requirement from the source is unmapped, if an unresolved ambiguity exists, or if the source file SHA256 has drifted from the snapshot.
+If a dispatch or resume outcome stays unknown for 10 minutes it appears in `apos inbox`. Check `orca orchestration task-list`; if Orca created nothing, run `apos execution abandon-intent <id> --key <key> --reason ...`.
 
----
+## The Goal contract
 
-## Local Web UI (`apos ui`)
+A Goal is a strictly validated JSON document (`src/domain/contracts.ts`). A minimal valid one:
 
-APOS provides a zero-dependency, read-only web dashboard running on `127.0.0.1:4343`:
+```json
+{
+  "id": "GOAL-001", "version": 1,
+  "outcome": "slugify returns URL-safe slugs",
+  "source": {
+    "path": "brief.md",
+    "sha256": "<sha256 of brief.md>",
+    "capturedAt": "2026-11-12T08:00:00Z",
+    "origin": "human"
+  },
+  "requirements": [
+    { "id": "R-1", "sourceSpan": "line 3", "text": "slugify lowercases, drops punctuation and joins words with dashes", "disposition": "acceptance" }
+  ],
+  "scope": ["slugify.js"],
+  "exclusions": ["no new dependencies"],
+  "acceptance": [
+    { "id": "AC-1", "text": "npm test passes", "requirementIds": ["R-1"], "checkIds": ["CHK-1"] }
+  ],
+  "checks": [
+    { "id": "CHK-1", "kind": "command", "command": "npm test", "expect": "pass" }
+  ],
+  "dependencies": [],
+  "priority": 1
+}
+```
+
+- `requirements[]` lists every requirement lifted from the source, with its span and `disposition: acceptance | excluded` (an excluded one needs `exclusionReason`).
+- `acceptance[]` carries `requirementIds`, `checkIds`, and optionally `examples`, `boundaries`, `prohibited` and `ambiguity` (`resolved` with a decision, or `blocked` with a question).
+- `checks[]` are either `{ kind: "command", command, expect: "pass" | "no-new-failures", failurePattern?, runs, timeoutMs, env }` or `{ kind: "manual", procedure, expectedResult }`. `no-new-failures` runs base and delivery and fails only on failures that are new at delivery.
+
+`goal create` snapshots the source with its sha256. **Approval refuses** an unmapped requirement, a `blocked` ambiguity, a missing appetite, and a source snapshot that no longer matches.
+
+The **appetite** (`size`, `maxSpendUsd`, `maxWallMinutes`, `maxAttempts`, `overrunPolicy`) is kept only by the controller. It never appears in Goal documents or briefs.
+
+## Execution flows
+
+### Solo (default)
+
+**Before dispatch** (`lead commit`), the controller checks the plan's source hash and Goal version, that there are no open questions, and that the estimate fits the appetite. For Multi-WP it also checks at least two packages, an acyclic graph, versioned interfaces (`name@vN`), acceptance coverage and a split rationale.
+
+**Dispatch.** The owner runs in its own Orca worktree created from an exact base commit, using its role profile (default: Codex `gpt-6.1-terra` for Lead and Worker, `gpt-6-sol` for Reviewer; override in `runtime.json`). The brief points at `.apos/skills/_core/execute.md` and the role skill by path and sha256, and names the activation line the delivery report must contain.
+
+**After the owner settles**, `controller tick`:
+
+1. Compares the launch receipt with the requested model. A mismatch is `needs-decision`.
+2. Reads the delivery head of the owner's worktree and checks that the committed report carries the activation line. If not, a finding resumes the same owner.
+3. Runs the **gate**: a fresh detached worktree at that exact commit, with a tree-killing timeout, comparing base and delivery failures. Logs are hashed in the controller home.
+4. **Green.** If review is required (Multi-WP, declared risks, changed tests or oracles, changed shared paths), a reviewer runs in a separate session. Otherwise the Goal is `verified` and waits for the Human.
+5. **Red.** The controller records a finding (check IDs, commit, logs) and resumes the same owner in the same terminal and worktree.
+6. **Stops at `needs-decision`** when the cause is unknown or the gate is unverifiable, the same failure survives two repairs, the attempt budget or wall time is spent, or the owner reports `failed`.
+
+`outcome close --merge-to <branch>` records a one-time authorization for the gated commit and merges it, then reruns the gate on the merge commit. If that gate is red the Goal stays open.
+
+**Manual checks** stay pending until someone other than the owner confirms them: `gate confirm GOAL-001 <checkId> --commit <sha> --by <name> --note "..."`.
+
+**Findings** (`finding record --kind`): `intent_gap` parks the Goal for PM and the Human; `bad_plan` is for the Lead to revise; `patch` goes to the owner; `defer` goes to the backlog.
+
+### Multi-WP
+
+The Lead adds packages (`package add --file wp.json`). Each names its owner, dependencies, versioned interfaces and local acceptance, optionally with `checkIds` from the Goal's checks. Then the Lead runs `lead commit GOAL-001 --terminal $ORCA_TERMINAL_HANDLE`.
+
+The controller then:
+
+- dispatches packages as their dependencies are verified;
+- gates each settled package on its own head against its base: green verifies the package, red sends it back to the same owner with the finding;
+- wakes the Lead's terminal once per batch of new events (package results, owner questions, ready to integrate, a red integration gate), and only after the Lead's previous turn has settled.
+
+`integration complete` gates the integration commit itself. Every Multi-WP Goal needs an independent Goal review before it can verify; once the integration gate is green on a commit that contains every package, the controller dispatches that reviewer itself (one per gated commit) and wakes the Lead with the verdict. A Multi-WP plan must not declare `risks`: they would demand package reviews APOS does not dispatch.
+
+## Web UI
+
+`apos ui [--port 4343]` serves a **read-only** web view of one project on `127.0.0.1`. It observes; it never runs the controller (start `controller watch` separately) and never writes controller state.
+
+- **Needs you:** gate A and B waiting, `needs-decision`, notices, and verified Goals awaiting an outcome. The list matches `apos inbox`, plus the two gates the CLI does not list.
+- **Goals by who holds them:** Human, Lead, Controller / agent, Done.
+- **Story tab** (default per Goal): what the Human gave; what the Lead decided (mode, approach, why it split or did not, risks, verification, estimated cost against the appetite); and for each owner the decisions, checkpoints, evidence, blockers, findings and reviews it put on record.
+- **Agent activity:** for each dispatch, the agent's own transcript (Codex rollouts under `~/.codex/sessions`, Claude Code sessions under `~/.claude/projects`; `CODEX_HOME` and `CLAUDE_CONFIG_DIR` move them), newest first, refreshing every 3 seconds while the owner runs: what it said, planned, ran and got back.
+- **Also:** lifecycle, Work Package graph, gate results with their logs, telemetry and appetite use, and the full event timeline.
+
+What to know before relying on it:
+
+- **No reasoning is shown.** Both agents encrypt or blank their reasoning, so only what they wrote and did is visible. This is the agent's own account, not a verified one.
+- **Transcripts are matched to a dispatch by worktree path and time**, not by an id. The page says so.
+- **Secrets are hidden by pattern** (keys, tokens, `NAME_KEY=value`). That is best effort, not a guarantee, and a transcript can contain anything the agent saw.
+- **There is no login.** It binds to loopback, checks the `Host` header, accepts only GET and HEAD, and resolves every request by id rather than path, but anything running as your OS user can read it. Keep it on a machine only you use.
+- It reads event logs without locking, creating or rebuilding anything. A torn final line is ignored, and a Goal whose hash chain is broken is flagged while the others still show.
+- Spend in USD is not shown: APOS has no price table. Tokens, attempts and wall time are.
+
+Design: [`docs/design/apos-ui.md`](docs/design/apos-ui.md), [`docs/design/apos-ui-activity.md`](docs/design/apos-ui-activity.md).
+
+## Telemetry
+
+`telemetry-recorded` events hold, per dispatch and role: the requested and launched model, token usage (input, cached, output) read from the owner's Codex session files, and wall time. When nothing matches, the usage is recorded as `unknown`, never estimated. `apos metrics show <goalId>` summarizes a Goal.
+
+## Configuration and state
+
+Controller state lives **outside the repo**, in `~/.apos/projects/<repo>-<hash>/`:
+
+| Path | Contents |
+| --- | --- |
+| `events/<GOAL>.jsonl` | Append-only, fsync'd, hash-chained event log. The source of truth. |
+| `state.sqlite` | An index, rebuildable from the log. |
+| `sources/<GOAL>/v<n>.md` | Verbatim source snapshots. |
+| `artifacts/` | Gate logs. |
+| `runtime.json` | Optional role profiles (agent, model, effort). |
+
+The repo gets readable Goal documents (`.apos/goals/<id>/`) committed only at milestones: Goal approved, plan accepted, verified, merged, outcome. Events committed into the repo by anyone else are ignored. `apos migrate` imports APOS v1 histories that still fit the contract.
+
+| Environment variable | Effect |
+| --- | --- |
+| `APOS_HOME` | Move the controller home. |
+| `APOS_SKILLS` / `APOS_DEV_SKILLS` | Skills source for `init` / for `skills:check` and `skills:promote`. |
+| `APOS_ARTIFACTS` | Move the gate-log folder. |
+| `CODEX_HOME`, `CLAUDE_CONFIG_DIR` | Where agent transcripts are read from (UI and telemetry). |
+
+## Trust model
+
+The controller home is **tamper-evident**, not a security boundary against a process that runs as the same OS user. Each event carries the hash of its predecessor, so an edit to the log breaks the chain and is detected; it does not stop an agent with the same user rights from reading or deleting files. The Human-only commands rely on APOS recognizing the terminals and worktrees it dispatched, which guards against an agent acting by mistake or by prompt, not against a determined local process. APOS assumes a single host operated by a trusted developer.
+
+## CLI reference
+
+Global option: `--repo <path>` (managed Git project; default: the current directory).
+
+| Command | Purpose |
+| --- | --- |
+| `init [--skills <dir>]` | Initialize `.apos` in a Git project. |
+| `migrate` | Import APOS v1 Goal histories into the controller log. |
+| `goal create --file <json> --source <path> [--origin <text>]` | Draft a Goal bound to a source snapshot. |
+| `goal list` | List Goals and their status. |
+| `goal approve <id> --size <S\|M\|L> --max-spend <usd> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>]` | **Gate A (Human).** |
+| `goal appetite <id> --reason <text> [appetite flags]` | **Human.** Change the controller budget, not the scope. |
+| `goal select <id>` | **Gate B (Human).** |
+| `goal revise --file <json> --source <path>` | New Goal version; needs re-approval. |
+| `lead recommend` | Recommend the next eligible Goal. |
+| `lead propose --file <json>` | Submit an execution proposal. |
+| `lead commit <id> [--terminal <handle>]` | Controller checks the plan and dispatches. |
+| `package add --file <json>`, `package revise <goalId> --file <json> --reason <text>` | Multi-WP packages. |
+| `integration prepare <goalId>`, `integration complete <goalId> --file <json>`, `integration merge <goalId> --source <commit> --target <branch>` | Multi-WP integration: prepare, record the integration commit, merge. |
+| `controller tick` | One controller pass: reconcile, gate, dispatch, wake. |
+| `controller watch [--interval-ms <n>]` | Continuous loop, inside an Orca terminal (1000 to 300000 ms; default 15000). |
+| `gate run <goalId> --commit <sha> [--base <sha>]` | Run the gate on a specific commit. |
+| `gate confirm <goalId> <checkId> --commit <sha> --by <name> --note <text>` | **Human.** Confirm a manual check. |
+| `execution checkpoint <id> --file <json>`, `execution retry <id> --reason <text>`, `execution abandon-intent <id> --key <key> --reason <text>` | Owner checkpoint, retry, and (Human) drop an unknown intent. |
+| `evidence add <id> --file <json>`, `evidence show <id>` | Owner evidence. |
+| `decision record <id> --note <text>`, `blocker report <id> --kind <kind> --note <text>`, `blocker resolve <id> --note <text>` | Decisions and blockers (`resolve` is Human). |
+| `finding record <id> --kind <intent_gap\|bad_plan\|patch\|defer> --note <text> [--by <name>]` | Record a finding. |
+| `outcome close <id> [--merge-to <branch>] [--by <name>]`, `outcome revise <id>`, `outcome stop <id>` | **Gate D (Human).** |
+| `inbox` | What needs the Human: notices, blocked Goals, verified Goals awaiting an outcome. |
+| `ui [--port <n>]` | Read-only local web view. |
+| `metrics show <goalId>` | Tokens, attempts and wall time. |
+
+Run `apos <command> --help` for the exact options of any command.
+
+## Development
 
 ```powershell
-apos ui --port 4343
-# Access: http://127.0.0.1:4343
+npm ci
+npm test              # vitest; covers every safety case in docs/fault-injection.md
+npm run typecheck     # tsc --noEmit
+npm run build         # tsc -> dist/
 ```
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ APOS Dashboard                                        [Port: 4343]     │
-├───────────────┬─────────────────────────────┬──────────────────────────┤
-│ Needs Human   │ In Progress                 │ Completed                │
-│ • GOAL-002: A │ • GOAL-001 (Solo: Worker)   │ • GOAL-SMOKE-V2 (Merged) │
-│ • GOAL-003: D │ • WP-02 (Multi: In-Review)  │                          │
-└───────────────┴─────────────────────────────┴──────────────────────────┘
-```
-
-### Dashboard Features:
-- **Zero-Mutation Safety:** Reads directly from event logs without taking locks or touching repository state. Broken hash chains are safely flagged per Goal without crashing the interface.
-- **Goal Story View:** Chronologically details what the Human specified, the Lead's architectural strategy, risks, and evidence submitted by each worker.
-- **Live Agent Transcript Inspector:** Inspects ongoing Codex (`~/.codex/sessions`) and Claude Code (`~/.claude/projects`) worker activity. Streams commands, file edits, and outputs in real time while censoring private keys, tokens, and stripping encrypted raw thinking.
-
----
-
-## Anti-Tamper & Security Model
-
-APOS enforces strict physical and logical boundaries between target code and orchestration control:
-
-```
-HOST ENVIRONMENT
-├── ~/.apos/projects/<repo>-<hash>/       ◄── [CONTROLLER HOME: OUTSIDE REPO]
-│   ├── events/<GOAL>.jsonl               # Hash-chained, append-only immutable event log
-│   ├── state.sqlite                      # Rebuildable fast-lookup query index
-│   ├── sources/<GOAL>/v<n>.md            # Immutable verbatim source snapshots
-│   ├── artifacts/                        # Full raw gate execution logs
-│   └── runtime.json                      # Custom model profiles (e.g. gpt-6.1-terra)
-│
-└── C:\path\to\your\repo\                 ◄── [TARGET REPOSITORY]
-    ├── .apos/
-    │   ├── project.yaml                  # Project identity & metadata
-    │   └── skills/                       # Committed & SHA-pinned role skills
-    └── src/...                           # Working code under development
+```text
+src/
+  domain/    contracts (zod), state machine (transitions), gate and Goal types
+  store/     event log, journal, SQLite index, read-only journal
+  app/       controller, gate, packages, review, merge, supervisor, inbox
+  runtime/   Orca adapter, brief builder, telemetry probe
+  ui/        read model, story, agent activity, HTTP server, single-page UI
+skills/      stable role skills (apos-core, apos-pm, apos-lead, apos-worker, apos-reviewer)
+docs/        FINAL-DESIGN.md, fault-injection.md, design/
+scripts/     skills promotion
 ```
 
-- **Hash-Chained Journal:** Every event in `events/<GOAL>.jsonl` contains the SHA256 hash of its predecessor. Any manual tampering invalidates the entire event chain.
-- **Milestone-Only Repo Commits:** Readable Goal markdown files (`.apos/goals/<id>/`) are committed only at milestones (Approve, Plan Accepted, Verified, Closed). Random agent commits into `.apos/` are automatically rejected.
-- **Worktree Isolation:** Workers cannot modify the main repository branch directly. Changes occur inside detached Orca worktrees and can only reach target branches via Human-authorized Gate D merge routines.
+## Status and known limits
 
----
+APOS has run live on real Orca with Codex (`gpt-6.1-terra`): a clean Solo Goal, a repair path (the gate went red, the same terminal was resumed, the Goal verified and merged), and a Solo Goal through independent review, repair, a second review, `verified`, closed and merged under `controller watch` with no manual step. These runs found and fixed multi-line briefs stalling in the Codex composer, an owner committing into the managed checkout, Orca timing out on a dispatch that had started, a resume refused right after `worker_done`, and telemetry double counting.
 
-## CLI Reference
+Known limits:
 
-### Goal Management (`apos goal`)
-| Command | Options | Description |
-| :--- | :--- | :--- |
-| `create` | `--file <json> --source <md>` | Draft a new Goal bound to a source snapshot. |
-| `list` | *none* | Display all Goals and their lifecycle statuses. |
-| `approve` | `<id> --size <S\|M\|L> --max-spend <usd> --max-minutes <m> --max-attempts <n>` | **Gate A (Human)**: Approve WHAT and establish appetite. |
-| `appetite` | `<id> --reason <text> [appetite-flags]` | **Human**: Adjust controller budget without changing scope. |
-| `select` | `<id>` | **Gate B (Human)**: Select which approved Goal runs next. |
-| `revise` | `--file <json> --source <md>` | Revise an active Goal (increments version; requires re-approval). |
-
-### Lead Planning (`apos lead`)
-| Command | Options | Description |
-| :--- | :--- | :--- |
-| `recommend` | *none* | Lead recommends next eligible Goal based on priority and dependencies. |
-| `propose` | `--file <json>` | Submit an execution proposal (Solo or Multi-WP). |
-| `commit` | `<id> [--terminal <handle>]` | Lead commits plan; controller verifies contracts and auto-dispatches. |
-
-### Controller & Supervision (`apos controller`)
-| Command | Options | Description |
-| :--- | :--- | :--- |
-| `tick` | *none* | Execute one controller cycle (reconcile, gate, dispatch, wake). |
-| `watch` | `[--interval-ms <n>]` | Continuous loop running inside an Orca terminal. |
-
-### Verification & Closure (`apos outcome`, `apos gate`)
-| Command | Options | Description |
-| :--- | :--- | :--- |
-| `gate run` | `<goalId> --commit <sha>` | Run automated test gate on a specific commit. |
-| `gate confirm` | `<goalId> <checkId> --commit <sha> --by <name> --note <text>` | **Human**: Sign off on declared manual checks. |
-| `outcome close`| `<id> [--merge-to <branch>]` | **Gate D (Human)**: Finalize Goal and authorize merge. |
-| `outcome revise`| `<id>` | Return verified Goal for further refinement. |
-| `outcome stop` | `<id>` | Terminate Goal without merging. |
-
-### System & Observation
-| Command | Options | Description |
-| :--- | :--- | :--- |
-| `inbox` | *none* | List pending human decisions, blockers, and notices. |
-| `ui` | `[--port <n>]` | Start the local read-only web dashboard. |
-| `metrics show` | `<goalId>` | Display token utilization, attempts, and wall time. |
-
----
-
-## Validation & Fault Injection
-
-The APOS controller and domain state machine are backed by **195 automated tests** across 31 test suites, rigorously validating all failure modes specified in [`docs/fault-injection.md`](docs/fault-injection.md):
-
-```powershell
-# Run the complete test suite
-npm test
-
-# Run type check and project compilation
-npm run typecheck
-npm run build
-```
-
-### Validated Fault Scenarios Include:
-- **Gate Integrity:** Catching regressions between base and delivery commits; rejecting uncommitted worktree artifacts; isolating baseline failures.
-- **Model Tampering:** Halting when the runtime launches a different model than planned.
-- **Prompt & Skill Protection:** Failing gates immediately if an agent delivery alters pinned APOS skills.
-- **Repair Convergence:** Automatically feeding red gate test output back to the same owner; stopping after 2 identical failed attempts.
-- **Post-Merge Verification:** Rerunning complete verification gates on the merge commit; keeping the Goal unclosed if post-merge tests fail.
-
-### Live Production Smoke Verification (2026-11-08)
-Conducted on real throwaway repositories with Orca 1.4.240 and Codex CLI (`gpt-6.1-terra`):
-- **`GOAL-SMOKE-V2` (Clean Solo Flow):** Verified end-to-end execution through Gate A, Gate B, autonomous Lead commit, isolated worktree delivery, green machine gate, and clean human merge.
-- **`GOAL-SMOKE-R` (Repair Path):** A simulated defect was injected after initial delivery. The controller flagged the red gate, generated structured findings, resumed the exact same Codex terminal session, verified the repair, and completed merge. Attempt 1 consumed 307k tokens; repair consumed 270k tokens with 97% cache hit rate.
-
----
-
-## Operational Notes & Roadmap
-
-- **Budget Enforcement:** `maxSpendUsd` and `overrunPolicy` are tracked and surfaced. When appetite is exceeded, the controller alerts the human and declines further resumes.
-- **Single-Host Boundary:** Controller data is cryptographically protected against accidental corruption and agent subversion. It assumes the local machine is operated by a trusted developer.
-- **Future Enhancements:** Native pricing engines for real-time USD billing calculations; multi-lead collaborative planning sessions.
-
----
-
-<p align="center">
-  <sub>APOS v2 • Designed for high-reliability agentic software engineering.</sub>
-</p>
+- **Spend is not enforced.** `maxSpendUsd` and `overrunPolicy` are recorded, but there is no price table and an overrun only notifies. The controller cannot stop a running owner; it only declines to resume it.
+- **Multi-WP has run live only on a toy Goal**, not yet where packages truly depend on each other or where the review asks for changes.
+- **The quality pilot did not beat the baseline.** On the SQLFMT task APOS ended with 28/32 target tests against the single-agent baseline's 32/32, and the controller blocked the Goal rather than verify it. The current aim is a smooth controller, not accuracy.
+- **Solo loses the Lead's planning context.** The Solo owner is a fresh session dispatched after `lead commit`, not the session that wrote the plan.
+- **Agent activity in the UI is verified against Codex dispatches.** The Claude Code reader works on real Claude Code transcripts but has not yet seen a Worker dispatched by APOS.
+- **Single host, trusted user** (see the trust model).

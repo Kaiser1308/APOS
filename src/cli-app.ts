@@ -21,6 +21,8 @@ import { MergeService } from './app/merge.js';
 import { ReviewService } from './app/review.js';
 import { assertExecutionSettled } from './app/replan.js';
 import { MetricsService } from './app/metrics.js';
+import { buildInbox } from './app/inbox.js';
+import { DEFAULT_UI_PORT, startUi } from './ui/server.js';
 import { GoalRegistryService } from './app/registry.js';
 import { VerificationService } from './app/verification.js';
 import { GateService, type GateOptions } from './app/gate.js';
@@ -394,13 +396,15 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     }));
   }
   program.command('inbox').description('what needs the Human: notices, blocked Goals, verified Goals awaiting outcome').action(() => withJournal(journal => {
-    for (const state of journal.listGoals()) {
-      const notices = journal.events(state.spec.id).filter(item => item.type === 'human-notified').map(item => item.data);
-      if (state.status === 'blocked') write(`${state.spec.id}\tneeds-decision\t${JSON.stringify(state.blocker)}`);
-      if (state.status === 'verified') write(`${state.spec.id}\tawaiting-outcome\tgate ${state.gate?.result} on ${state.gate?.deliveryCommit}`);
-      for (const notice of notices) write(`${state.spec.id}\tnotice\t${JSON.stringify(notice)}`);
-    }
+    for (const item of buildInbox(journal)) write(`${item.goalId}\t${item.kind}\t${item.detail}`);
   }));
+  program.command('ui').description('read-only web view of this project on 127.0.0.1; it never writes controller state').option('--port <n>', 'port to listen on', String(DEFAULT_UI_PORT)).action(async ({ port }: { port: string }) => {
+    if (!existsSync(join(repo(), '.apos', 'project.yaml'))) throw new Error('Run apos init first');
+    const number = Number(port);
+    if (!Number.isInteger(number) || number < 0 || number > 65535) throw new Error('--port must be an integer from 0 to 65535');
+    const server = await startUi(options.home ?? controllerHome(repo()), number);
+    write(`APOS UI: http://127.0.0.1:${(server.address() as { port: number }).port}  (read-only; Ctrl+C to stop)`);
+  });
   const finding = program.command('finding');
   finding.command('record').argument('<id>').requiredOption('--kind <intent_gap|bad_plan|patch|defer>').requiredOption('--note <text>').option('--by <name>', 'who found it', 'lead').action((id: string, flags: { kind: string; note: string; by: string }) => withJournal(journal => {
     journal.append(event(id, 'finding-recorded', { kind: flags.kind, note: flags.note, by: flags.by }));

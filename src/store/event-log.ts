@@ -18,6 +18,21 @@ type Line = { event: GoalEvent; prev: string; hash: string };
 const GENESIS = '0'.repeat(64);
 const chain = (prev: string, event: GoalEvent) => createHash('sha256').update(prev).update(JSON.stringify(event)).digest('hex');
 
+/** Parses and verifies complete JSONL lines; any corrupt line or break in the chain is reported as tampering. */
+export function verifyChain(goalId: string, complete: string[]): Line[] {
+  const lines: Line[] = [];
+  let prev = GENESIS;
+  for (const [index, text] of complete.entries()) {
+    let line: Line;
+    try { line = JSON.parse(text) as Line; }
+    catch { throw new Error(`APOS event log ${goalId} is corrupt at line ${index + 1}`); }
+    if (line.prev !== prev || line.hash !== chain(prev, line.event)) throw new Error(`APOS event log ${goalId} was modified at line ${index + 1}`);
+    lines.push(line);
+    prev = line.hash;
+  }
+  return lines;
+}
+
 /**
  * Append-only, fsync'd, hash-chained event log: one JSONL file per Goal. A torn final line (crash
  * mid-write) is dropped on read; any other break in the chain is reported as tampering.
@@ -42,17 +57,7 @@ export class EventLog {
     const complete = raw.endsWith('\n') ? parts.slice(0, -1) : parts.slice(0, -1);
     const torn = raw.endsWith('\n') ? '' : parts.at(-1)!;
     if (torn) truncateSync(path, Buffer.byteLength(raw) - Buffer.byteLength(torn));
-    const lines: Line[] = [];
-    let prev = GENESIS;
-    for (const [index, text] of complete.entries()) {
-      let line: Line;
-      try { line = JSON.parse(text) as Line; }
-      catch { throw new Error(`APOS event log ${goalId} is corrupt at line ${index + 1}`); }
-      if (line.prev !== prev || line.hash !== chain(prev, line.event)) throw new Error(`APOS event log ${goalId} was modified at line ${index + 1}`);
-      lines.push(line);
-      prev = line.hash;
-    }
-    return lines;
+    return verifyChain(goalId, complete);
   }
 
   read(goalId: string): GoalEvent[] { return this.lines(goalId).map(line => line.event); }

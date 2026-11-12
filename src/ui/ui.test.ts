@@ -17,6 +17,7 @@ import { ReadOnlyJournal } from '../store/readonly-journal.js';
 import { DELIVERY, approval, gateReport, proposal, sourceText, spec } from '../domain/fixtures.test-support.js';
 import type { GoalEventType, GoalStatus } from '../domain/transitions.js';
 import { attemptKey } from '../domain/gate.js';
+import { buildStory } from './story.js';
 import { HOLDER, buildGoalDetail, buildSnapshot, findGateLog, tickRunning } from './read-model.js';
 import { PAGE } from './page.js';
 import { route, startUi } from './server.js';
@@ -265,4 +266,39 @@ it('leaves out notices that are history or repeat the status, while apos inbox s
   expect(buildSnapshot(repo).inbox.map(item => `${item.goalId}:${item.kind}`)).toEqual(['GOAL-X:awaiting-outcome', 'GOAL-X:notice', 'GOAL-Y:notice']);
   expect(buildInbox(repo).filter(item => item.goalId === 'GOAL-X')).toHaveLength(3); // CLI: status item plus both notices
   expect(buildInbox(repo).filter(item => item.goalId === 'GOAL-Z')).toHaveLength(1); // CLI still lists the closed Goal's notice
+});
+
+it('tells the story of a Goal: what the Human gave, what the Lead decided, and what each owner put on record', async () => {
+  const p = await project();
+  const g = p.goal('GOAL-S'); g.draft(); g.add('goal-approved', approval); g.add('goal-selected');
+  g.add('proposal-drafted', { ...proposal, goalId: 'GOAL-S', approach: 'reuse the <b>API</b>', splitRationale: undefined });
+  const before = buildStory(new ReadOnlyJournal(p.home), 'GOAL-S')!;
+  expect(before.lead).toMatchObject({ mode: 'solo-direct', approved: false, approach: 'reuse the <b>API</b>' });
+  expect(before.lead!.modeLabel).toMatch(/1 owner/);
+  expect(before.lead!.whySplit).toMatch(/không ghi lý do chia/);
+  g.add('proposal-approved');
+  g.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
+  g.add('decision-logged', { note: 'cookie session, not JWT' });
+  g.add('checkpointed', { phase: 'impl', progress: 'login route done', evidenceRefs: [] });
+  g.add('blocked', { kind: 'technical', note: 'need a decision' });
+  p.close();
+  const story = buildStory(new ReadOnlyJournal(p.home), 'GOAL-S')!;
+  expect(story.goal.requirements[0].id).toBe('R-1');
+  expect(story.lead!.approved).toBe(true);
+  expect(story.owners).toHaveLength(1);
+  expect(story.owners[0].entries.map(item => `${item.kind}:${item.text}`)).toEqual(['decision:cookie session, not JWT', 'report:impl: login route done', 'blocker:technical: need a decision']);
+  const reply = route(p.home, new URL('/api/goals/GOAL-S/story', 'http://localhost'));
+  expect(reply.status).toBe(200);
+  expect(JSON.parse(reply.body).owners[0].entries).toHaveLength(3);
+  expect(route(p.home, new URL('/api/goals/GOAL-NOPE/story', 'http://localhost')).status).toBe(404);
+});
+
+it('splits a Multi-WP story per package and keeps Lead-level notes apart', async () => {
+  const p = await project();
+  const g = p.goal('GOAL-M'); g.draft(); g.add('goal-approved', approval); g.add('goal-selected');
+  g.add('proposal-drafted', { ...proposal, goalId: 'GOAL-M', mode: 'multi-wp', splitRationale: 'two modules are independent', estimatedCost: { spendUsd: 8, wallMinutes: 90 } });
+  p.close();
+  const story = buildStory(new ReadOnlyJournal(p.home), 'GOAL-M')!;
+  expect(story.lead).toMatchObject({ mode: 'multi-wp', whySplit: 'two modules are independent' });
+  expect(story.lead!.modeLabel).toMatch(/Chia nhiều/);
 });

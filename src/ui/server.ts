@@ -4,6 +4,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { ReadOnlyJournal } from '../store/readonly-journal.js';
 import { buildGoalDetail, buildSnapshot, findGateLog } from './read-model.js';
+import { buildStory } from './story.js';
 import { PAGE } from './page.js';
 
 export const DEFAULT_UI_PORT = 4343;
@@ -41,6 +42,7 @@ export function route(home: string, url: URL): Reply {
     const before = url.searchParams.get('before') ?? undefined;
     return json(200, buildGoalDetail(repo, goalId, { limit: Number.isFinite(limit) ? limit : 200, before }));
   }
+  if (parts.length === 4 && parts[3] === 'story') return json(200, buildStory(repo, goalId));
   if (parts.length === 5 && parts[3] === 'gate-log') {
     if (!/^[0-9a-f]{64}$/.test(parts[4])) return text(400, 'invalid log id');
     const ref = findGateLog(state, parts[4]);

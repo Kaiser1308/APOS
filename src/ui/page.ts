@@ -49,6 +49,24 @@ a { color:var(--accent); }
 pre { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--chip); padding:8px; border-radius:6px; margin:4px 0; }
 svg text { fill:var(--ink); font-size:12px; }
 svg rect { stroke:var(--line); }
+.card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:10px 0; background:var(--panel); }
+.card > .ct { font-weight:600; margin-bottom:6px; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
+.card.lead { border-left:4px solid var(--warn); }
+.card.owner { border-left:4px solid var(--accent); }
+.card.give { border-left:4px solid var(--mute); }
+.kv { display:grid; grid-template-columns:150px 1fr; gap:4px 12px; }
+@media (max-width: 800px) { .kv { grid-template-columns:1fr; } }
+.kv .k { color:var(--mute); }
+.mode { font-size:15px; font-weight:600; }
+.tl { margin:6px 0 0; padding:0 0 0 14px; border-left:2px solid var(--line); }
+.tl .ev { position:relative; padding:2px 0 8px 12px; }
+.tl .ev::before { content:""; position:absolute; left:-20px; top:7px; width:10px; height:10px; border-radius:50%; background:var(--mute); }
+.tl .ev.decision::before { background:var(--accent); }
+.tl .ev.blocker::before { background:var(--bad); }
+.tl .ev.report::before { background:var(--ok); }
+.tl .ev.finding::before, .tl .ev.review::before { background:var(--warn); }
+.tl .when { color:var(--mute); font-size:12px; }
+details > summary { cursor:pointer; color:var(--accent); }
 .back { cursor:pointer; color:var(--accent); display:inline-block; margin-bottom:8px; }
 </style>
 </head>
@@ -68,7 +86,7 @@ svg rect { stroke:var(--line); }
 (function () {
   var HOLDERS = [["human", "Human"], ["lead", "Lead"], ["controller", "Controller / agent"], ["done", "Done"]];
   var STEPS = ["draft", "approved", "selected", "planned", "ready", "executing", "verified", "closed"];
-  var state = { snap: null, goal: null, tab: "overview", lastGood: null, failed: false, doneOpen: false, timeline: [], nextBefore: null };
+  var state = { snap: null, goal: null, tab: "story", story: null, lastGood: null, failed: false, doneOpen: false, timeline: [], nextBefore: null };
 
   function h(tag, attrs, kids) {
     var el = document.createElement(tag);
@@ -100,7 +118,7 @@ svg rect { stroke:var(--line); }
       return r.text().then(function (body) { if (!r.ok) throw new Error(path + " -> " + r.status + " " + body.slice(0, 200)); return body; });
     });
   }
-  function select(id) { state.goal = id; state.detail = null; state.detailError = null; state.tab = "overview"; state.timeline = []; state.nextBefore = null; location.hash = id || ""; render(); if (id) loadDetail(); }
+  function select(id) { state.goal = id; state.detail = null; state.detailError = null; state.story = null; state.tab = "story"; state.timeline = []; state.nextBefore = null; location.hash = id || ""; render(); if (id) loadDetail(); }
 
   function renderHeader() {
     var s = state.snap;
@@ -220,14 +238,66 @@ svg rect { stroke:var(--line); }
     if (next) box.appendChild(h("a", { href: "#", text: "older events", onclick: function (e) { e.preventDefault(); loadOlder(next); } }));
     return box;
   }
+  var ENTRY_LABEL = { decision: "Quyết định", report: "Báo cáo", blocker: "Bị chặn", finding: "Finding", review: "Review" };
+  function list(items) { var ul = h("ul", { style: "margin:4px 0; padding-left:18px" }); items.forEach(function (t) { ul.appendChild(h("li", { text: t })); }); return ul; }
+  function kv(rows) { var d = h("div", { class: "kv" }); rows.forEach(function (r) { if (!r[1]) return; d.appendChild(h("div", { class: "k", text: r[0] })); d.appendChild(typeof r[1] === "string" ? h("div", { text: r[1] }) : r[1]); }); return d; }
+  function ago(iso) { return new Date(iso).toLocaleTimeString() + " (" + age(iso) + ")"; }
+  function giveCard(s) {
+    var c = h("details", { class: "card give" }); if (!s.lead) c.setAttribute("open", "");
+    c.appendChild(h("summary", { text: "1. Anh giao: " + s.goal.outcome }));
+    c.appendChild(kv([
+      ["Requirements", list(s.goal.requirements.map(function (r) { return r.id + ": " + r.text + (r.disposition === "excluded" ? " (excluded: " + (r.exclusionReason || "") + ")" : ""); }))],
+      ["Acceptance", list(s.goal.acceptance.map(function (a) { return a.id + ": " + a.text + " [" + a.requirementIds.join(", ") + "]"; }))],
+      ["Trong phạm vi", s.goal.scope.join("; ")], ["Ngoài phạm vi", s.goal.exclusions.join("; ")]
+    ]));
+    return c;
+  }
+  function leadCard(s) {
+    var c = h("div", { class: "card lead" });
+    c.appendChild(h("div", { class: "ct" }, [h("span", { text: "2. Lead hiểu và quyết định" })]));
+    if (!s.lead) { c.appendChild(h("div", { class: "mute", text: "Lead chưa đề xuất kế hoạch." })); return c; }
+    var l = s.lead;
+    c.appendChild(h("div", { class: "ct" }, [h("span", { class: "mode", text: l.modeLabel }), chip(l.approved ? "controller đã duyệt" : "chờ controller duyệt", l.approved ? "pass" : "lead")]));
+    var maps = h("table", null, [h("tr", null, [h("th", { text: "Acceptance" }), h("th", { text: "Kiểm bằng" })])]);
+    l.acceptanceMapping.forEach(function (m) { maps.appendChild(h("tr", null, [h("td", { text: m.acceptanceId }), h("td", { text: m.verification })])); });
+    var cost = l.estimatedCost ? "$" + l.estimatedCost.spendUsd + ", " + l.estimatedCost.wallMinutes + " phút" + (s.goal.appetite ? "  (appetite: $" + s.goal.appetite.maxSpendUsd + ", " + s.goal.appetite.maxWallMinutes + " phút)" : "") : "";
+    c.appendChild(kv([
+      ["Cách làm", l.approach], [l.mode === "multi-wp" ? "Vì sao chia" : "Vì sao không chia", l.whySplit || "(chưa ghi)"],
+      ["Rủi ro", l.risks.length ? list(l.risks) : ""], ["Đường dùng chung", l.sharedPaths.join(", ")],
+      ["Cách kiểm", l.verificationStrategy], ["Ánh xạ", maps], ["Ước tính", cost]
+    ]));
+    return c;
+  }
+  function ownerCard(s, o) {
+    var c = h("div", { class: "card owner" });
+    var max = state.detail && state.detail.appetite ? "/" + state.detail.appetite.maxAttempts : "";
+    c.appendChild(h("div", { class: "ct" }, [h("span", { text: o.label }), o.status ? chip(o.status) : null, h("span", { class: "mute", text: "lần thử " + o.attempts + max + (o.dependencies.length ? " · sau " + o.dependencies.join(", ") : "") })]));
+    if (o.outcome) c.appendChild(h("div", { class: "mute", text: o.outcome }));
+    if (!o.entries.length) { c.appendChild(h("div", { class: "mute", text: "Chưa ghi gì vào APOS." })); return c; }
+    var tl = h("div", { class: "tl" });
+    o.entries.slice().reverse().forEach(function (e) {
+      tl.appendChild(h("div", { class: "ev " + e.kind }, [h("div", null, [h("b", { text: ENTRY_LABEL[e.kind] || e.kind }), h("span", { class: "when", text: "  " + ago(e.at) + (e.by ? " · " + e.by : "") })]), h("div", { text: e.text })]));
+    });
+    c.appendChild(tl);
+    return c;
+  }
+  function storyView() {
+    var s = state.story, box = h("div");
+    if (!s) { box.appendChild(h("div", { class: "mute", text: "đang tải..." })); return box; }
+    box.appendChild(giveCard(s)); box.appendChild(leadCard(s));
+    box.appendChild(h("h3", { text: "3. Owner làm gì" }));
+    box.appendChild(h("div", { class: "mute", text: "Những gì đã ghi vào log APOS (mới nhất ở trên). Việc chi tiết của agent hiện ở mục Hoạt động khi có transcript." }));
+    s.owners.forEach(function (o) { box.appendChild(ownerCard(s, o)); });
+    return box;
+  }
   function renderDetail(view) {
     view.appendChild(h("a", { class: "back", text: "< all Goals", onclick: function () { select(null); } }));
     var g = state.detail;
     if (!g || g.id !== state.goal) { view.appendChild(h("div", { class: state.detailError ? "err" : "mute", text: state.detailError || "loading..." })); return; }
     var sec = h("section", null, [h("h2", { text: g.id }), h("div", null, [chip(g.status), h("span", { text: "  " + g.outcome })])]);
-    var tabs = h("div", { class: "tabs" }); ["overview", "gates", "timeline"].forEach(function (t) { tabs.appendChild(h("button", { class: t === state.tab ? "on" : "", text: t, onclick: function () { state.tab = t; render(); } })); });
+    var tabs = h("div", { class: "tabs" }); ["story", "overview", "gates", "timeline"].forEach(function (t) { tabs.appendChild(h("button", { class: t === state.tab ? "on" : "", text: t, onclick: function () { state.tab = t; render(); } })); });
     sec.appendChild(tabs);
-    sec.appendChild(state.tab === "gates" ? gates(g) : state.tab === "timeline" ? timeline(g) : overview(g));
+    sec.appendChild(state.tab === "story" ? storyView() : state.tab === "gates" ? gates(g) : state.tab === "timeline" ? timeline(g) : overview(g));
     view.appendChild(sec);
   }
   function render() {
@@ -237,7 +307,9 @@ svg rect { stroke:var(--line); }
   }
   function loadDetail() {
     var id = state.goal; if (!id) return Promise.resolve();
-    return get("/api/goals/" + encodeURIComponent(id)).then(function (b) { if (state.goal === id) { state.detail = JSON.parse(b); state.detailError = null; } }).catch(function (e) { if (state.goal === id) { state.detail = null; state.detailError = String(e.message); } }).then(render);
+    return get("/api/goals/" + encodeURIComponent(id)).then(function (b) { if (state.goal === id) { state.detail = JSON.parse(b); state.detailError = null; } })
+      .then(function () { return get("/api/goals/" + encodeURIComponent(id) + "/story"); }).then(function (b) { if (state.goal === id) state.story = JSON.parse(b); })
+      .catch(function (e) { if (state.goal === id) { state.detail = null; state.detailError = String(e.message); } }).then(render);
   }
   function loadOlder(before) {
     var id = state.goal;

@@ -1,8 +1,28 @@
-# APOS
+<div align="center">
 
-**AI Project Orchestration System.** APOS runs AI coding agents on software Goals. A Human decides *what* to build and whether to accept it; a Lead agent decides *how*; a controller with no LLM in it dispatches the work, checks the result itself and keeps an auditable record of everything that happened.
+<img src="docs/assets/hero.svg" alt="APOS: Let AI agents build. Keep the proof." width="100%" />
 
-![node](https://img.shields.io/badge/node-%E2%89%A5%2024-339933) ![typescript](https://img.shields.io/badge/typescript-5.9-3178c6) ![runtime](https://img.shields.io/badge/runtime%20deps-commander%20%2B%20zod-informational) ![state](https://img.shields.io/badge/state-append--only%20hash--chained%20log-orange)
+<br />
+
+**Run AI coding agents on real software Goals, under a controller that never takes anyone's word for it. Not even the agents'.**
+
+![node](https://img.shields.io/badge/node-%E2%89%A5%2024-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
+![typescript](https://img.shields.io/badge/typescript-5.9-3178c6?style=for-the-badge&logo=typescript&logoColor=white)
+![runtime deps](https://img.shields.io/badge/runtime%20deps-2-informational?style=for-the-badge)
+![state](https://img.shields.io/badge/state-hash--chained%20log-orange?style=for-the-badge)
+
+[**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Web UI**](#web-ui) · [**Trust model**](#trust-model) · [**CLI reference**](#cli-reference)
+
+</div>
+
+<br />
+
+| | |
+| --- | --- |
+| **Humans own the what** | You approve the Goal, the budget and whether to merge. Never the technical plan. |
+| **Agents own the how** | A Lead plans; Owners implement in isolated worktrees, resumed (not restarted) when a check fails. |
+| **The controller owns the truth** | No LLM in the loop. It runs the gates itself: an agent saying "done" is a claim, never evidence. |
+| **Everything is auditable** | Every event lands in an append-only, hash-chained log you can replay and verify. |
 
 ---
 

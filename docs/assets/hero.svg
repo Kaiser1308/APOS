@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 440" width="1200" height="440" role="img" aria-label="APOS: Let AI agents build. Keep the proof.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#070b14"/><stop offset="0.6" stop-color="#120d2b"/><stop offset="1" stop-color="#1b0f2e"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/><stop offset="0.5" stop-color="#a78bfa"/><stop offset="1" stop-color="#fb923c"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.2" cy="0.1" r="0.6"><stop offset="0" stop-color="#22d3ee" stop-opacity="0.22"/><stop offset="1" stop-color="#22d3ee" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowB" cx="0.85" cy="0.2" r="0.6"><stop offset="0" stop-color="#fb923c" stop-opacity="0.18"/><stop offset="1" stop-color="#fb923c" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>
+    <style>
+      .f{font-family:'Segoe UI','Inter',-apple-system,'Helvetica Neue',Arial,sans-serif}
+      .flow{stroke-dasharray:6 8;animation:dash 1.2s linear infinite}
+      @keyframes dash{to{stroke-dashoffset:-14}}
+      .pulse{transform-box:fill-box;transform-origin:center;animation:pulse 2.4s ease-out infinite}
+      @keyframes pulse{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.4);opacity:0}}
+      .blink{animation:blink 2.4s ease-in-out infinite}
+      @keyframes blink{0%,100%{opacity:.35}50%{opacity:1}}
+    </style>
+  </defs>
+
+  <rect width="1200" height="440" rx="20" fill="url(#bg)"/>
+  <rect width="1200" height="440" rx="20" fill="url(#grid)"/>
+  <rect width="1200" height="440" rx="20" fill="url(#glowA)"/>
+  <rect width="1200" height="440" rx="20" fill="url(#glowB)"/>
+  <rect x="0.5" y="0.5" width="1199" height="439" rx="20" fill="none" stroke="#ffffff" stroke-opacity="0.1"/>
+
+  <!-- title -->
+  <text class="f" x="600" y="138" text-anchor="middle" font-size="104" font-weight="800" letter-spacing="14" fill="url(#title)" filter="url(#blur)" opacity="0.45">APOS</text>
+  <text class="f" x="600" y="138" text-anchor="middle" font-size="104" font-weight="800" letter-spacing="14" fill="url(#title)">APOS</text>
+  <text class="f" x="600" y="188" text-anchor="middle" font-size="30" font-weight="600" fill="#f1f5f9">Let AI agents build. <tspan fill="#fb923c">Keep the proof.</tspan></text>
+  <text class="f" x="600" y="220" text-anchor="middle" font-size="14" font-weight="500" letter-spacing="5" fill="#94a3b8">AI PROJECT ORCHESTRATION SYSTEM</text>
+
+  <!-- connectors -->
+  <g stroke-width="2.5" fill="none" stroke-linecap="round">
+    <line class="flow" x1="178" y1="310" x2="322" y2="310" stroke="#f59e0b"/>
+    <line class="flow" x1="408" y1="310" x2="552" y2="310" stroke="#8b5cf6"/>
+    <line class="flow" x1="648" y1="310" x2="782" y2="310" stroke="#22d3ee"/>
+    <line class="flow" x1="868" y1="310" x2="1012" y2="310" stroke="#34d399"/>
+  </g>
+  <!-- feedback: evidence back to the human -->
+  <path d="M1100 342 C1100 392 1100 398 1060 398 L140 398 C100 398 100 392 100 346" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1.5" stroke-dasharray="3 6"/>
+  <text class="f blink" x="600" y="392" text-anchor="middle" font-size="12" letter-spacing="3" fill="#cbd5e1">OUTCOME + EVIDENCE · APPEND-ONLY HASH-CHAINED LOG</text>
+
+  <!-- nodes -->
+  <g class="f" text-anchor="middle">
+    <circle cx="140" cy="310" r="34" fill="#f59e0b" fill-opacity="0.14" stroke="#f59e0b" stroke-width="2"/>
+    <text x="140" y="318" font-size="24" fill="#f59e0b">&#9679;</text>
+    <text x="140" y="270" font-size="15" font-weight="700" fill="#f1f5f9">HUMAN</text>
+
+    <circle cx="365" cy="310" r="34" fill="#8b5cf6" fill-opacity="0.14" stroke="#8b5cf6" stroke-width="2"/>
+    <text x="365" y="318" font-size="24" fill="#a78bfa">&#9670;</text>
+    <text x="365" y="270" font-size="15" font-weight="700" fill="#f1f5f9">LEAD</text>
+
+    <circle class="pulse" cx="600" cy="310" r="40" fill="none" stroke="#22d3ee" stroke-width="2"/>
+    <circle cx="600" cy="310" r="40" fill="#22d3ee" fill-opacity="0.18" stroke="#22d3ee" stroke-width="2.5"/>
+    <text x="600" y="319" font-size="26" fill="#22d3ee">&#9672;</text>
+    <text x="600" y="258" font-size="15" font-weight="700" fill="#f1f5f9">CONTROLLER</text>
+
+    <circle cx="825" cy="310" r="34" fill="#34d399" fill-opacity="0.14" stroke="#34d399" stroke-width="2"/>
+    <text x="825" y="318" font-size="24" fill="#34d399">&#9638;</text>
+    <text x="825" y="270" font-size="15" font-weight="700" fill="#f1f5f9">OWNER</text>
+
+    <circle cx="1060" cy="310" r="34" fill="#f472b6" fill-opacity="0.14" stroke="#f472b6" stroke-width="2"/>
+    <text x="1060" y="318" font-size="24" fill="#f472b6">&#10003;</text>
+    <text x="1060" y="270" font-size="15" font-weight="700" fill="#f1f5f9">REVIEWER</text>
+
+    <!-- captions under nodes -->
+    <g font-size="12" fill="#94a3b8">
+      <text x="140" y="360">decides WHAT</text>
+      <text x="365" y="360">decides HOW</text>
+      <text x="600" y="360" fill="#67e8f9" font-weight="600">no LLM · checks everything</text>
+      <text x="825" y="360">own worktree</text>
+      <text x="1060" y="360">independent session</text>
+    </g>
+  </g>
+</svg>

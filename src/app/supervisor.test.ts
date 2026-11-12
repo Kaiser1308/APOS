@@ -28,7 +28,7 @@ const APPETITE = ['--size', 'M', '--max-spend', '20', '--max-minutes', '240', '-
  * scripted work for that attempt, then settles. Everything else - gate, findings, resume, review,
  * verification, merge - is the real controller on real Git.
  */
-async function setup(work: (attempt: number, commit: (files: Record<string, string>, message: string) => void, line: string) => void, options: { risks?: string[]; reviewer?: (commit: (files: Record<string, string>) => void, key: string) => void; launched?: string; intrude?: boolean; failed?: (attempt: number) => boolean; inbox?: OrcaMessage[]; reviewerUnknown?: boolean; refuseResumes?: number } = {}) {
+async function setup(work: (attempt: number, commit: (files: Record<string, string>, message: string) => void, line: string) => void, options: { risks?: string[]; reviewer?: (commit: (files: Record<string, string>) => void, key: string) => void; launched?: string; intrude?: boolean; failed?: (attempt: number) => boolean; inbox?: OrcaMessage[]; reviewerUnknown?: boolean; refuseResumes?: number; hungIdleMinutes?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'apos-auto-')); dirs.push(dir);
   const artifacts = mkdtempSync(join(tmpdir(), 'apos-auto-art-')); dirs.push(artifacts);
   execFileSync('git', ['init', '-q', dir]);
@@ -59,7 +59,7 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
   const runOwner = () => {
     attempt += 1;
     work(attempt, commit, activationLine(committedFileDigest(dir, base, CORE_SKILL)));
-    settled.add(`ctx_${attempt}`);
+    if (options.hungIdleMinutes === undefined) settled.add(`ctx_${attempt}`);
     if (options.failed?.(attempt)) failedDispatches.add(`ctx_${attempt}`);
   };
   const runtime: RuntimeAdapter = {
@@ -73,7 +73,7 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
     async resumeSolo(_ref, _checkpoint, _key, budget) {
       if (refusals < (options.refuseResumes ?? 0)) { refusals += 1; throw new OrcaRefused('agent_unconfigured', 'agent_unconfigured'); }
       budgets.push(budget); dispatches.push('resume'); const r = ref(attempt + 1); runOwner(); return r; },
-    async inspect(r) { return settled.has(r.dispatchId) ? { state: 'settled', outcome: failedDispatches.has(r.dispatchId) ? 'failed' : 'completed', ref: r } : { state: 'live', ref: r }; },
+    async inspect(r) { if (options.hungIdleMinutes !== undefined && !settled.has(r.dispatchId)) return { state: 'live', idleMinutes: options.hungIdleMinutes, ref: r }; return settled.has(r.dispatchId) ? { state: 'settled', outcome: failedDispatches.has(r.dispatchId) ? 'failed' : 'completed', ref: r } : { state: 'live', ref: r }; },
     async deliveryHead(r) { return execFileSync('git', ['-C', r.worktreeId ? r.worktreeId.split('::')[1] : owner, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); },
     async launchReceipt() { return { agent: 'codex', model: options.launched ?? 'gpt-6.1-terra' }; },
     async startReviewer(input) {
@@ -146,6 +146,14 @@ describe('Solo autopilot', () => {
     expect(dispatches).toEqual(['start', 'resume']);
     expect(state().findings![0].note).toMatch(/activation line/);
     expect(state().status).toBe('verified');
+  }, 90_000);
+
+  it('tells the Human once when an unsettled owner has sat idle past the quiet spell (a dead launch looks like this)', async () => {
+    const { tick, state, output } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), { hungIdleMinutes: 20 });
+    await tick(); await tick(); await tick();
+    expect(state().status).toBe('executing');
+    expect(output.filter(line => line.includes('idle 20 min; Human notified'))).toHaveLength(1);
+    expect(state().findings ?? []).toHaveLength(0);
   }, 90_000);
 
   it('stops for a decision when the runtime launched a different model than planned', async () => {

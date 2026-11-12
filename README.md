@@ -209,7 +209,7 @@ A Goal is a strictly validated JSON document (`src/domain/contracts.ts`). A mini
 
 - `requirements[]` lists every requirement lifted from the source, with its span and `disposition: acceptance | excluded` (an excluded one needs `exclusionReason`).
 - `acceptance[]` carries `requirementIds`, `checkIds`, and optionally `examples`, `boundaries`, `prohibited` and `ambiguity` (`resolved` with a decision, or `blocked` with a question).
-- `checks[]` are either `{ kind: "command", command, expect: "pass" | "no-new-failures", failurePattern?, runs, timeoutMs, env }` or `{ kind: "manual", procedure, expectedResult }`. `no-new-failures` runs base and delivery and fails only on failures that are new at delivery.
+- `checks[]` are either `{ kind: "command", command, expect: "pass" | "no-new-failures", failurePattern?, runs, timeoutMs, env }` or `{ kind: "manual", procedure, expectedResult }`. `no-new-failures` needs a `failurePattern` (a regex that recognises a failing line); it runs base and delivery and fails only on failures that are new at delivery.
 
 `goal create` snapshots the source with its sha256. **Approval refuses** an unmapped requirement, a `blocked` ambiguity, a missing appetite, and a source snapshot that no longer matches.
 
@@ -221,7 +221,7 @@ The **appetite** (`size`, `maxSpendUsd`, `maxWallMinutes`, `maxAttempts`, `overr
 
 **Before dispatch** (`lead commit`), the controller checks the plan's source hash and Goal version, that there are no open questions, and that the estimate fits the appetite. For Multi-WP it also checks at least two packages, an acyclic graph, versioned interfaces (`name@vN`), acceptance coverage and a split rationale.
 
-**Dispatch.** The owner runs in its own Orca worktree created from an exact base commit, using its role profile (default: Codex `gpt-6.1-terra` for Lead and Worker, `gpt-6-sol` for Reviewer; override in `runtime.json`). The brief points at `.apos/skills/_core/execute.md` and the role skill by path and sha256, and names the activation line the delivery report must contain.
+**Dispatch.** The owner runs in its own Orca worktree created from an exact base commit, using its role profile (default: Codex `gpt-6.1-terra` for Lead and Worker, `gpt-6-sol` for Reviewer; override in `runtime.json`; use the model id Codex accepts, e.g. `gpt-6-luna`, not the display name). The brief points at `.apos/skills/_core/execute.md` and the role skill by path and sha256, and names the activation line the delivery report must contain.
 
 **After the owner settles**, `controller tick`:
 
@@ -285,7 +285,7 @@ Controller state lives **outside the repo**, in `~/.apos/projects/<repo>-<hash>/
 | `state.sqlite` | An index, rebuildable from the log. |
 | `sources/<GOAL>/v<n>.md` | Verbatim source snapshots. |
 | `artifacts/` | Gate logs. |
-| `runtime.json` | Optional role profiles (agent, model, effort). |
+| `runtime.json` | Optional role profiles, created by you after the first `goal create` (the folder is `~/.apos/projects/<repo-name>-<hash>/`): `{ "lead": { "agent": "codex", "model": "gpt-6-luna" }, "worker": { ... }, "reviewer": { ... } }`. `effort` is optional. |
 
 The repo gets readable Goal documents (`.apos/goals/<id>/`) committed only at milestones: Goal approved, plan accepted, verified, merged, outcome. Events committed into the repo by anyone else are ignored. `apos migrate` imports APOS v1 histories that still fit the contract.
 
@@ -328,6 +328,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `decision record <id> --note <text>`, `blocker report <id> --kind <kind> --note <text>`, `blocker resolve <id> --note <text>` | Decisions and blockers (`resolve` is Human). |
 | `finding record <id> --kind <intent_gap\|bad_plan\|patch\|defer> --note <text> [--by <name>]` | Record a finding. |
 | `outcome close <id> [--merge-to <branch>] [--by <name>]`, `outcome revise <id>`, `outcome stop <id>` | **Gate D (Human).** |
+| `execution start\|resume\|status\|reconcile\|verify <id>`, `review submit <goalId>` | Lower-level controls the controller normally drives itself; see `--help`. `review submit` is Human-only. |
 | `inbox` | What needs the Human: notices, blocked Goals, verified Goals awaiting an outcome. |
 | `ui [--port <n>]` | Read-only local web view. |
 | `metrics show <goalId>` | Tokens, attempts and wall time. |

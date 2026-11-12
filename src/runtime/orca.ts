@@ -11,7 +11,8 @@ export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; ow
 /** What Orca says actually launched; compared with the requested profile. */
 export type LaunchReceipt = { agent?: string; model?: string | null; effort?: string | null };
 export type ReviewerRef = { runId: string; taskId: string; dispatchId: string; owner: 'reviewer'; repoPath: string; terminal?: string; worktreeId?: string; key: string; commit: string };
-export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; outcome?: 'completed' | 'failed'; ref: RuntimeRef };
+/** `idleMinutes`: how long Orca says the agent has been idle (worker-show `activity` + `lastActivity`), when it says. */
+export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; outcome?: 'completed' | 'failed'; idleMinutes?: number; ref: RuntimeRef };
 export type OrcaMessage = { id: string; type: string; subject?: string; body?: string; payload?: unknown; dispatch_id?: string; dispatchId?: string };
 export type OrcaDelivery = { deliveryId?: string; messages: OrcaMessage[] };
 export type SoloInput = { repoPath: string; goalId: string; proposalVersion: number; checkpoint?: PhaseCheckpoint; idempotencyKey: string; attempt?: number; budget?: Budget };
@@ -70,9 +71,14 @@ export class OrcaRefused extends Error {
 // Orca 1.4.254 answers worker-show and worker-start with a concise view by default; APOS reads the full record.
 const fullFlag = (args: string[]): string[] => args[0] === 'orchestration' && ['worker-show', 'worker-start'].includes(args[1] ?? '') && !args.includes('--full') ? ['--full'] : [];
 
-function runOrca(args: string[]): Record<string, unknown> {
+/** `--compact` is APOS-internal: ask for Orca's concise view (the only one that carries `activity` and `lastActivity`) instead of the full record. */
+export const COMPACT = '--compact';
+
+function runOrca(argv: string[]): Record<string, unknown> {
+  const compact = argv.includes(COMPACT);
+  const args = argv.filter(item => item !== COMPACT);
   try {
-    return parseOrcaResult(execFileSync('orca', [...args, ...fullFlag(args), '--json'], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
+    return parseOrcaResult(execFileSync('orca', [...args, ...(compact ? [] : fullFlag(args)), '--json'], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
   } catch (error) {
     const stdout = (error as { stdout?: string }).stdout;
     let detail = '';
@@ -135,6 +141,15 @@ export function interpretWorkerShow(shown: Record<string, unknown>): RuntimeObse
   if (dispatchStatus === 'completed' || dispatchStatus === 'failed') return 'settled';
   const liveness = object(object(shown.projection).liveness).verdict;
   return liveness === 'live' ? 'live' : 'unverifiable';
+}
+
+/** Minutes of idleness from worker-show (`activity: idle`, `lastActivity: "10m ago"`); undefined when the agent is not idle or Orca gives no age. */
+export function idleMinutesFrom(shown: Record<string, unknown>): number | undefined {
+  const where = shown.activity !== undefined ? shown : object(shown.projection);
+  if (where.activity !== 'idle' || typeof where.lastActivity !== 'string') return undefined;
+  const match = /^(\d+)\s*(s|m|h|d)/.exec(where.lastActivity.trim());
+  if (!match) return undefined;
+  return Number(match[1]) * { s: 1 / 60, m: 1, h: 60, d: 1440 }[match[2] as 's' | 'm' | 'h' | 'd'];
 }
 
 export const SPILL_LIMIT = 400;
@@ -276,7 +291,12 @@ export class OrcaRuntime implements RuntimeAdapter {
   async inspect(ref: RuntimeRef): Promise<RuntimeObservation> {
     const shown = this.execute(['orchestration', 'worker-show', '--dispatch', ref.dispatchId]);
     const status = object(shown.dispatch).status;
-    return { state: interpretWorkerShow(shown), ...(status === 'completed' || status === 'failed' ? { outcome: status } : {}), ref };
+    let idleMinutes = idleMinutesFrom(shown);
+    // The full record has no idle age; ask the concise view, only for a dispatch that has not settled.
+    if (idleMinutes === undefined && status !== 'completed' && status !== 'failed') {
+      try { idleMinutes = idleMinutesFrom(this.execute(['orchestration', 'worker-show', '--dispatch', ref.dispatchId, COMPACT])); } catch { /* idle age is advisory */ }
+    }
+    return { state: interpretWorkerShow(shown), ...(status === 'completed' || status === 'failed' ? { outcome: status } : {}), ...(idleMinutes !== undefined ? { idleMinutes } : {}), ref };
   }
 
   async checkRun(runId: string): Promise<OrcaDelivery> {

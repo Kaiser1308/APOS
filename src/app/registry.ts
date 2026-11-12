@@ -35,7 +35,8 @@ export class GoalRegistryService {
 
   select(goalId: string): void {
     const state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'approved') throw new Error('Approved Goal required');
+    if (!state) throw new Error(`Goal does not exist: ${goalId}`);
+    if (state.status !== 'approved') throw new Error(`Approved Goal required: ${goalId} is ${state.status}${state.status === 'draft' ? ' (gate A first: apos goal approve)' : ''}`);
     const pending = state.spec.dependencies.filter(id => this.store.getGoal(id)?.status !== 'closed');
     if (pending.length) throw new Error(`Goal dependencies not closed: ${pending.join(', ')}`);
     this.store.append({ id: randomUUID(), goalId, type: 'goal-selected', at: new Date().toISOString() });

@@ -14,6 +14,9 @@ import { VerificationService } from './verification.js';
 import { PackageService, type PackageRuntime, type PackageRuntimeRef } from './packages.js';
 import { GitCommitInspector, IntegrationService, type CommitInspector } from './integration.js';
 
+/** Minutes an unsettled owner may sit idle before the Human is told (the same quiet spell as the controller's idle watchdog). */
+const OWNER_IDLE_MINUTES = 15;
+
 const show = (repo: string, commit: string, path: string): string | undefined => {
   try { return execFileSync('git', ['-C', repo, 'show', `${commit}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
   catch { return undefined; }
@@ -51,6 +54,22 @@ export class SoloSupervisor {
     return started ? (this.now() - Date.parse(started.at)) / 60_000 : 0;
   }
 
+  /**
+   * Seen live: an owner's turn died at launch (`model_not_found`), Orca kept it `live idle`, no worker_done ever came and
+   * the Goal sat `executing` with nothing in the inbox. An owner that is still unsettled yet idle for OWNER_IDLE_MINUTES is
+   * reported once per dispatch, with how to look and how to recover.
+   */
+  private async noticeIdleOwner(goalId: string, ref: RuntimeRef): Promise<string[]> {
+    if (!this.runtime.inspect) return [];
+    let idleMinutes: number | undefined;
+    try { idleMinutes = (await this.runtime.inspect(ref)).idleMinutes; } catch { return []; }
+    if (idleMinutes === undefined || idleMinutes < OWNER_IDLE_MINUTES) return [];
+    const noticed = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string; dispatchId?: string }).kind === 'owner-idle' && (item.data as { dispatchId?: string }).dispatchId === ref.dispatchId);
+    if (noticed) return [];
+    this.record(goalId, 'human-notified', { kind: 'owner-idle', goalId, dispatchId: ref.dispatchId, idleMinutes: Math.round(idleMinutes), note: `owner has been idle for ${Math.round(idleMinutes)} min without reporting worker_done; it may have died (wrong model, auth, crash). Check the terminal in Orca or \`orca orchestration worker-show --dispatch ${ref.dispatchId}\`, then \`apos execution abandon-intent\` or \`apos outcome stop\`.` });
+    return [`owner ${ref.dispatchId} idle ${Math.round(idleMinutes)} min; Human notified`];
+  }
+
   async step(goalId: string, repoPath: string): Promise<string[]> {
     const actions: string[] = [];
     const state = this.store.getGoal(goalId);
@@ -62,6 +81,7 @@ export class SoloSupervisor {
       const noticed = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'overrun');
       if (overTime && !noticed) { this.record(goalId, 'human-notified', { kind: 'overrun', goalId, note: 'owner still running past the approved wall time' }); actions.push('notified overrun'); }
       const since = [...this.store.events(goalId)].reverse().find(item => ['execution-started', 'runtime-resumed'].includes(item.type));
+      actions.push(...await this.noticeIdleOwner(goalId, ref));
       actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at }));
       return actions;
     }

@@ -243,7 +243,7 @@ it('serves a gate log from the Goal artifact folder, and refuses one whose store
   expect(detail.gates[0].checks[0].logs.map((log: { role: string }) => log.role)).toEqual(['base', 'delivery']);
 });
 
-it('leaves out notices that are history or repeat the status, while apos inbox still lists them', async () => {
+it('leaves out notices that are history or repeat the status, in the UI and in apos inbox alike', async () => {
   const p = await project();
   const closed = p.goal('GOAL-X'); closed.draft(); closed.add('goal-approved', approval); closed.add('goal-selected');
   closed.add('proposal-drafted', { ...proposal, goalId: 'GOAL-X' }); closed.add('proposal-approved');
@@ -264,8 +264,8 @@ it('leaves out notices that are history or repeat the status, while apos inbox s
   expect(repo.getGoal('GOAL-Z')?.status).toBe('closed');
   // X is verified: its status item stays once, its idle notice stays, the repeated awaiting-outcome notice goes. Z is closed: nothing.
   expect(buildSnapshot(repo).inbox.map(item => `${item.goalId}:${item.kind}`)).toEqual(['GOAL-X:awaiting-outcome', 'GOAL-X:notice', 'GOAL-Y:notice']);
-  expect(buildInbox(repo).filter(item => item.goalId === 'GOAL-X')).toHaveLength(3); // CLI: status item plus both notices
-  expect(buildInbox(repo).filter(item => item.goalId === 'GOAL-Z')).toHaveLength(1); // CLI still lists the closed Goal's notice
+  expect(buildInbox(repo).filter(item => item.goalId === 'GOAL-X')).toHaveLength(2); // CLI: status item plus the idle notice
+  expect(buildInbox(repo).filter(item => item.goalId === 'GOAL-Z')).toHaveLength(0); // CLI: the closed Goal's notice is history
 });
 
 it('tells the story of a Goal: what the Human gave, what the Lead decided, and what each owner put on record', async () => {

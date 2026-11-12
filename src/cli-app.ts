@@ -169,7 +169,8 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     .option('--worktree <selector>', 'worktree selector of the Lead terminal')
     .action(async (id: string, flags: { terminal?: string; worktree?: string }) => withJournalAsync(async journal => {
       const state = journal.getGoal(id);
-      if (!state?.proposal) throw new Error('Current proposal required');
+      if (!state) throw new Error(`Goal does not exist: ${id}`);
+      if (!state.proposal) throw new Error(`Current proposal required: ${id} has no proposal yet (run apos lead propose --file <execution.json> first)`);
       assertMultiWpPlannable(state.proposal);
       journal.append(event(id, 'proposal-approved', { by: 'controller', proposalVersion: state.proposal.version }));
       if (state.proposal.mode === 'multi-wp') {

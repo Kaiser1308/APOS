@@ -86,28 +86,13 @@ function gateItems(repo: ReadOnlyJournal): UiInboxItem[] {
   return items;
 }
 
-/**
- * `apos inbox` keeps every notice ever recorded. For the UI a notice about a Goal that is closed or stopped is
- * history, and the supervisor's `awaiting-outcome` notice repeats what the verified status already says.
- */
-function relevant(repo: ReadOnlyJournal, items: InboxItem[]): InboxItem[] {
-  return items.filter(item => {
-    if (item.kind !== 'notice') return true;
-    const status = repo.getGoal(item.goalId)?.status;
-    if (status === 'closed' || status === 'stopped') return false;
-    let kind: unknown;
-    try { kind = (JSON.parse(item.detail) as { kind?: unknown } | null)?.kind; } catch { kind = undefined; }
-    return !(kind === 'awaiting-outcome' && status === 'verified');
-  });
-}
-
 export function buildSnapshot(repo: ReadOnlyJournal, now: () => Date = () => new Date()): Snapshot {
   const goals: GoalRow[] = repo.goalIds().map(id => {
     const state = repo.getGoal(id);
     return state ? row(repo, state, now()) : { id, packages: { verified: 0, total: 0 }, attempts: 0, elapsedMinutes: 0, usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, unknownDispatches: 0, wallMs: 0 }, integrityError: repo.failures.get(id) };
   });
   const lastEventAt = goals.map(item => item.lastEventAt).filter((item): item is string => Boolean(item)).sort().at(-1);
-  const inbox: UiInboxItem[] = [...gateItems(repo), ...relevant(repo, buildInbox(repo))];
+  const inbox: UiInboxItem[] = [...gateItems(repo), ...buildInbox(repo)];
   return { readAt: now().toISOString(), lastEventAt, tickRunning: tickRunning(repo.home), inbox, goals };
 }
 

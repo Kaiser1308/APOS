@@ -239,3 +239,26 @@ it('reads the Orca 1.4.254 shapes: run-create answers runId, a start receipt nam
   const ref = await runtime.startSolo({ repoPath: 'C:/project', goalId: 'GOAL-001', proposalVersion: 1, idempotencyKey: 'key-1' });
   expect(ref).toMatchObject({ runId: 'run_1', terminal: 'term_1', worktreeId: 'wt::C:/w' });
 });
+
+import { idleMinutesFrom } from './orca.js';
+it('reads how long Orca says an agent has been idle', () => {
+  expect(idleMinutesFrom({ activity: 'idle', lastActivity: '10m ago' })).toBe(10);
+  expect(idleMinutesFrom({ activity: 'idle', lastActivity: '1h ago' })).toBe(60);
+  expect(idleMinutesFrom({ activity: 'working', lastActivity: '10m ago' })).toBeUndefined();
+  expect(idleMinutesFrom({ activity: 'idle', lastActivity: 'just now' })).toBeUndefined();
+  expect(idleMinutesFrom({ dispatch: { status: 'dispatched' } })).toBeUndefined();
+});
+
+it('asks the concise worker-show for the idle age because the full record has none', async () => {
+  const calls: string[][] = [];
+  const runtime = new OrcaRuntime(args => {
+    calls.push(args);
+    if (args.includes('--compact')) return { state: 'ready', liveness: 'live', activity: 'idle', lastActivity: '18m ago' };
+    return { dispatch: { status: 'dispatched' }, projection: { liveness: { verdict: 'live' }, stage: { activity: 'done' } } };
+  });
+  const observed = await runtime.inspect({ runId: 'run_1', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: 'C:/p' });
+  expect(observed).toMatchObject({ state: 'live', idleMinutes: 18 });
+  const settled = await new OrcaRuntime(args => { calls.push(args); return { dispatch: { status: 'completed' } }; }).inspect({ runId: 'run_1', taskId: 't', dispatchId: 'ctx_2', owner: 'lead', repoPath: 'C:/p' });
+  expect(settled.idleMinutes).toBeUndefined();
+  expect(calls.filter(args => args.includes('--compact')).map(args => args[3])).toEqual(['ctx_1']);
+});

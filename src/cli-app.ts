@@ -98,7 +98,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     const text = readFileSync(sourcePath, 'utf8');
     const digest = sourceDigest(text);
     const given = raw.source as { sha256?: string } | undefined;
-    if (given?.sha256 && given.sha256 !== digest) throw new Error('Goal source sha256 does not match --source file');
+    if (given?.sha256 && given.sha256 !== digest) throw new Error(`Goal source sha256 does not match --source file: expected ${digest} (APOS hashes the text with CRLF line endings turned into LF, so a hash of the raw file on Windows differs); or omit "source" from goal.json and APOS fills it in.`);
     const spec = parseGoalSpec({ ...raw, source: given ?? { path: sourcePath, sha256: digest, capturedAt: new Date().toISOString(), origin } });
     return { spec, text };
   };
@@ -141,7 +141,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(`Drafted ${spec.id}`);
   }));
   goal.command('list').action(() => withJournal(journal => {
-    for (const state of journal.listGoals()) write(`${state.spec.id}\t${state.status}\t${state.spec.outcome}`);
+    const goals = journal.listGoals();
+    if (!goals.length) write('No Goals yet. Draft one with `apos goal create --file goal.json --source brief.md`.');
+    for (const state of goals) write(`${state.spec.id}\t${state.status}\t${state.spec.outcome}`);
   }));
   // Gate A: the Human approves WHAT, together with the appetite only the controller will see.
   const appetiteOptions = <T extends Command>(command: T): T => command
@@ -162,6 +164,8 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   goal.command('select').argument('<id>').action((id: string) => withJournalAsync(async journal => {
     assertHuman(journal, 'goal select');
     new GoalRegistryService(journal).select(id); write(`Selected ${id}`);
+    const lead = describeProfiles(home()).lead;
+    write(`Lead runs on ${lead.agent}${lead.model ? ` model=${lead.model}` : ''}${lead.effort ? ` effort=${lead.effort}` : ''} (${lead.source}); change it first with \`apos profile set lead --agent <id> --model <id>\`, or move a running Lead with \`apos handoff ${id}\`.`);
     try { write(`Dispatched Lead ${id}: ${(await new LeadService(journal, runtime).start(id, repo())).dispatchId}`); }
     catch (error) { write(`Lead not dispatched for ${id}: ${error instanceof Error ? error.message : String(error)}. Retry with \`apos lead start ${id}\`.`); }
   }));
@@ -464,7 +468,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     }));
   }
   program.command('inbox').description('what needs the Human: notices, blocked Goals, verified Goals awaiting outcome').action(() => withJournal(journal => {
-    for (const item of buildInbox(journal)) write(`${item.goalId}\t${item.kind}\t${item.detail}`);
+    const items = buildInbox(journal);
+    if (!items.length) write('Inbox is clean: nothing waits for the Human.');
+    for (const item of items) write(`${item.goalId}\t${item.kind}\t${item.detail}`);
   }));
   program.command('ui').description('read-only web view of this project on 127.0.0.1; it never writes controller state').option('--port <n>', 'port to listen on', String(DEFAULT_UI_PORT)).action(async ({ port }: { port: string }) => {
     if (!existsSync(join(repo(), '.apos', 'project.yaml'))) throw new Error('Run apos init first');

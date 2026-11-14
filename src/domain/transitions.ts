@@ -385,5 +385,9 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, status: 'draft', selected: false, approvedGoalVersion: undefined, proposal: undefined, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined, gate: undefined, manualConfirmations: [], mergeAuthorization: undefined, postMergeGate: undefined, findings: [] };
     case 'outcome-stopped':
       return { ...state, status: 'stopped' };
+    default:
+      // An event type this version does not know (written by a newer APOS) leaves the state as it was,
+      // so a rollback can still replay the log instead of losing every Goal after it.
+      return state;
   }
 }

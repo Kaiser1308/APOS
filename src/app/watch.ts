@@ -10,17 +10,38 @@ export const QUOTA_CHECK_IDLE_MINUTES = 2;
 export const OWNER_IDLE_MINUTES = 15;
 
 /** The agent a dispatch runs: the profile APOS asked for, else what Orca says it launched; undefined when neither says. */
-export async function dispatchAgent(runtime: RuntimeAdapter, dispatchId: string, requested?: { agent?: string }): Promise<string | undefined> {
+export async function dispatchAgent(
+  runtime: RuntimeAdapter,
+  dispatchId: string,
+  requested?: { agent?: string },
+): Promise<string | undefined> {
   if (requested?.agent) return requested.agent;
-  try { return (await runtime.launchReceipt?.(dispatchId))?.agent ?? undefined; } catch { return undefined; }
+  try {
+    return (await runtime.launchReceipt?.(dispatchId))?.agent ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Reads the screen of a quiet dispatch for its agent's out-of-quota line; undefined when it is not quiet enough or nothing matches. */
-export async function exhaustedAgent(runtime: RuntimeAdapter, input: { dispatchId: string; terminal?: string; requested?: { agent?: string }; idleMinutes?: number }): Promise<{ agent?: string; message: string } | undefined> {
-  if (!runtime.agentQuota || !input.terminal || input.idleMinutes === undefined || input.idleMinutes < QUOTA_CHECK_IDLE_MINUTES) return undefined;
+export async function exhaustedAgent(
+  runtime: RuntimeAdapter,
+  input: { dispatchId: string; terminal?: string; requested?: { agent?: string }; idleMinutes?: number },
+): Promise<{ agent?: string; message: string } | undefined> {
+  if (
+    !runtime.agentQuota ||
+    !input.terminal ||
+    input.idleMinutes === undefined ||
+    input.idleMinutes < QUOTA_CHECK_IDLE_MINUTES
+  )
+    return undefined;
   const agent = await dispatchAgent(runtime, input.dispatchId, input.requested);
   let message: string | undefined;
-  try { message = await runtime.agentQuota(input.terminal, agent); } catch { return undefined; }
+  try {
+    message = await runtime.agentQuota(input.terminal, agent);
+  } catch {
+    return undefined;
+  }
   return message ? { agent, message } : undefined;
 }
 
@@ -34,29 +55,87 @@ export const exhaustedNote = (role: Role, agent: string | undefined, message: st
  */
 export function quotaEscalation(message: { type?: string; subject?: string; body?: string }): string | undefined {
   // Orca's own shape only: agents send their own escalations too, and may well talk about rate limits.
-  if (message.type !== 'escalation' || !/^Agent hit an error: .*\b(usage limit|quota)\b/i.test(message.subject ?? '')) return undefined;
+  if (message.type !== 'escalation' || !/^Agent hit an error: .*\b(usage limit|quota)\b/i.test(message.subject ?? ''))
+    return undefined;
   const details = /Details from the agent:\s*(.+)/.exec(message.body ?? '')?.[1]?.trim();
   return details || (message.subject ?? '').replace(/^Agent hit an error:\s*/, '').trim();
 }
 
 /** The owner a dispatch belongs to in this Goal, and the handoff that moves it; undefined when it is none of them. */
-export function ownerOf(state: GoalState, dispatchId: string): { role: Role; requested?: { agent?: string; model?: string }; packageId?: string; handoffHint: string } | undefined {
+export function ownerOf(
+  state: GoalState,
+  dispatchId: string,
+): { role: Role; requested?: { agent?: string; model?: string }; packageId?: string; handoffHint: string } | undefined {
   const goalId = state.spec.id;
-  const runtimeRef = state.runtimeRef as { dispatchId?: string; requested?: { agent?: string; model?: string } } | undefined;
-  if (runtimeRef?.dispatchId === dispatchId || state.lead?.current === dispatchId) return { role: 'lead', requested: (runtimeRef?.dispatchId === dispatchId ? runtimeRef.requested : state.lead?.ref.requested) as { agent?: string; model?: string } | undefined, handoffHint: `apos handoff ${goalId} --agent <other>` };
+  const runtimeRef = state.runtimeRef as
+    { dispatchId?: string; requested?: { agent?: string; model?: string } } | undefined;
+  if (runtimeRef?.dispatchId === dispatchId || state.lead?.current === dispatchId)
+    return {
+      role: 'lead',
+      requested: (runtimeRef?.dispatchId === dispatchId ? runtimeRef.requested : state.lead?.ref.requested) as
+        { agent?: string; model?: string } | undefined,
+      handoffHint: `apos handoff ${goalId} --agent <other>`,
+    };
   for (const item of Object.values(state.packages ?? {})) {
     const ref = item.runtimeRef as { dispatchId?: string; requested?: { agent?: string; model?: string } } | undefined;
-    if (ref?.dispatchId === dispatchId) return { role: 'worker', requested: ref.requested, packageId: item.spec.id, handoffHint: `apos handoff ${goalId} --package ${item.spec.id} --agent <other>` };
+    if (ref?.dispatchId === dispatchId)
+      return {
+        role: 'worker',
+        requested: ref.requested,
+        packageId: item.spec.id,
+        handoffHint: `apos handoff ${goalId} --package ${item.spec.id} --agent <other>`,
+      };
   }
-  if (state.reviewDispatch?.dispatchId === dispatchId) return { role: 'reviewer', requested: state.reviewDispatch.requested, handoffHint: `apos handoff ${goalId} --reviewer --agent <other>` };
+  if (state.reviewDispatch?.dispatchId === dispatchId)
+    return {
+      role: 'reviewer',
+      requested: state.reviewDispatch.requested,
+      handoffHint: `apos handoff ${goalId} --reviewer --agent <other>`,
+    };
   return undefined;
 }
 
 /** Records one agent-exhausted notice per dispatch; false when it was already recorded. */
-export function recordExhausted(store: GoalRepository, now: () => number, input: { goalId: string; dispatchId: string; role: Role; agent?: string; model?: string; packageId?: string; message: string; handoffHint: string }): boolean {
-  const seen = store.events(input.goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'agent-exhausted' && (item.data as { dispatchId?: string }).dispatchId === input.dispatchId);
+export function recordExhausted(
+  store: GoalRepository,
+  now: () => number,
+  input: {
+    goalId: string;
+    dispatchId: string;
+    role: Role;
+    agent?: string;
+    model?: string;
+    packageId?: string;
+    message: string;
+    handoffHint: string;
+  },
+): boolean {
+  const seen = store
+    .events(input.goalId)
+    .some(
+      item =>
+        item.type === 'human-notified' &&
+        (item.data as { kind?: string }).kind === 'agent-exhausted' &&
+        (item.data as { dispatchId?: string }).dispatchId === input.dispatchId,
+    );
   if (seen) return false;
-  store.append({ id: randomUUID(), goalId: input.goalId, type: 'human-notified', data: { kind: 'agent-exhausted', goalId: input.goalId, dispatchId: input.dispatchId, role: input.role, ...(input.packageId ? { packageId: input.packageId } : {}), agent: input.agent, model: input.model, message: input.message, note: exhaustedNote(input.role, input.agent, input.message, input.handoffHint) }, at: new Date(now()).toISOString() });
+  store.append({
+    id: randomUUID(),
+    goalId: input.goalId,
+    type: 'human-notified',
+    data: {
+      kind: 'agent-exhausted',
+      goalId: input.goalId,
+      dispatchId: input.dispatchId,
+      role: input.role,
+      ...(input.packageId ? { packageId: input.packageId } : {}),
+      agent: input.agent,
+      model: input.model,
+      message: input.message,
+      note: exhaustedNote(input.role, input.agent, input.message, input.handoffHint),
+    },
+    at: new Date(now()).toISOString(),
+  });
   return true;
 }
 
@@ -64,27 +143,89 @@ export function recordExhausted(store: GoalRepository, now: () => number, input:
  * One controller pass over a running, unsettled dispatch: an out-of-quota line on its screen is reported once, naming
  * the agent and the handoff; otherwise a dispatch idle for `idleNoticeMinutes` is reported once as owner-idle.
  */
-export async function watchDispatch(store: GoalRepository, runtime: RuntimeAdapter, now: () => number, input: {
-  goalId: string; dispatchId: string; runId: string; repoPath: string; terminal?: string;
-  role: Role; requested?: RuntimeProfile | { agent?: string; model?: string }; packageId?: string;
-  /** Default OWNER_IDLE_MINUTES; null leaves idle reporting to the caller. */
-  idleNoticeMinutes?: number | null;
-  handoffHint: string;
-}): Promise<string[]> {
+export async function watchDispatch(
+  store: GoalRepository,
+  runtime: RuntimeAdapter,
+  now: () => number,
+  input: {
+    goalId: string;
+    dispatchId: string;
+    runId: string;
+    repoPath: string;
+    terminal?: string;
+    role: Role;
+    requested?: RuntimeProfile | { agent?: string; model?: string };
+    packageId?: string;
+    /** Default OWNER_IDLE_MINUTES; null leaves idle reporting to the caller. */
+    idleNoticeMinutes?: number | null;
+    handoffHint: string;
+  },
+): Promise<string[]> {
   let idleMinutes: number | undefined;
-  try { idleMinutes = (await runtime.inspect({ runId: input.runId, taskId: '', dispatchId: input.dispatchId, owner: 'lead', repoPath: input.repoPath })).idleMinutes; } catch { return []; }
+  try {
+    idleMinutes = (
+      await runtime.inspect({
+        runId: input.runId,
+        taskId: '',
+        dispatchId: input.dispatchId,
+        owner: 'lead',
+        repoPath: input.repoPath,
+      })
+    ).idleMinutes;
+  } catch {
+    return [];
+  }
   if (idleMinutes === undefined) return [];
-  const seen = (kind: string) => store.events(input.goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === kind && (item.data as { dispatchId?: string }).dispatchId === input.dispatchId);
-  const record = (data: Record<string, unknown>) => store.append({ id: randomUUID(), goalId: input.goalId, type: 'human-notified', data: { goalId: input.goalId, dispatchId: input.dispatchId, role: input.role, ...(input.packageId ? { packageId: input.packageId } : {}), ...data }, at: new Date(now()).toISOString() });
+  const seen = (kind: string) =>
+    store
+      .events(input.goalId)
+      .some(
+        item =>
+          item.type === 'human-notified' &&
+          (item.data as { kind?: string }).kind === kind &&
+          (item.data as { dispatchId?: string }).dispatchId === input.dispatchId,
+      );
+  const record = (data: Record<string, unknown>) =>
+    store.append({
+      id: randomUUID(),
+      goalId: input.goalId,
+      type: 'human-notified',
+      data: {
+        goalId: input.goalId,
+        dispatchId: input.dispatchId,
+        role: input.role,
+        ...(input.packageId ? { packageId: input.packageId } : {}),
+        ...data,
+      },
+      at: new Date(now()).toISOString(),
+    });
   if (seen('agent-exhausted')) return [];
-  const exhausted = await exhaustedAgent(runtime, { dispatchId: input.dispatchId, terminal: input.terminal, requested: input.requested, idleMinutes });
+  const exhausted = await exhaustedAgent(runtime, {
+    dispatchId: input.dispatchId,
+    terminal: input.terminal,
+    requested: input.requested,
+    idleMinutes,
+  });
   if (exhausted) {
-    recordExhausted(store, now, { goalId: input.goalId, dispatchId: input.dispatchId, role: input.role, agent: exhausted.agent, model: input.requested?.model, packageId: input.packageId, message: exhausted.message, handoffHint: input.handoffHint });
+    recordExhausted(store, now, {
+      goalId: input.goalId,
+      dispatchId: input.dispatchId,
+      role: input.role,
+      agent: exhausted.agent,
+      model: input.requested?.model,
+      packageId: input.packageId,
+      message: exhausted.message,
+      handoffHint: input.handoffHint,
+    });
     return [`${input.role} ${input.dispatchId} out of quota (${exhausted.agent ?? 'unknown agent'}); Human notified`];
   }
   const threshold = input.idleNoticeMinutes === undefined ? OWNER_IDLE_MINUTES : input.idleNoticeMinutes;
   if (threshold === null || idleMinutes < threshold || seen('owner-idle')) return [];
   const minutes = Math.round(idleMinutes);
-  record({ kind: 'owner-idle', idleMinutes: minutes, note: `the ${input.role}${input.packageId ? ` of ${input.packageId}` : ''} has been idle for ${minutes} min without reporting worker_done; it may have died (wrong model, auth, crash, quota). Check the terminal in Orca or \`orca orchestration worker-show --dispatch ${input.dispatchId}\`, then \`${input.handoffHint}\`, \`apos execution abandon-intent\` or \`apos outcome stop\`.` });
+  record({
+    kind: 'owner-idle',
+    idleMinutes: minutes,
+    note: `the ${input.role}${input.packageId ? ` of ${input.packageId}` : ''} has been idle for ${minutes} min without reporting worker_done; it may have died (wrong model, auth, crash, quota). Check the terminal in Orca or \`orca orchestration worker-show --dispatch ${input.dispatchId}\`, then \`${input.handoffHint}\`, \`apos execution abandon-intent\` or \`apos outcome stop\`.`,
+  });
   return [`${input.role} ${input.dispatchId} idle ${minutes} min; Human notified`];
 }

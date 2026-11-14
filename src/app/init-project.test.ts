@@ -6,9 +6,12 @@ import { execFileSync } from 'node:child_process';
 import { initProject } from './init-project.js';
 
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+});
 it('initializes a managed Git project twice without losing the first state', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-init-')); dirs.push(dir);
+  const dir = mkdtempSync(join(tmpdir(), 'apos-init-'));
+  dirs.push(dir);
   execFileSync('git', ['init', '-q', dir]);
   await initProject(dir);
   await initProject(dir);
@@ -43,13 +46,16 @@ it('refuses skills that are missing or written for another APOS contract', async
 
 it('installs the role skills where Codex and Antigravity read them too, without overwriting a local copy', async () => {
   const { readFileSync, mkdirSync, writeFileSync } = await import('node:fs');
-  const dir = mkdtempSync(join(tmpdir(), 'apos-init-agents-')); dirs.push(dir);
+  const dir = mkdtempSync(join(tmpdir(), 'apos-init-agents-'));
+  dirs.push(dir);
   execFileSync('git', ['init', '-q', dir]);
   mkdirSync(join(dir, '.agents', 'skills', 'apos-lead'), { recursive: true });
   writeFileSync(join(dir, '.agents', 'skills', 'apos-lead', 'SKILL.md'), 'my own lead skill');
   await initProject(dir);
   for (const role of ['pm', 'worker', 'reviewer']) {
-    expect(readFileSync(join(dir, '.agents', 'skills', `apos-${role}`, 'SKILL.md'), 'utf8')).toBe(readFileSync(join(dir, '.claude', 'skills', `apos-${role}`, 'SKILL.md'), 'utf8'));
+    expect(readFileSync(join(dir, '.agents', 'skills', `apos-${role}`, 'SKILL.md'), 'utf8')).toBe(
+      readFileSync(join(dir, '.claude', 'skills', `apos-${role}`, 'SKILL.md'), 'utf8'),
+    );
   }
   expect(readFileSync(join(dir, '.agents', 'skills', 'apos-lead', 'SKILL.md'), 'utf8')).toBe('my own lead skill');
   const committed = execFileSync('git', ['-C', dir, 'ls-tree', '-r', '--name-only', 'HEAD'], { encoding: 'utf8' });

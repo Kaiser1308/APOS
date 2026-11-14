@@ -18,7 +18,10 @@ const codex: ScreenRules = {
   working: lines => lines.some(line => /esc to interrupt|^\s*[•◦]\s*Working\b/.test(line)),
   unsentBrief(lines) {
     if (codex.working(lines)) return false;
-    const prompt = lines.map((line, index) => ({ line, index })).filter(item => /^\s*›/.test(item.line)).at(-1);
+    const prompt = lines
+      .map((line, index) => ({ line, index }))
+      .filter(item => /^\s*›/.test(item.line))
+      .at(-1);
     if (!prompt) return false;
     const composer = lines.slice(prompt.index, prompt.index + 4).join(' ');
     return composer.includes('[Pasted Content') || prompt.line.replace(/^\s*›\s*/, '').length > 120;
@@ -26,10 +29,14 @@ const codex: ScreenRules = {
   // Message text is real (Codex rollout error.message); its `■` placement on screen is unverified. Only an unindented
   // line with nothing after it but the prompt and its status lines counts: text the agent printed or an old notice does not.
   quota(lines) {
-    const index = lines.map((line, at) => ({ line, at })).filter(item => /^■? ?You[’']ve hit your usage limit\b/.test(item.line)).at(-1)?.at;
-    if (index === undefined || lines.slice(index + 1).some(line => line.trim() && !/^\s*›|^\s{2,}\S/.test(line))) return undefined;
+    const index = lines
+      .map((line, at) => ({ line, at }))
+      .filter(item => /^■? ?You[’']ve hit your usage limit\b/.test(item.line))
+      .at(-1)?.at;
+    if (index === undefined || lines.slice(index + 1).some(line => line.trim() && !/^\s*›|^\s{2,}\S/.test(line)))
+      return undefined;
     return lines[index].replace(/^■? ?/, '').trim();
-  }
+  },
 };
 
 /** Orca opens Claude as a structured chat: the tail is a transcript and Orca delivers the brief itself. */
@@ -39,8 +46,10 @@ const claude: ScreenRules = {
   // Only the transcript's last line: an old notice the session has moved past, or a quoted one, does not count.
   quota(lines) {
     const last = lastLine(lines);
-    return /^(\[assistant\] )?[⎿●•■]? ?You[’']ve hit your (weekly|5-hour|usage|session) limit\b/.test(last) ? last.replace(/^(\[assistant\] )?[⎿●•■]? ?/, '').trim() : undefined;
-  }
+    return /^(\[assistant\] )?[⎿●•■]? ?You[’']ve hit your (weekly|5-hour|usage|session) limit\b/.test(last)
+      ? last.replace(/^(\[assistant\] )?[⎿●•■]? ?/, '').trim()
+      : undefined;
+  },
 };
 
 /** Antigravity CLI: a `>` input box between two rules, `esc to cancel` and a spinner while it works. */
@@ -55,7 +64,7 @@ const antigravity: ScreenRules = {
     return box.join(' ').replace(/^>\s*/, '').trim().length > 120;
   },
   // No real quota sample yet: unverified, so nothing is claimed and owner-idle covers it.
-  quota: () => undefined
+  quota: () => undefined,
 };
 
 export const SCREENS: Record<AgentId, ScreenRules> = { codex, claude, antigravity };
@@ -73,6 +82,9 @@ export function unsentBrief(agent: string | undefined, lines: string[]): boolean
 export function quotaMessage(agent: string | undefined, lines: string[]): string | undefined {
   const rules = rulesFor(agent);
   if (rules.some(item => item.working(lines))) return undefined;
-  for (const item of rules) { const found = item.quota(lines); if (found) return found; }
+  for (const item of rules) {
+    const found = item.quota(lines);
+    if (found) return found;
+  }
   return undefined;
 }

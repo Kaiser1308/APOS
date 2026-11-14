@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "skills:check": "node scripts/promote-skills.mjs --check",
-    "skills:promote": "node scripts/promote-skills.mjs"
+    "skills:promote": "node scripts/promote-skills.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "commander": "14.0.2",
@@ -19,6 +21,7 @@
   },
   "devDependencies": {
     "@types/node": "24.9.1",
+    "prettier": "3.9.10",
     "typescript": "5.9.3",
     "vitest": "4.1.12"
   }

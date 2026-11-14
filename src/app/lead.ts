@@ -12,39 +12,76 @@ export const LEAD_IDLE_MINUTES = 20;
 
 /** The Lead's latest dispatch as a runtime reference: the Solo owner, and the target of resumes and wakes. */
 export function currentLeadRef(lead: LeadState): RuntimeRef {
-  return { ...lead.ref, dispatchId: lead.current, owner: 'lead', requested: lead.ref.requested as RuntimeRef['requested'] };
+  return {
+    ...lead.ref,
+    dispatchId: lead.current,
+    owner: 'lead',
+    requested: lead.ref.requested as RuntimeRef['requested'],
+  };
 }
 
 /** When the Goal's appetite clock started: the Lead's dispatch intent, else (older Goals) the Solo start. */
 export function clockStart(events: { type: GoalEventType; at: string }[]): string | undefined {
-  return (events.find(item => item.type === 'lead-dispatch-intended') ?? events.find(item => item.type === 'execution-started'))?.at;
+  return (
+    events.find(item => item.type === 'lead-dispatch-intended') ??
+    events.find(item => item.type === 'execution-started')
+  )?.at;
 }
 
 /**
  * `lead propose` and `lead commit` belong to the Lead APOS dispatched for this Goal, from its own terminal. Otherwise
  * the Solo owner the controller adopts would not be the session that planned (the defect this replaces).
  */
-export function assertLeadTerminal(state: GoalState, handle: string | undefined, command: string, cwd: string = process.cwd()): LeadState {
+export function assertLeadTerminal(
+  state: GoalState,
+  handle: string | undefined,
+  command: string,
+  cwd: string = process.cwd(),
+): LeadState {
   const lead = state.lead;
-  if (!lead) throw new Error(`${command}: no APOS-dispatched Lead for ${state.spec.id}. The Human runs \`apos lead start ${state.spec.id}\` (or \`goal select\`), and the Lead it starts runs this command.`);
+  if (!lead)
+    throw new Error(
+      `${command}: no APOS-dispatched Lead for ${state.spec.id}. The Human runs \`apos lead start ${state.spec.id}\` (or \`goal select\`), and the Lead it starts runs this command.`,
+    );
   // Two signals, either enough: Orca's terminal handle, or running inside the Lead's own worktree (the handle format an
   // agent sees in ORCA_TERMINAL_HANDLE is not yet confirmed live against the start receipt).
   const tree = worktreePath(lead.ref.worktreeId);
   const here = resolve(cwd).toLowerCase();
-  const inTree = Boolean(tree) && (here === resolve(tree!).toLowerCase() || here.startsWith(`${resolve(tree!).toLowerCase()}${sep}`));
-  if (handle !== lead.ref.terminal && !inTree) throw new Error(`${command} must run from the Lead terminal APOS dispatched for ${state.spec.id} (${lead.ref.terminal}) or its worktree (${tree ?? 'unknown'}), not ${handle ? `terminal ${handle}` : 'a terminal outside Orca'} in ${cwd}`);
+  const inTree =
+    Boolean(tree) &&
+    (here === resolve(tree!).toLowerCase() || here.startsWith(`${resolve(tree!).toLowerCase()}${sep}`));
+  if (handle !== lead.ref.terminal && !inTree)
+    throw new Error(
+      `${command} must run from the Lead terminal APOS dispatched for ${state.spec.id} (${lead.ref.terminal}) or its worktree (${tree ?? 'unknown'}), not ${handle ? `terminal ${handle}` : 'a terminal outside Orca'} in ${cwd}`,
+    );
   return lead;
 }
 
 export class LeadService {
-  constructor(private readonly store: GoalRepository, private readonly runtime: RuntimeAdapter, private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly store: GoalRepository,
+    private readonly runtime: RuntimeAdapter,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   private record(goalId: string, type: GoalEventType, data?: unknown): void {
     this.store.append({ id: randomUUID(), goalId, type, data, at: new Date(this.now()).toISOString() });
   }
 
-  private notifyOnce(goalId: string, kind: string, match: (data: Record<string, unknown>) => boolean, data: Record<string, unknown>): boolean {
-    const seen = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === kind && match(item.data as Record<string, unknown>));
+  private notifyOnce(
+    goalId: string,
+    kind: string,
+    match: (data: Record<string, unknown>) => boolean,
+    data: Record<string, unknown>,
+  ): boolean {
+    const seen = this.store
+      .events(goalId)
+      .some(
+        item =>
+          item.type === 'human-notified' &&
+          (item.data as { kind?: string }).kind === kind &&
+          match(item.data as Record<string, unknown>),
+      );
     if (!seen) this.record(goalId, 'human-notified', { kind, goalId, ...data });
     return !seen;
   }
@@ -56,16 +93,29 @@ export class LeadService {
     if (state.lead && !state.lead.settled) return currentLeadRef(state.lead);
     if (state.leadIntent) {
       const recovered = await this.runtime.recover?.(state.leadIntent);
-      if (!recovered) throw new Error(`Lead dispatch outcome unknown for ${goalId}; check \`orca orchestration task-list\`, then \`apos execution abandon-intent ${goalId} --key ${state.leadIntent} --reason ...\` if Orca created nothing`);
+      if (!recovered)
+        throw new Error(
+          `Lead dispatch outcome unknown for ${goalId}; check \`orca orchestration task-list\`, then \`apos execution abandon-intent ${goalId} --key ${state.leadIntent} --reason ...\` if Orca created nothing`,
+        );
       this.record(goalId, 'lead-started', recovered);
       return recovered;
     }
     const key = randomUUID();
     this.record(goalId, 'lead-dispatch-intended', key);
     let ref: RuntimeRef;
-    try { ref = await this.runtime.startLead({ repoPath, goalId, goalVersion: state.spec.version, idempotencyKey: key, budget: state.appetite ? { minutesLeft: state.appetite.maxWallMinutes, attemptsLeft: Math.max(0, state.appetite.maxAttempts - 1) } : undefined }); }
-    catch (error) {
-      if (error instanceof OrcaRefused) this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
+    try {
+      ref = await this.runtime.startLead({
+        repoPath,
+        goalId,
+        goalVersion: state.spec.version,
+        idempotencyKey: key,
+        budget: state.appetite
+          ? { minutesLeft: state.appetite.maxWallMinutes, attemptsLeft: Math.max(0, state.appetite.maxAttempts - 1) }
+          : undefined,
+      });
+    } catch (error) {
+      if (error instanceof OrcaRefused)
+        this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
       throw error;
     }
     this.record(goalId, 'lead-started', ref);
@@ -79,25 +129,66 @@ export class LeadService {
     if (!state.lead.settled) {
       // A Lead waiting on an unanswered question is still "in its turn", yet it is waiting for the Human: reply on Orca.
       const events = this.store.events(goalId);
-      const answered = new Set(events.filter(item => item.type === 'decision-logged').map(item => (item.data as { answers?: string })?.answers));
+      const answered = new Set(
+        events
+          .filter(item => item.type === 'decision-logged')
+          .map(item => (item.data as { answers?: string })?.answers),
+      );
       // Only a question asked since the Lead's latest start or wake is still open; older ones were overtaken.
-      const since = events.map((item, index) => ['lead-started', 'lead-woken'].includes(item.type) ? index : -1).reduce((a, b) => Math.max(a, b), -1);
-      const question = [...events].slice(since + 1).reverse().find(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'lead-question' && !answered.has((item.data as { messageId?: string }).messageId));
+      const since = events
+        .map((item, index) => (['lead-started', 'lead-woken'].includes(item.type) ? index : -1))
+        .reduce((a, b) => Math.max(a, b), -1);
+      const question = [...events]
+        .slice(since + 1)
+        .reverse()
+        .find(
+          item =>
+            item.type === 'human-notified' &&
+            (item.data as { kind?: string }).kind === 'lead-question' &&
+            !answered.has((item.data as { messageId?: string }).messageId),
+        );
       const messageId = (question?.data as { messageId?: string } | undefined)?.messageId;
       if (messageId && this.runtime.replyMessage) {
         await this.runtime.replyMessage(state.lead.ref.runId, messageId, note);
-        this.record(goalId, 'decision-logged', { note: `human answered Lead question ${messageId}: ${note}`, answers: messageId });
+        this.record(goalId, 'decision-logged', {
+          note: `human answered Lead question ${messageId}: ${note}`,
+          answers: messageId,
+        });
         return state.lead.current;
       }
     }
     // The controller wakes the Lead itself once a plan is accepted; the Human has nothing to wake (and no APOS-side signal that it is "in its turn").
-    if (!['selected', 'planned', 'ready'].includes(state.status)) throw new Error(`${goalId} is ${state.status}: the controller wakes the Lead itself when there is work. If the Lead stopped responding, run \`apos handoff ${goalId}\` to start a fresh one.`);
-    if (!state.lead.settled) throw new Error(`The Lead of ${goalId} is still in its turn; wait for it to report worker_done`);
-    if (!['selected', 'planned', 'ready'].includes(state.status)) throw new Error(`${goalId} is ${state.status}: the controller resumes its owner itself`);
+    if (!['selected', 'planned', 'ready'].includes(state.status))
+      throw new Error(
+        `${goalId} is ${state.status}: the controller wakes the Lead itself when there is work. If the Lead stopped responding, run \`apos handoff ${goalId}\` to start a fresh one.`,
+      );
+    if (!state.lead.settled)
+      throw new Error(`The Lead of ${goalId} is still in its turn; wait for it to report worker_done`);
+    if (!['selected', 'planned', 'ready'].includes(state.status))
+      throw new Error(`${goalId} is ${state.status}: the controller resumes its owner itself`);
     if (!this.runtime.wakeLead) throw new Error('Configured runtime cannot wake the Lead');
     const event = `human (${new Date(this.now()).toISOString()}): ${note}`;
-    const woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: state.lead.ref.terminal, worktree: `id:${state.lead.ref.worktreeId}`, runId: state.lead.ref.runId, events: [event], idempotencyKey: randomUUID(), phase: 'plan', requested: state.lead.ref.requested as { agent?: string; model?: string } | undefined, baseCommit: state.lead.ref.baseCommit, goalVersion: state.spec.version });
-    this.record(goalId, 'lead-woken', { dispatchId: woken.dispatchId, events: [event], runId: state.lead.ref.runId, ...(woken.terminal ? { terminal: woken.terminal, worktree: `id:${state.lead.ref.worktreeId}`, requested: woken.requested } : {}) });
+    const woken = await this.runtime.wakeLead({
+      repoPath,
+      goalId,
+      terminal: state.lead.ref.terminal,
+      worktree: `id:${state.lead.ref.worktreeId}`,
+      runId: state.lead.ref.runId,
+      events: [event],
+      idempotencyKey: randomUUID(),
+      phase: 'plan',
+      requested: state.lead.ref.requested as { agent?: string; model?: string } | undefined,
+      baseCommit: state.lead.ref.baseCommit,
+      goalVersion: state.spec.version,
+    });
+    this.record(goalId, 'lead-woken', {
+      dispatchId: woken.dispatchId,
+      events: [event],
+      runId: state.lead.ref.runId,
+      ...(woken.terminal
+        ? { terminal: woken.terminal, worktree: `id:${state.lead.ref.worktreeId}`, requested: woken.requested }
+        : {}),
+    });
     return woken.dispatchId;
   }
 
@@ -109,11 +200,19 @@ export class LeadService {
     if (state.leadIntent) {
       const key = state.leadIntent;
       const recovered = await this.runtime.recover?.(key);
-      if (recovered) { this.record(goalId, 'lead-started', recovered); actions.push(`recovered Lead ${recovered.dispatchId}`); }
-      else {
+      if (recovered) {
+        this.record(goalId, 'lead-started', recovered);
+        actions.push(`recovered Lead ${recovered.dispatchId}`);
+      } else {
         const intent = [...this.store.events(goalId)].reverse().find(item => item.type === 'lead-dispatch-intended');
         if (intent && this.now() - Date.parse(intent.at) > LEAD_INTENT_MINUTES * 60_000) {
-          if (this.notifyOnce(goalId, 'needs-decision', data => data.key === key, { key, note: `Orca outcome for the Lead dispatch ${key} is unknown after ${LEAD_INTENT_MINUTES} min. Check \`orca orchestration task-list\`; if it created nothing, run \`apos execution abandon-intent ${goalId} --key ${key} --reason ...\` and then \`apos lead start ${goalId}\`.` })) actions.push('Lead dispatch unknown; Human notified');
+          if (
+            this.notifyOnce(goalId, 'needs-decision', data => data.key === key, {
+              key,
+              note: `Orca outcome for the Lead dispatch ${key} is unknown after ${LEAD_INTENT_MINUTES} min. Check \`orca orchestration task-list\`; if it created nothing, run \`apos execution abandon-intent ${goalId} --key ${key} --reason ...\` and then \`apos lead start ${goalId}\`.`,
+            })
+          )
+            actions.push('Lead dispatch unknown; Human notified');
         }
         return actions;
       }
@@ -128,21 +227,61 @@ export class LeadService {
       this.record(goalId, 'lead-settled', { dispatchId: lead.current, outcome: observation.outcome });
       // Orca keeps the terminal bound to a settled dispatch until it is retained; the wake needs it (seen live).
       await this.runtime.retainWorker?.(lead.current).catch(() => undefined);
-      this.notifyOnce(goalId, 'lead-needs-decision', data => data.dispatchId === lead.current, { dispatchId: lead.current, outcome: observation.outcome, note: `the Lead ended its turn (${observation.outcome}) before any plan was accepted. Read its report in the Lead terminal or \`apos ui\`, decide (for example \`apos goal appetite\`), then \`apos lead wake ${goalId} --note "..."\`.` });
+      this.notifyOnce(goalId, 'lead-needs-decision', data => data.dispatchId === lead.current, {
+        dispatchId: lead.current,
+        outcome: observation.outcome,
+        note: `the Lead ended its turn (${observation.outcome}) before any plan was accepted. Read its report in the Lead terminal or \`apos ui\`, decide (for example \`apos goal appetite\`), then \`apos lead wake ${goalId} --note "..."\`.`,
+      });
       actions.push(`Lead ${lead.current} settled ${observation.outcome} before a plan was accepted; Human notified`);
       return actions;
     }
-    const exhausted = await exhaustedAgent(this.runtime, { dispatchId: lead.current, terminal: lead.ref.terminal, requested: ref.requested, idleMinutes: observation.idleMinutes });
+    const exhausted = await exhaustedAgent(this.runtime, {
+      dispatchId: lead.current,
+      terminal: lead.ref.terminal,
+      requested: ref.requested,
+      idleMinutes: observation.idleMinutes,
+    });
     if (exhausted) {
-      if (this.notifyOnce(goalId, 'agent-exhausted', data => data.dispatchId === lead.current, { dispatchId: lead.current, role: 'lead', agent: exhausted.agent, model: ref.requested?.model, message: exhausted.message, note: exhaustedNote('lead', exhausted.agent, exhausted.message, `apos handoff ${goalId} --agent <other>`) })) actions.push(`lead ${lead.current} out of quota (${exhausted.agent ?? 'unknown agent'}); Human notified`);
-    } else if (this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string; dispatchId?: string }).kind === 'agent-exhausted' && (item.data as { dispatchId?: string }).dispatchId === lead.current)) {
+      if (
+        this.notifyOnce(goalId, 'agent-exhausted', data => data.dispatchId === lead.current, {
+          dispatchId: lead.current,
+          role: 'lead',
+          agent: exhausted.agent,
+          model: ref.requested?.model,
+          message: exhausted.message,
+          note: exhaustedNote('lead', exhausted.agent, exhausted.message, `apos handoff ${goalId} --agent <other>`),
+        })
+      )
+        actions.push(`lead ${lead.current} out of quota (${exhausted.agent ?? 'unknown agent'}); Human notified`);
+    } else if (
+      this.store
+        .events(goalId)
+        .some(
+          item =>
+            item.type === 'human-notified' &&
+            (item.data as { kind?: string; dispatchId?: string }).kind === 'agent-exhausted' &&
+            (item.data as { dispatchId?: string }).dispatchId === lead.current,
+        )
+    ) {
       // Already reported as out of quota: not reported again as idle.
     } else if (observation.idleMinutes !== undefined && observation.idleMinutes >= LEAD_IDLE_MINUTES) {
-      if (this.notifyOnce(goalId, 'lead-idle', data => data.dispatchId === lead.current, { dispatchId: lead.current, idleMinutes: Math.round(observation.idleMinutes), note: `the Lead has been idle for ${Math.round(observation.idleMinutes)} min without reporting worker_done; it may have died (wrong model, auth, crash). Check its terminal in Orca or \`orca orchestration worker-show --dispatch ${lead.current}\`.` })) actions.push(`Lead ${lead.current} idle; Human notified`);
+      if (
+        this.notifyOnce(goalId, 'lead-idle', data => data.dispatchId === lead.current, {
+          dispatchId: lead.current,
+          idleMinutes: Math.round(observation.idleMinutes),
+          note: `the Lead has been idle for ${Math.round(observation.idleMinutes)} min without reporting worker_done; it may have died (wrong model, auth, crash). Check its terminal in Orca or \`orca orchestration worker-show --dispatch ${lead.current}\`.`,
+        })
+      )
+        actions.push(`Lead ${lead.current} idle; Human notified`);
     }
     const started = clockStart(this.store.events(goalId));
     if (state.appetite && started && (this.now() - Date.parse(started)) / 60_000 > state.appetite.maxWallMinutes) {
-      if (this.notifyOnce(goalId, 'overrun', () => true, { note: 'the Lead is still planning past the approved wall time' })) actions.push('notified overrun');
+      if (
+        this.notifyOnce(goalId, 'overrun', () => true, {
+          note: 'the Lead is still planning past the approved wall time',
+        })
+      )
+        actions.push('notified overrun');
     }
     return actions;
   }

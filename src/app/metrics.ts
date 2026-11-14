@@ -22,12 +22,17 @@ export class MetricsService {
     const closed = [...events].reverse().find(item => item.type === 'outcome-accepted');
     const packages = Object.values(state.packages ?? {});
     return {
-      goalId, status: state.status, mode: state.proposal?.mode,
+      goalId,
+      status: state.status,
+      mode: state.proposal?.mode,
       packageCount: packages.length,
       attempts: (state.soloAttempts ?? 0) + packages.reduce((sum, item) => sum + item.attempts, 0),
-      blockers: events.filter(item => ['blocked', 'package-blocked', 'package-retry-exhausted'].includes(item.type)).length,
-      reviewChanges: events.filter(item => item.type === 'review-submitted' && (item.data as { result?: string })?.result === 'changes').length,
-      ...(created && closed ? { cycleTimeMs: Date.parse(closed.at) - Date.parse(created.at) } : {})
+      blockers: events.filter(item => ['blocked', 'package-blocked', 'package-retry-exhausted'].includes(item.type))
+        .length,
+      reviewChanges: events.filter(
+        item => item.type === 'review-submitted' && (item.data as { result?: string })?.result === 'changes',
+      ).length,
+      ...(created && closed ? { cycleTimeMs: Date.parse(closed.at) - Date.parse(created.at) } : {}),
     };
   }
 }

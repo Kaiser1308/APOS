@@ -3,7 +3,16 @@ import { afterEach, expect, it, vi } from 'vitest';
 // Seeding commits milestone documents to git, which is slow on a busy machine.
 vi.setConfig({ testTimeout: 60_000 });
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  mkdirSync,
+} from 'node:fs';
 import { request, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -31,16 +40,35 @@ afterEach(() => {
 const at = '2026-11-07T00:00:00.000Z';
 
 async function project() {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-ui-')); dirs.push(dir);
-  const home = mkdtempSync(join(tmpdir(), 'apos-ui-home-')); dirs.push(home);
+  const dir = mkdtempSync(join(tmpdir(), 'apos-ui-'));
+  dirs.push(dir);
+  const home = mkdtempSync(join(tmpdir(), 'apos-ui-home-'));
+  dirs.push(home);
   execFileSync('git', ['init', '-q', dir]);
   await initProject(dir);
   const opened = ProjectJournal.open(dir, home);
   let n = 0;
   const goal = (id: string) => ({
     spec: { ...spec, id },
-    add: (type: GoalEventType, data?: unknown) => opened.journal.append({ id: `EV-${++n}`, goalId: id, type, data, at: new Date(Date.parse(at) + n * 1000).toISOString() }),
-    draft: () => opened.journal.appendWithSource({ id: `EV-${++n}`, goalId: id, type: 'goal-drafted', data: { ...spec, id }, at: new Date(Date.parse(at) + n * 1000).toISOString() }, sourceText)
+    add: (type: GoalEventType, data?: unknown) =>
+      opened.journal.append({
+        id: `EV-${++n}`,
+        goalId: id,
+        type,
+        data,
+        at: new Date(Date.parse(at) + n * 1000).toISOString(),
+      }),
+    draft: () =>
+      opened.journal.appendWithSource(
+        {
+          id: `EV-${++n}`,
+          goalId: id,
+          type: 'goal-drafted',
+          data: { ...spec, id },
+          at: new Date(Date.parse(at) + n * 1000).toISOString(),
+        },
+        sourceText,
+      ),
   });
   return { dir, home, goal, ...opened };
 }
@@ -61,10 +89,14 @@ function hashTree(root: string): string {
 /** Two Goals in different states: GOAL-A awaits gate A, GOAL-B is blocked while executing. */
 async function seeded() {
   const p = await project();
-  const a = p.goal('GOAL-A'); a.draft();
-  const b = p.goal('GOAL-B'); b.draft();
-  b.add('goal-approved', approval); b.add('goal-selected');
-  b.add('proposal-drafted', { ...proposal, goalId: 'GOAL-B' }); b.add('proposal-approved');
+  const a = p.goal('GOAL-A');
+  a.draft();
+  const b = p.goal('GOAL-B');
+  b.draft();
+  b.add('goal-approved', approval);
+  b.add('goal-selected');
+  b.add('proposal-drafted', { ...proposal, goalId: 'GOAL-B' });
+  b.add('proposal-approved');
   b.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   b.add('blocked', { kind: 'technical', note: 'needs a decision <script>alert(1)</script>' });
   b.add('human-notified', { kind: 'idle', goalId: 'GOAL-B', note: 'quiet' });
@@ -73,7 +105,9 @@ async function seeded() {
 
 it('shows what apos inbox shows, and adds the Human gates A and B that the CLI inbox lacks', async () => {
   const p = await seeded();
-  const c = p.goal('GOAL-C'); c.draft(); c.add('goal-approved', approval);
+  const c = p.goal('GOAL-C');
+  c.draft();
+  c.add('goal-approved', approval);
   const lines: string[] = [];
   await runCli(['--repo', p.dir, 'inbox'], { home: p.home, write: line => lines.push(line) });
   const readOnly = new ReadOnlyJournal(p.home);
@@ -88,7 +122,18 @@ it('shows what apos inbox shows, and adds the Human gates A and B that the CLI i
 });
 
 it('groups every status under exactly one holder', () => {
-  const statuses: GoalStatus[] = ['draft', 'approved', 'selected', 'planned', 'ready', 'executing', 'blocked', 'verified', 'closed', 'stopped'];
+  const statuses: GoalStatus[] = [
+    'draft',
+    'approved',
+    'selected',
+    'planned',
+    'ready',
+    'executing',
+    'blocked',
+    'verified',
+    'closed',
+    'stopped',
+  ];
   expect(Object.keys(HOLDER).sort()).toEqual([...statuses].sort());
   expect(HOLDER.ready).toBe('controller');
   expect(HOLDER.verified).toBe('human');
@@ -102,7 +147,14 @@ it('never changes the controller home, even for a torn final line, and ignores t
   appendFileSync(file, '{"event":{"id":"EV-torn"'); // a write the controller has not finished
   const before = hashTree(p.home);
   const tornSize = statSync(file).size;
-  const urls = ['/', '/api/snapshot', '/api/goals/GOAL-A', '/api/goals/GOAL-B', '/api/goals/GOAL-B?limit=2', '/api/goals/GOAL-B/source/1'];
+  const urls = [
+    '/',
+    '/api/snapshot',
+    '/api/goals/GOAL-A',
+    '/api/goals/GOAL-B',
+    '/api/goals/GOAL-B?limit=2',
+    '/api/goals/GOAL-B/source/1',
+  ];
   for (let i = 0; i < 100; i++) for (const url of urls) route(p.home, new URL(url, 'http://localhost'));
   expect(hashTree(p.home)).toBe(before);
   expect(statSync(file).size).toBe(tornSize);
@@ -126,7 +178,8 @@ it('reports a broken hash chain on that Goal only', async () => {
 });
 
 it('serves detail with a paged timeline, newest first', async () => {
-  const p = await seeded(); p.close();
+  const p = await seeded();
+  p.close();
   const repo = new ReadOnlyJournal(p.home);
   const first = buildGoalDetail(repo, 'GOAL-B', { limit: 3 })!;
   expect(first.timeline.events.map(item => item.type)).toEqual(['human-notified', 'blocked', 'execution-started']);
@@ -138,7 +191,8 @@ it('serves detail with a paged timeline, newest first', async () => {
 });
 
 it('detects a running tick only from a lease held by a live process', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'apos-ui-lease-')); dirs.push(home);
+  const home = mkdtempSync(join(tmpdir(), 'apos-ui-lease-'));
+  dirs.push(home);
   expect(tickRunning(home)).toBe(false);
   writeFileSync(join(home, 'controller.lease'), JSON.stringify({ pid: process.pid, at }));
   expect(tickRunning(home)).toBe(true);
@@ -149,14 +203,22 @@ it('detects a running tick only from a lease held by a live process', async () =
 });
 
 it('finds a gate log only by the hash the controller recorded', () => {
-  const report = { checks: [{ base: [{ logSha256: 'a'.repeat(64), logRef: '/x/base.log' }], delivery: [{ logSha256: 'b'.repeat(64), logRef: '/x/delivery.log' }] }] };
+  const report = {
+    checks: [
+      {
+        base: [{ logSha256: 'a'.repeat(64), logRef: '/x/base.log' }],
+        delivery: [{ logSha256: 'b'.repeat(64), logRef: '/x/delivery.log' }],
+      },
+    ],
+  };
   const state = { gate: report, packages: {} } as never;
   expect(findGateLog(state, 'b'.repeat(64))).toBe('/x/delivery.log');
   expect(findGateLog(state, 'c'.repeat(64))).toBeUndefined();
 });
 
 it('serves gate logs from the Goal artifact folder and refuses anything else', async () => {
-  const p = await seeded(); p.close();
+  const p = await seeded();
+  p.close();
   expect(route(p.home, new URL(`/api/goals/GOAL-B/gate-log/${'a'.repeat(64)}`, 'http://localhost')).status).toBe(404);
   expect(route(p.home, new URL('/api/goals/GOAL-B/gate-log/..%2F..%2Fsecret', 'http://localhost')).status).toBe(400);
   expect(route(p.home, new URL('/api/goals/GOAL-B/source/..%2F1', 'http://localhost')).status).toBe(400);
@@ -166,25 +228,38 @@ it('serves gate logs from the Goal artifact folder and refuses anything else', a
   expect(route(p.home, new URL('/api/goals/GOAL-B/source/1', 'http://localhost')).status).toBe(200);
 });
 
-function call(port: number, method: string, path: string, headers: Record<string, string> = {}): Promise<{ status: number; body: string }> {
+function call(
+  port: number,
+  method: string,
+  path: string,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = request({ host: '127.0.0.1', port, method, path, headers }, res => {
-      let body = ''; res.on('data', chunk => { body += chunk; }); res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+      let body = '';
+      res.on('data', chunk => {
+        body += chunk;
+      });
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
     });
-    req.on('error', reject); req.end();
+    req.on('error', reject);
+    req.end();
   });
 }
 
 it('listens on loopback only, is read-only, and refuses foreign Host headers', async () => {
-  const p = await seeded(); p.close();
-  const server = await startUi(p.home, 0); servers.push(server);
+  const p = await seeded();
+  p.close();
+  const server = await startUi(p.home, 0);
+  servers.push(server);
   const { address, port } = server.address() as AddressInfo;
   expect(address).toBe('127.0.0.1');
   const page = await call(port, 'GET', '/');
   expect(page.status).toBe(200);
   expect(page.body).toContain('<title>APOS</title>');
   expect((await call(port, 'GET', '/api/snapshot')).status).toBe(200);
-  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) expect((await call(port, method, '/api/snapshot')).status).toBe(405);
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'])
+    expect((await call(port, method, '/api/snapshot')).status).toBe(405);
   expect((await call(port, 'GET', '/api/snapshot', { Host: 'evil.example' })).status).toBe(403);
   expect((await call(port, 'GET', '/api/snapshot', { Host: `evil.example:${port}` })).status).toBe(403);
   expect((await call(port, 'GET', '/api/snapshot', { Host: `localhost:${port}` })).status).toBe(200);
@@ -192,8 +267,10 @@ it('listens on loopback only, is read-only, and refuses foreign Host headers', a
 });
 
 it('refuses to start on a port that is taken', async () => {
-  const p = await seeded(); p.close();
-  const first = await startUi(p.home, 0); servers.push(first);
+  const p = await seeded();
+  p.close();
+  const first = await startUi(p.home, 0);
+  servers.push(first);
   const { port } = first.address() as AddressInfo;
   await expect(startUi(p.home, port)).rejects.toThrow(/already in use/);
 });
@@ -208,13 +285,18 @@ it('places agent-written text with textContent, never as markup', () => {
 
 it('measures wall time as the supervisor does: from the first owner start, to now while the Goal is on the clock', async () => {
   const p = await seeded();
-  const d = p.goal('GOAL-D'); d.draft(); d.add('goal-approved', approval); d.add('goal-selected');
-  d.add('proposal-drafted', { ...proposal, goalId: 'GOAL-D' }); d.add('proposal-approved');
+  const d = p.goal('GOAL-D');
+  d.draft();
+  d.add('goal-approved', approval);
+  d.add('goal-selected');
+  d.add('proposal-drafted', { ...proposal, goalId: 'GOAL-D' });
+  d.add('proposal-approved');
   d.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   p.close();
   const repo = new ReadOnlyJournal(p.home);
   const started = Date.parse(repo.events('GOAL-D').find(item => item.type === 'execution-started')!.at);
-  const goal = (minutes: number) => buildSnapshot(repo, () => new Date(started + minutes * 60_000)).goals.find(item => item.id === 'GOAL-D')!;
+  const goal = (minutes: number) =>
+    buildSnapshot(repo, () => new Date(started + minutes * 60_000)).goals.find(item => item.id === 'GOAL-D')!;
   expect(goal(90).elapsedMinutes).toBe(90);
   expect(goal(1).elapsedMinutes).toBe(1);
   expect(goal(90).attempts).toBe(1);
@@ -223,15 +305,40 @@ it('measures wall time as the supervisor does: from the first owner start, to no
 
 it('serves a gate log from the Goal artifact folder, and refuses one whose stored path points elsewhere', async () => {
   const p = await seeded();
-  const d = p.goal('GOAL-D'); d.draft(); d.add('goal-approved', approval); d.add('goal-selected');
-  d.add('proposal-drafted', { ...proposal, goalId: 'GOAL-D' }); d.add('proposal-approved');
+  const d = p.goal('GOAL-D');
+  d.draft();
+  d.add('goal-approved', approval);
+  d.add('goal-selected');
+  d.add('proposal-drafted', { ...proposal, goalId: 'GOAL-D' });
+  d.add('proposal-approved');
   d.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   const inside = join(p.home, 'artifacts', 'GOAL-D', 'GATE-test', 'CHK-1-delivery-1.log');
   const outside = join(p.home, 'secret.txt');
   mkdirSync(join(inside, '..'), { recursive: true });
-  writeFileSync(inside, 'delivery output'); writeFileSync(outside, 'not an artifact');
-  const run = (logRef: string, logSha256: string) => ({ commit: DELIVERY, exitCode: 0, timedOut: false, logRef, logSha256, failures: [] });
-  const report = { ...gateReport(DELIVERY, 'green', { ...spec, id: 'GOAL-D' }), attemptKey: attemptKey(p.journal.getGoal('GOAL-D')!), checks: [{ checkId: 'CHK-1', status: 'pass', reason: 'ok', base: [run(outside, 'b'.repeat(64))], delivery: [run(inside, 'a'.repeat(64))], newFailures: [] }] };
+  writeFileSync(inside, 'delivery output');
+  writeFileSync(outside, 'not an artifact');
+  const run = (logRef: string, logSha256: string) => ({
+    commit: DELIVERY,
+    exitCode: 0,
+    timedOut: false,
+    logRef,
+    logSha256,
+    failures: [],
+  });
+  const report = {
+    ...gateReport(DELIVERY, 'green', { ...spec, id: 'GOAL-D' }),
+    attemptKey: attemptKey(p.journal.getGoal('GOAL-D')!),
+    checks: [
+      {
+        checkId: 'CHK-1',
+        status: 'pass',
+        reason: 'ok',
+        base: [run(outside, 'b'.repeat(64))],
+        delivery: [run(inside, 'a'.repeat(64))],
+        newFailures: [],
+      },
+    ],
+  };
   d.add('gate-recorded', report);
   p.close();
   const ok = route(p.home, new URL(`/api/goals/GOAL-D/gate-log/${'a'.repeat(64)}`, 'http://localhost'));
@@ -245,33 +352,59 @@ it('serves a gate log from the Goal artifact folder, and refuses one whose store
 
 it('leaves out notices that are history or repeat the status, in the UI and in apos inbox alike', async () => {
   const p = await project();
-  const closed = p.goal('GOAL-X'); closed.draft(); closed.add('goal-approved', approval); closed.add('goal-selected');
-  closed.add('proposal-drafted', { ...proposal, goalId: 'GOAL-X' }); closed.add('proposal-approved');
+  const closed = p.goal('GOAL-X');
+  closed.draft();
+  closed.add('goal-approved', approval);
+  closed.add('goal-selected');
+  closed.add('proposal-drafted', { ...proposal, goalId: 'GOAL-X' });
+  closed.add('proposal-approved');
   closed.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   closed.add('human-notified', { kind: 'idle', goalId: 'GOAL-X', note: 'old' });
-  closed.add('verified'); closed.add('human-notified', { kind: 'awaiting-outcome', goalId: 'GOAL-X' });
-  const open = p.goal('GOAL-Y'); open.draft(); open.add('goal-approved', approval); open.add('goal-selected');
-  open.add('proposal-drafted', { ...proposal, goalId: 'GOAL-Y' }); open.add('proposal-approved');
+  closed.add('verified');
+  closed.add('human-notified', { kind: 'awaiting-outcome', goalId: 'GOAL-X' });
+  const open = p.goal('GOAL-Y');
+  open.draft();
+  open.add('goal-approved', approval);
+  open.add('goal-selected');
+  open.add('proposal-drafted', { ...proposal, goalId: 'GOAL-Y' });
+  open.add('proposal-approved');
   open.add('execution-started', { runId: 'run_2', taskId: 't', dispatchId: 'd2', owner: 'worker', repoPath: p.dir });
   open.add('human-notified', { kind: 'idle', goalId: 'GOAL-Y', note: 'still quiet' });
-  const done = p.goal('GOAL-Z'); done.draft(); done.add('goal-approved', approval); done.add('goal-selected');
-  done.add('proposal-drafted', { ...proposal, goalId: 'GOAL-Z' }); done.add('proposal-approved');
+  const done = p.goal('GOAL-Z');
+  done.draft();
+  done.add('goal-approved', approval);
+  done.add('goal-selected');
+  done.add('proposal-drafted', { ...proposal, goalId: 'GOAL-Z' });
+  done.add('proposal-approved');
   done.add('execution-started', { runId: 'run_3', taskId: 't', dispatchId: 'd3', owner: 'worker', repoPath: p.dir });
   done.add('human-notified', { kind: 'idle', goalId: 'GOAL-Z', note: 'ancient' });
-  done.add('verified'); done.add('outcome-accepted');
+  done.add('verified');
+  done.add('outcome-accepted');
   p.close();
   const repo = new ReadOnlyJournal(p.home);
   expect(repo.getGoal('GOAL-Z')?.status).toBe('closed');
   // X is verified: its status item stays once, its idle notice stays, the repeated awaiting-outcome notice goes. Z is closed: nothing.
-  expect(buildSnapshot(repo).inbox.map(item => `${item.goalId}:${item.kind}`)).toEqual(['GOAL-X:awaiting-outcome', 'GOAL-X:notice', 'GOAL-Y:notice']);
+  expect(buildSnapshot(repo).inbox.map(item => `${item.goalId}:${item.kind}`)).toEqual([
+    'GOAL-X:awaiting-outcome',
+    'GOAL-X:notice',
+    'GOAL-Y:notice',
+  ]);
   expect(buildInbox(repo).filter(item => item.goalId === 'GOAL-X')).toHaveLength(2); // CLI: status item plus the idle notice
   expect(buildInbox(repo).filter(item => item.goalId === 'GOAL-Z')).toHaveLength(0); // CLI: the closed Goal's notice is history
 });
 
 it('tells the story of a Goal: what the Human gave, what the Lead decided, and what each owner put on record', async () => {
   const p = await project();
-  const g = p.goal('GOAL-S'); g.draft(); g.add('goal-approved', approval); g.add('goal-selected');
-  g.add('proposal-drafted', { ...proposal, goalId: 'GOAL-S', approach: 'reuse the <b>API</b>', splitRationale: undefined });
+  const g = p.goal('GOAL-S');
+  g.draft();
+  g.add('goal-approved', approval);
+  g.add('goal-selected');
+  g.add('proposal-drafted', {
+    ...proposal,
+    goalId: 'GOAL-S',
+    approach: 'reuse the <b>API</b>',
+    splitRationale: undefined,
+  });
   const before = buildStory(new ReadOnlyJournal(p.home), 'GOAL-S')!;
   expect(before.lead).toMatchObject({ mode: 'solo-direct', approved: false, approach: 'reuse the <b>API</b>' });
   expect(before.lead!.modeLabel).toMatch(/1 owner/);
@@ -286,7 +419,11 @@ it('tells the story of a Goal: what the Human gave, what the Lead decided, and w
   expect(story.goal.requirements[0].id).toBe('R-1');
   expect(story.lead!.approved).toBe(true);
   expect(story.owners).toHaveLength(1);
-  expect(story.owners[0].entries.map(item => `${item.kind}:${item.text}`)).toEqual(['decision:cookie session, not JWT', 'report:impl: login route done', 'blocker:technical: need a decision']);
+  expect(story.owners[0].entries.map(item => `${item.kind}:${item.text}`)).toEqual([
+    'decision:cookie session, not JWT',
+    'report:impl: login route done',
+    'blocker:technical: need a decision',
+  ]);
   const reply = route(p.home, new URL('/api/goals/GOAL-S/story', 'http://localhost'));
   expect(reply.status).toBe(200);
   expect(JSON.parse(reply.body).owners[0].entries).toHaveLength(3);
@@ -295,8 +432,17 @@ it('tells the story of a Goal: what the Human gave, what the Lead decided, and w
 
 it('splits a Multi-WP story per package and keeps Lead-level notes apart', async () => {
   const p = await project();
-  const g = p.goal('GOAL-M'); g.draft(); g.add('goal-approved', approval); g.add('goal-selected');
-  g.add('proposal-drafted', { ...proposal, goalId: 'GOAL-M', mode: 'multi-wp', splitRationale: 'two modules are independent', estimatedCost: { spendUsd: 8, wallMinutes: 90 } });
+  const g = p.goal('GOAL-M');
+  g.draft();
+  g.add('goal-approved', approval);
+  g.add('goal-selected');
+  g.add('proposal-drafted', {
+    ...proposal,
+    goalId: 'GOAL-M',
+    mode: 'multi-wp',
+    splitRationale: 'two modules are independent',
+    estimatedCost: { spendUsd: 8, wallMinutes: 90 },
+  });
   p.close();
   const story = buildStory(new ReadOnlyJournal(p.home), 'GOAL-M')!;
   expect(story.lead).toMatchObject({ mode: 'multi-wp', whySplit: 'two modules are independent' });

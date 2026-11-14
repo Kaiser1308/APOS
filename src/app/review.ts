@@ -7,7 +7,13 @@ export class ReviewService {
 
   submit(goalId: string, value: unknown): ReviewRecord {
     const review = parseReview(value);
-    this.store.append({ id: randomUUID(), goalId, type: 'review-submitted', data: review, at: new Date().toISOString() });
+    this.store.append({
+      id: randomUUID(),
+      goalId,
+      type: 'review-submitted',
+      data: review,
+      at: new Date().toISOString(),
+    });
     return review;
   }
 }

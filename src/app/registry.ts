@@ -22,21 +22,44 @@ export class GoalRegistryService {
 
   /** `currentSourceDigest` reads the committed snapshot; approval refuses a snapshot that differs from the spec. */
   /** The Human approves the Goal together with its appetite, which only the controller keeps. */
-  approve(goalId: string, appetite: unknown, currentSourceDigest: ((goalId: string) => string | undefined) | undefined = this.store.currentSourceDigest?.bind(this.store)): void {
+  approve(
+    goalId: string,
+    appetite: unknown,
+    currentSourceDigest: ((goalId: string) => string | undefined) | undefined = this.store.currentSourceDigest?.bind(
+      this.store,
+    ),
+  ): void {
     this.assertAcyclic();
     const state = this.store.getGoal(goalId);
-    if (currentSourceDigest && state && currentSourceDigest(goalId) !== state.spec.source.sha256) throw new Error(`Source snapshot for ${goalId} is missing or differs from the Goal sha256`);
-    this.store.append({ id: randomUUID(), goalId, type: 'goal-approved', data: { appetite }, at: new Date().toISOString() });
+    if (currentSourceDigest && state && currentSourceDigest(goalId) !== state.spec.source.sha256)
+      throw new Error(`Source snapshot for ${goalId} is missing or differs from the Goal sha256`);
+    this.store.append({
+      id: randomUUID(),
+      goalId,
+      type: 'goal-approved',
+      data: { appetite },
+      at: new Date().toISOString(),
+    });
   }
 
   recommend(): GoalState | undefined {
-    return this.store.listGoals().filter(state => state.status === 'approved' && state.spec.dependencies.every(id => this.store.getGoal(id)?.status === 'closed')).sort((a, b) => a.spec.priority - b.spec.priority)[0];
+    return this.store
+      .listGoals()
+      .filter(
+        state =>
+          state.status === 'approved' &&
+          state.spec.dependencies.every(id => this.store.getGoal(id)?.status === 'closed'),
+      )
+      .sort((a, b) => a.spec.priority - b.spec.priority)[0];
   }
 
   select(goalId: string): void {
     const state = this.store.getGoal(goalId);
     if (!state) throw new Error(`Goal does not exist: ${goalId}`);
-    if (state.status !== 'approved') throw new Error(`Approved Goal required: ${goalId} is ${state.status}${state.status === 'draft' ? ' (gate A first: apos goal approve)' : ''}`);
+    if (state.status !== 'approved')
+      throw new Error(
+        `Approved Goal required: ${goalId} is ${state.status}${state.status === 'draft' ? ' (gate A first: apos goal approve)' : ''}`,
+      );
     const pending = state.spec.dependencies.filter(id => this.store.getGoal(id)?.status !== 'closed');
     if (pending.length) throw new Error(`Goal dependencies not closed: ${pending.join(', ')}`);
     this.store.append({ id: randomUUID(), goalId, type: 'goal-selected', at: new Date().toISOString() });

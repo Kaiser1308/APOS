@@ -6,7 +6,15 @@ import { attemptLimit, handingOff } from '../domain/transitions.js';
 import { requiresIndependentReview, reviewReasons } from '../domain/reviews.js';
 import type { GateReport } from '../domain/gate.js';
 import type { GoalRepository } from '../store/journal.js';
-import { CORE_SKILL, aposCommand, activationLine, committedFileDigest, packageReportPath, reviewResultPath, soloReportPath } from '../runtime/brief.js';
+import {
+  CORE_SKILL,
+  aposCommand,
+  activationLine,
+  committedFileDigest,
+  packageReportPath,
+  reviewResultPath,
+  soloReportPath,
+} from '../runtime/brief.js';
 import { isDeadSession, worktreePath, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
 import type { TelemetryProbe } from '../runtime/telemetry.js';
 import { GateService } from './gate.js';
@@ -17,11 +25,26 @@ import { GitCommitInspector, IntegrationService, type CommitInspector } from './
 import { dispatchAgent, watchDispatch } from './watch.js';
 
 const show = (repo: string, commit: string, path: string): string | undefined => {
-  try { return execFileSync('git', ['-C', repo, 'show', `${commit}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
-  catch { return undefined; }
+  try {
+    return execFileSync('git', ['-C', repo, 'show', `${commit}:${path}`], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return undefined;
+  }
 };
 
-export type SupervisorOptions = { gate?: GateService; telemetry?: TelemetryProbe; now?: () => number; inspector?: CommitInspector; /** Moves the Lead to a fresh agent on its worktree (the handoff), for a wake whose session has ended. */ freshLead?: (goalId: string, repoPath: string) => Promise<unknown> };
+export type SupervisorOptions = {
+  gate?: GateService;
+  telemetry?: TelemetryProbe;
+  now?: () => number;
+  inspector?: CommitInspector;
+  /** Moves the Lead to a fresh agent on its worktree (the handoff), for a wake whose session has ended. */ freshLead?: (
+    goalId: string,
+    repoPath: string,
+  ) => Promise<unknown>;
+};
 
 /**
  * The controller's mechanical loop for a Solo Goal after its owner settles:
@@ -33,7 +56,11 @@ export type SupervisorOptions = { gate?: GateService; telemetry?: TelemetryProbe
 export class SoloSupervisor {
   private readonly gate: GateService;
   private readonly now: () => number;
-  constructor(private readonly store: GoalRepository, private readonly runtime: RuntimeAdapter, private readonly options: SupervisorOptions = {}) {
+  constructor(
+    private readonly store: GoalRepository,
+    private readonly runtime: RuntimeAdapter,
+    private readonly options: SupervisorOptions = {},
+  ) {
     this.gate = options.gate ?? new GateService(store);
     this.now = options.now ?? Date.now;
   }
@@ -56,17 +83,54 @@ export class SoloSupervisor {
   async step(goalId: string, repoPath: string): Promise<string[]> {
     const actions: string[] = [];
     const state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'executing' || !state.proposal?.mode.startsWith('solo') || !state.runtimeRef || handingOff(state)) return actions;
+    if (
+      !state ||
+      state.status !== 'executing' ||
+      !state.proposal?.mode.startsWith('solo') ||
+      !state.runtimeRef ||
+      handingOff(state)
+    )
+      return actions;
     const ref = state.runtimeRef as RuntimeRef;
     const overTime = state.appetite && this.wallMinutesUsed(goalId) > state.appetite.maxWallMinutes;
     const outcome = state.settlements?.[ref.dispatchId];
     if (!outcome) {
-      const noticed = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'overrun');
-      if (overTime && !noticed) { this.record(goalId, 'human-notified', { kind: 'overrun', goalId, note: 'owner still running past the approved wall time' }); actions.push('notified overrun'); }
-      const since = [...this.store.events(goalId)].reverse().find(item => ['execution-started', 'runtime-resumed'].includes(item.type));
+      const noticed = this.store
+        .events(goalId)
+        .some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'overrun');
+      if (overTime && !noticed) {
+        this.record(goalId, 'human-notified', {
+          kind: 'overrun',
+          goalId,
+          note: 'owner still running past the approved wall time',
+        });
+        actions.push('notified overrun');
+      }
+      const since = [...this.store.events(goalId)]
+        .reverse()
+        .find(item => ['execution-started', 'runtime-resumed'].includes(item.type));
       // Seen live: an owner's turn died at launch (`model_not_found`) and Orca kept it `live idle` with nothing in the inbox.
-      actions.push(...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, runId: ref.runId, repoPath: ref.repoPath, terminal: ref.terminal, role: 'lead', requested: ref.requested, handoffHint: `apos handoff ${goalId} --agent <other>` }));
-      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at, requested: ref.requested }));
+      actions.push(
+        ...(await watchDispatch(this.store, this.runtime, this.now, {
+          goalId,
+          dispatchId: ref.dispatchId,
+          runId: ref.runId,
+          repoPath: ref.repoPath,
+          terminal: ref.terminal,
+          role: 'lead',
+          requested: ref.requested,
+          handoffHint: `apos handoff ${goalId} --agent <other>`,
+        })),
+      );
+      actions.push(
+        ...(await unstickDispatch(this.store, this.runtime, this.now, {
+          goalId,
+          dispatchId: ref.dispatchId,
+          terminal: ref.terminal,
+          since: since?.at,
+          requested: ref.requested,
+        })),
+      );
       return actions;
     }
     if (state.reviewDispatch) return this.collectReview(state, repoPath, actions);
@@ -75,9 +139,15 @@ export class SoloSupervisor {
       // A repair the controller already decided on but Orca refused to start: retry, bounded.
       if (state.checkpoint && !state.resumeIntent) {
         const refusals = this.store.events(goalId).filter(item => item.type === 'intent-abandoned').length;
-        if (refusals >= 3) { this.decide(goalId, `Orca refused to resume the owner ${refusals} times`, actions); return actions; }
-        try { actions.push(`resumed owner: ${(await new SoloService(this.store, this.runtime).resume(goalId)).dispatchId}`); }
-        catch (error) { actions.push(`resume refused, will retry: ${error instanceof Error ? error.message : String(error)}`); }
+        if (refusals >= 3) {
+          this.decide(goalId, `Orca refused to resume the owner ${refusals} times`, actions);
+          return actions;
+        }
+        try {
+          actions.push(`resumed owner: ${(await new SoloService(this.store, this.runtime).resume(goalId)).dispatchId}`);
+        } catch (error) {
+          actions.push(`resume refused, will retry: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
       return actions;
     }
@@ -94,95 +164,220 @@ export class SoloSupervisor {
       // appetite lasts, an honest "not done" is a finding for the same owner, not a stop. repair() enforces the budget.
       const failedHead = await this.runtime.deliveryHead?.(ref);
       const failedReport = failedHead && show(repoPath, failedHead, soloReportPath(goalId, attempt));
-      const failedLine = ref.baseCommit ? activationLine(committedFileDigest(repoPath, ref.baseCommit, CORE_SKILL)) : undefined;
-      if (!failedHead || !failedReport || !failedLine || !failedReport.includes(failedLine)) { this.decide(goalId, `owner reported failed on attempt ${attempt} without a delivery report`, actions); return actions; }
-      return this.repair(state, {
-        note: `You reported failed on attempt ${attempt} at ${failedHead}, and the approved budget is not spent. Your report says what remains: ${remaining(failedReport)} Finish it. Report failed again only if the Goal cannot be met within scope, naming the requirement that blocks it.`,
-        signature: 'owner-incomplete', commit: failedHead
-      }, repoPath, actions);
+      const failedLine = ref.baseCommit
+        ? activationLine(committedFileDigest(repoPath, ref.baseCommit, CORE_SKILL))
+        : undefined;
+      if (!failedHead || !failedReport || !failedLine || !failedReport.includes(failedLine)) {
+        this.decide(goalId, `owner reported failed on attempt ${attempt} without a delivery report`, actions);
+        return actions;
+      }
+      return this.repair(
+        state,
+        {
+          note: `You reported failed on attempt ${attempt} at ${failedHead}, and the approved budget is not spent. Your report says what remains: ${remaining(failedReport)} Finish it. Report failed again only if the Goal cannot be met within scope, naming the requirement that blocks it.`,
+          signature: 'owner-incomplete',
+          commit: failedHead,
+        },
+        repoPath,
+        actions,
+      );
     }
     const receipt = await this.runtime.launchReceipt?.(ref.dispatchId);
     if (ref.requested?.model && receipt?.model && receipt.model !== ref.requested.model) {
-      this.decide(goalId, `runtime launched ${receipt.agent}/${receipt.model}, plan requires ${ref.requested.agent}/${ref.requested.model}`, actions);
+      this.decide(
+        goalId,
+        `runtime launched ${receipt.agent}/${receipt.model}, plan requires ${ref.requested.agent}/${ref.requested.model}`,
+        actions,
+      );
       return actions;
     }
     const head = await this.runtime.deliveryHead?.(ref);
-    if (!head || !ref.baseCommit) { this.decide(goalId, 'delivery commit unknown: owner worktree or base commit missing', actions); return actions; }
+    if (!head || !ref.baseCommit) {
+      this.decide(goalId, 'delivery commit unknown: owner worktree or base commit missing', actions);
+      return actions;
+    }
     // Seen live: an owner told the repo path committed into the managed checkout instead of its worktree.
     const intruders = foreignCommits(repoPath, ref.baseCommit, goalId);
-    if (intruders.length) { this.decide(goalId, `the owner's delivery landed in the managed checkout instead of its worktree: ${intruders.join(', ')}`, actions); return actions; }
+    if (intruders.length) {
+      this.decide(
+        goalId,
+        `the owner's delivery landed in the managed checkout instead of its worktree: ${intruders.join(', ')}`,
+        actions,
+      );
+      return actions;
+    }
 
     const report = show(repoPath, head, soloReportPath(goalId, attempt));
     const line = activationLine(committedFileDigest(repoPath, ref.baseCommit, CORE_SKILL));
     if (!report || !report.includes(line)) {
-      return this.repair(state, { note: report ? `Delivery report lacks the activation line "${line}": the core execution skill was not loaded as briefed.` : `No delivery report committed at ${soloReportPath(goalId, attempt)} on ${head}.`, signature: report ? 'activation' : 'no-report', commit: head }, repoPath, actions);
+      return this.repair(
+        state,
+        {
+          note: report
+            ? `Delivery report lacks the activation line "${line}": the core execution skill was not loaded as briefed.`
+            : `No delivery report committed at ${soloReportPath(goalId, attempt)} on ${head}.`,
+          signature: report ? 'activation' : 'no-report',
+          commit: head,
+        },
+        repoPath,
+        actions,
+      );
     }
 
     const gate = this.gate.run(goalId, repoPath, { deliveryCommit: head });
     actions.push(`gate ${gate.result} on ${head}`);
     if (gate.result === 'green') {
       const reasons = reviewReasons(this.store.getGoal(goalId)!);
-      if (reasons.length && this.runtime.startReviewer) return this.startReview(goalId, ref, head, repoPath, reasons, actions);
-      if (reasons.length) { this.decide(goalId, `review required (${reasons.join('; ')}) but no reviewer runtime`, actions); return actions; }
+      if (reasons.length && this.runtime.startReviewer)
+        return this.startReview(goalId, ref, head, repoPath, reasons, actions);
+      if (reasons.length) {
+        this.decide(goalId, `review required (${reasons.join('; ')}) but no reviewer runtime`, actions);
+        return actions;
+      }
       new VerificationService(this.store).verify(goalId, head);
       this.record(goalId, 'human-notified', { kind: 'awaiting-outcome', goalId, deliveryCommit: head });
       actions.push('verified; awaiting Human outcome');
       return actions;
     }
-    if (gate.result === 'pending') { this.record(goalId, 'human-notified', { kind: 'manual-check', goalId, deliveryCommit: head, checks: gate.checks.filter(item => item.status === 'manual-pending').map(item => item.checkId) }); actions.push('awaiting manual check'); return actions; }
-    if (gate.result === 'unverifiable') { this.decide(goalId, `gate unverifiable on ${head}: ${describe(gate)}`, actions); return actions; }
+    if (gate.result === 'pending') {
+      this.record(goalId, 'human-notified', {
+        kind: 'manual-check',
+        goalId,
+        deliveryCommit: head,
+        checks: gate.checks.filter(item => item.status === 'manual-pending').map(item => item.checkId),
+      });
+      actions.push('awaiting manual check');
+      return actions;
+    }
+    if (gate.result === 'unverifiable') {
+      this.decide(goalId, `gate unverifiable on ${head}: ${describe(gate)}`, actions);
+      return actions;
+    }
     const failing = gate.checks.filter(item => item.status === 'fail');
-    return this.repair(state, {
-      note: `Controller gate red on ${head}: ${describe(gate)}`,
-      signature: failing.map(item => `${item.checkId}[${item.newFailures.join(',')}]`).sort().join('|'),
-      checkIds: failing.map(item => item.checkId),
-      logRefs: failing.flatMap(item => item.delivery.map(run => run.logRef)),
-      commit: head
-    }, repoPath, actions);
+    return this.repair(
+      state,
+      {
+        note: `Controller gate red on ${head}: ${describe(gate)}`,
+        signature: failing
+          .map(item => `${item.checkId}[${item.newFailures.join(',')}]`)
+          .sort()
+          .join('|'),
+        checkIds: failing.map(item => item.checkId),
+        logRefs: failing.flatMap(item => item.delivery.map(run => run.logRef)),
+        commit: head,
+      },
+      repoPath,
+      actions,
+    );
   }
 
   /** The intent is recorded first: seen live, Orca created the reviewer but reported its start as outcome-unknown. */
-  private async startReview(goalId: string, ref: RuntimeRef, head: string, repoPath: string, reasons: string[], actions: string[]): Promise<string[]> {
+  private async startReview(
+    goalId: string,
+    ref: RuntimeRef,
+    head: string,
+    repoPath: string,
+    reasons: string[],
+    actions: string[],
+  ): Promise<string[]> {
     const key = randomUUID();
     this.record(goalId, 'review-intended', { key, commit: head });
     try {
-      const reviewer = await this.runtime.startReviewer!({ repoPath, goalId, baseCommit: ref.baseCommit!, commit: head, reasons, idempotencyKey: key, runId: ref.runId });
-      this.record(goalId, 'review-dispatched', { dispatchId: reviewer.dispatchId, runId: reviewer.runId, key, commit: head, worktreeId: reviewer.worktreeId, terminal: reviewer.terminal, requested: reviewer.requested });
+      const reviewer = await this.runtime.startReviewer!({
+        repoPath,
+        goalId,
+        baseCommit: ref.baseCommit!,
+        commit: head,
+        reasons,
+        idempotencyKey: key,
+        runId: ref.runId,
+      });
+      this.record(goalId, 'review-dispatched', {
+        dispatchId: reviewer.dispatchId,
+        runId: reviewer.runId,
+        key,
+        commit: head,
+        worktreeId: reviewer.worktreeId,
+        terminal: reviewer.terminal,
+        requested: reviewer.requested,
+      });
       actions.push(`reviewer ${reviewer.dispatchId}: ${reasons.join('; ')}`);
     } catch (error) {
-      actions.push(`reviewer start outcome unknown, will recover by key: ${error instanceof Error ? error.message : String(error)}`);
+      actions.push(
+        `reviewer start outcome unknown, will recover by key: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     return actions;
   }
 
-  private async recoverReview(state: GoalState, ref: RuntimeRef, repoPath: string, actions: string[]): Promise<string[]> {
+  private async recoverReview(
+    state: GoalState,
+    ref: RuntimeRef,
+    repoPath: string,
+    actions: string[],
+  ): Promise<string[]> {
     const goalId = state.spec.id;
     const intent = state.reviewIntent!;
     const found = await this.runtime.recover?.(intent.key, ref.runId);
     if (found) {
-      this.record(goalId, 'review-dispatched', { dispatchId: found.dispatchId, runId: found.runId, key: intent.key, commit: intent.commit, worktreeId: found.worktreeId, terminal: found.terminal });
+      this.record(goalId, 'review-dispatched', {
+        dispatchId: found.dispatchId,
+        runId: found.runId,
+        key: intent.key,
+        commit: intent.commit,
+        worktreeId: found.worktreeId,
+        terminal: found.terminal,
+      });
       actions.push(`recovered reviewer ${found.dispatchId}`);
       return actions;
     }
     if (this.now() - Date.parse(intent.at) < 3 * 60_000) return actions;
     const tries = this.store.events(goalId).filter(item => item.type === 'review-intended').length;
-    if (tries >= 3 || !this.runtime.startReviewer || !ref.baseCommit) { this.decide(goalId, `reviewer for ${intent.commit} could not be started or found after ${tries} tries`, actions); return actions; }
+    if (tries >= 3 || !this.runtime.startReviewer || !ref.baseCommit) {
+      this.decide(goalId, `reviewer for ${intent.commit} could not be started or found after ${tries} tries`, actions);
+      return actions;
+    }
     return this.startReview(goalId, ref, intent.commit, repoPath, reviewReasons(state), actions);
   }
 
   /** Records a machine finding and resumes the same owner, unless a stop condition sends it to the Human. */
-  private async repair(state: GoalState, finding: { note: string; signature: string; checkIds?: string[]; logRefs?: string[]; commit: string }, repoPath: string, actions: string[]): Promise<string[]> {
+  private async repair(
+    state: GoalState,
+    finding: { note: string; signature: string; checkIds?: string[]; logRefs?: string[]; commit: string },
+    repoPath: string,
+    actions: string[],
+  ): Promise<string[]> {
     const goalId = state.spec.id;
     const attempt = state.soloAttempts ?? 1;
     this.record(goalId, 'finding-recorded', { kind: 'patch', by: 'controller', attempt, ...finding });
     actions.push(`finding: ${finding.note}`);
-    const repeats = (this.store.getGoal(goalId)!.findings ?? []).filter(item => item.kind === 'patch' && item.signature === finding.signature).length;
-    if (repeats >= 3) { this.decide(goalId, `same failure after two repairs (${finding.signature})`, actions); return actions; }
-    if (attempt >= attemptLimit(state)) { this.decide(goalId, `attempt budget ${attemptLimit(state)} spent`, actions); return actions; }
-    if (state.appetite && this.wallMinutesUsed(goalId) > state.appetite.maxWallMinutes) { this.decide(goalId, `wall time ${state.appetite.maxWallMinutes} min spent`, actions); return actions; }
-    this.record(goalId, 'checkpointed', { phase: 'controller finding', progress: finding.note, evidenceRefs: finding.logRefs ?? [], goalId, attempt: attempt + 1 });
-    try { actions.push(`resumed owner: ${(await new SoloService(this.store, this.runtime).resume(goalId)).dispatchId}`); }
-    catch (error) { actions.push(`resume refused, will retry: ${error instanceof Error ? error.message : String(error)}`); }
+    const repeats = (this.store.getGoal(goalId)!.findings ?? []).filter(
+      item => item.kind === 'patch' && item.signature === finding.signature,
+    ).length;
+    if (repeats >= 3) {
+      this.decide(goalId, `same failure after two repairs (${finding.signature})`, actions);
+      return actions;
+    }
+    if (attempt >= attemptLimit(state)) {
+      this.decide(goalId, `attempt budget ${attemptLimit(state)} spent`, actions);
+      return actions;
+    }
+    if (state.appetite && this.wallMinutesUsed(goalId) > state.appetite.maxWallMinutes) {
+      this.decide(goalId, `wall time ${state.appetite.maxWallMinutes} min spent`, actions);
+      return actions;
+    }
+    this.record(goalId, 'checkpointed', {
+      phase: 'controller finding',
+      progress: finding.note,
+      evidenceRefs: finding.logRefs ?? [],
+      goalId,
+      attempt: attempt + 1,
+    });
+    try {
+      actions.push(`resumed owner: ${(await new SoloService(this.store, this.runtime).resume(goalId)).dispatchId}`);
+    } catch (error) {
+      actions.push(`resume refused, will retry: ${error instanceof Error ? error.message : String(error)}`);
+    }
     void repoPath;
     return actions;
   }
@@ -190,22 +385,67 @@ export class SoloSupervisor {
   private async collectReview(state: GoalState, repoPath: string, actions: string[]): Promise<string[]> {
     const goalId = state.spec.id;
     const pending = state.reviewDispatch!;
-    const observation = await this.runtime.inspect({ ...(state.runtimeRef as RuntimeRef), dispatchId: pending.dispatchId, runId: pending.runId });
+    const observation = await this.runtime.inspect({
+      ...(state.runtimeRef as RuntimeRef),
+      dispatchId: pending.dispatchId,
+      runId: pending.runId,
+    });
     if (!observation.outcome) {
       // Seen live: the reviewer's brief sat in the composer like the owner's did.
       const since = [...this.store.events(goalId)].reverse().find(item => item.type === 'review-dispatched');
-      actions.push(...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, runId: pending.runId, repoPath, terminal: pending.terminal, role: 'reviewer', requested: pending.requested, handoffHint: `apos handoff ${goalId} --reviewer --agent <other>` }));
-      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at, requested: pending.requested }));
+      actions.push(
+        ...(await watchDispatch(this.store, this.runtime, this.now, {
+          goalId,
+          dispatchId: pending.dispatchId,
+          runId: pending.runId,
+          repoPath,
+          terminal: pending.terminal,
+          role: 'reviewer',
+          requested: pending.requested,
+          handoffHint: `apos handoff ${goalId} --reviewer --agent <other>`,
+        })),
+      );
+      actions.push(
+        ...(await unstickDispatch(this.store, this.runtime, this.now, {
+          goalId,
+          dispatchId: pending.dispatchId,
+          terminal: pending.terminal,
+          since: since?.at,
+          requested: pending.requested,
+        })),
+      );
       return actions;
     }
-    await this.recordTelemetry(state, { dispatchId: pending.dispatchId, worktreeId: pending.worktreeId } as RuntimeRef, 'reviewer');
+    await this.recordTelemetry(
+      state,
+      { dispatchId: pending.dispatchId, worktreeId: pending.worktreeId } as RuntimeRef,
+      'reviewer',
+    );
     const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId, dispatchId: pending.dispatchId });
     const raw = head && show(repoPath, head, reviewResultPath(goalId, pending.key));
     let result: { result?: string; note?: string } | undefined;
     // PowerShell writes a UTF-8 BOM (seen live: a valid review was rejected).
-    try { result = raw ? JSON.parse(raw.replace(/^﻿/, '')) : undefined; } catch { result = undefined; }
-    if (!result || !['pass', 'changes'].includes(result.result ?? '') || !result.note?.trim()) { this.decide(goalId, `reviewer ${pending.dispatchId} left no valid review at ${reviewResultPath(goalId, pending.key)}`, actions); return actions; }
-    this.record(goalId, 'review-submitted', { subject: 'goal', reviewer: 'apos-reviewer', session: pending.dispatchId, result: result.result, commitRef: pending.commit, note: result.note });
+    try {
+      result = raw ? JSON.parse(raw.replace(/^﻿/, '')) : undefined;
+    } catch {
+      result = undefined;
+    }
+    if (!result || !['pass', 'changes'].includes(result.result ?? '') || !result.note?.trim()) {
+      this.decide(
+        goalId,
+        `reviewer ${pending.dispatchId} left no valid review at ${reviewResultPath(goalId, pending.key)}`,
+        actions,
+      );
+      return actions;
+    }
+    this.record(goalId, 'review-submitted', {
+      subject: 'goal',
+      reviewer: 'apos-reviewer',
+      session: pending.dispatchId,
+      result: result.result,
+      commitRef: pending.commit,
+      note: result.note,
+    });
     actions.push(`review ${result.result}`);
     if (result.result === 'pass') {
       new VerificationService(this.store).verify(goalId, pending.commit);
@@ -213,24 +453,50 @@ export class SoloSupervisor {
       actions.push('verified; awaiting Human outcome');
       return actions;
     }
-    return this.repair(this.store.getGoal(goalId)!, { note: `Independent review requested changes on ${pending.commit}: ${result.note}`, signature: `review:${result.note.slice(0, 80)}`, commit: pending.commit }, repoPath, actions);
+    return this.repair(
+      this.store.getGoal(goalId)!,
+      {
+        note: `Independent review requested changes on ${pending.commit}: ${result.note}`,
+        signature: `review:${result.note.slice(0, 80)}`,
+        commit: pending.commit,
+      },
+      repoPath,
+      actions,
+    );
   }
 
-  private async recordTelemetry(state: GoalState, ref: RuntimeRef, role: 'lead' | 'worker' | 'reviewer'): Promise<void> {
+  private async recordTelemetry(
+    state: GoalState,
+    ref: RuntimeRef,
+    role: 'lead' | 'worker' | 'reviewer',
+  ): Promise<void> {
     if (state.telemetry?.some(item => item.dispatchId === ref.dispatchId)) return;
     const receipt = await this.runtime.launchReceipt?.(ref.dispatchId).catch(() => undefined);
     const events = this.store.events(state.spec.id);
     // A Solo owner is the Lead: its window opens when the Lead was dispatched, so planning counts (design: lead-owns-solo Q2).
-    const startedAt = events.findIndex(item => ['lead-started', 'execution-started', 'runtime-resumed', 'review-dispatched'].includes(item.type) && (item.data as { dispatchId?: string })?.dispatchId === ref.dispatchId);
+    const startedAt = events.findIndex(
+      item =>
+        ['lead-started', 'execution-started', 'runtime-resumed', 'review-dispatched'].includes(item.type) &&
+        (item.data as { dispatchId?: string })?.dispatchId === ref.dispatchId,
+    );
     // The window opens at the dispatch intent: a dispatch recovered later was already running before it was recorded (seen live).
-    const intent = startedAt > 0 && ['dispatch-intended', 'resume-intended', 'lead-dispatch-intended'].includes(events[startedAt - 1].type) ? events[startedAt - 1] : undefined;
+    const intent =
+      startedAt > 0 &&
+      ['dispatch-intended', 'resume-intended', 'lead-dispatch-intended'].includes(events[startedAt - 1].type)
+        ? events[startedAt - 1]
+        : undefined;
     const started = intent ?? (startedAt >= 0 ? events[startedAt] : undefined);
     const path = worktreePath(ref.worktreeId);
     const until = new Date(this.now()).toISOString();
-    const usage = path && started ? this.options.telemetry?.usage({ worktreePath: path, since: started.at, until }) : undefined;
+    const usage =
+      path && started ? this.options.telemetry?.usage({ worktreePath: path, since: started.at, until }) : undefined;
     this.record(state.spec.id, 'telemetry-recorded', {
-      dispatchId: ref.dispatchId, role, requestedModel: ref.requested?.model, launchedModel: receipt?.model ?? usage?.model,
-      usage: usage ?? 'unknown', ...(started ? { wallMs: this.now() - Date.parse(started.at) } : {})
+      dispatchId: ref.dispatchId,
+      role,
+      requestedModel: ref.requested?.model,
+      launchedModel: receipt?.model ?? usage?.model,
+      usage: usage ?? 'unknown',
+      ...(started ? { wallMs: this.now() - Date.parse(started.at) } : {}),
     });
   }
 }
@@ -241,24 +507,46 @@ export class SoloSupervisor {
  * unsent brief, press Enter up to three times a minute apart; then the Human is told. An agent that is
  * visibly working is never reported.
  */
-export async function unstickDispatch(store: GoalRepository, runtime: RuntimeAdapter, now: () => number, input: { goalId: string; dispatchId: string; terminal?: string; since?: string; requested?: { agent?: string } }): Promise<string[]> {
+export async function unstickDispatch(
+  store: GoalRepository,
+  runtime: RuntimeAdapter,
+  now: () => number,
+  input: { goalId: string; dispatchId: string; terminal?: string; since?: string; requested?: { agent?: string } },
+): Promise<string[]> {
   if (!runtime.nudge || !input.terminal || !input.since) return [];
   if (now() - Date.parse(input.since) < 60_000) return [];
-  const pending = runtime.composerPending ? await runtime.composerPending(input.terminal, await dispatchAgent(runtime, input.dispatchId, input.requested)) : await runtime.inputStalled?.(input.dispatchId);
+  const pending = runtime.composerPending
+    ? await runtime.composerPending(input.terminal, await dispatchAgent(runtime, input.dispatchId, input.requested))
+    : await runtime.inputStalled?.(input.dispatchId);
   if (!pending) return [];
   const marker = `nudge ${input.dispatchId}`;
   const events = store.events(input.goalId);
-  const nudges = events.filter(item => item.type === 'decision-logged' && String((item.data as { note?: string }).note).startsWith(marker));
-  const record = (type: GoalEventType, data: unknown) => store.append({ id: randomUUID(), goalId: input.goalId, type, data, at: new Date(now()).toISOString() });
+  const nudges = events.filter(
+    item => item.type === 'decision-logged' && String((item.data as { note?: string }).note).startsWith(marker),
+  );
+  const record = (type: GoalEventType, data: unknown) =>
+    store.append({ id: randomUUID(), goalId: input.goalId, type, data, at: new Date(now()).toISOString() });
   if (nudges.length < 3) {
     if (nudges.length && now() - Date.parse(nudges.at(-1)!.at) < 60_000) return [];
     await runtime.nudge(input.terminal);
-    record('decision-logged', { note: `${marker}: brief unsent in the composer; controller pressed Enter (${nudges.length + 1}/3)` });
+    record('decision-logged', {
+      note: `${marker}: brief unsent in the composer; controller pressed Enter (${nudges.length + 1}/3)`,
+    });
     return [`nudged ${input.dispatchId} (${nudges.length + 1}/3)`];
   }
-  const notified = events.some(item => item.type === 'human-notified' && (item.data as { kind?: string; dispatchId?: string }).kind === 'stalled' && (item.data as { dispatchId?: string }).dispatchId === input.dispatchId);
+  const notified = events.some(
+    item =>
+      item.type === 'human-notified' &&
+      (item.data as { kind?: string; dispatchId?: string }).kind === 'stalled' &&
+      (item.data as { dispatchId?: string }).dispatchId === input.dispatchId,
+  );
   if (notified || now() - Date.parse(nudges.at(-1)!.at) < 60_000) return [];
-  record('human-notified', { kind: 'stalled', goalId: input.goalId, dispatchId: input.dispatchId, note: 'brief still unsent after three Enters' });
+  record('human-notified', {
+    kind: 'stalled',
+    goalId: input.goalId,
+    dispatchId: input.dispatchId,
+    note: 'brief still unsent after three Enters',
+  });
   return [`stalled ${input.dispatchId}; Human notified`];
 }
 
@@ -268,9 +556,17 @@ export async function unstickDispatch(store: GoalRepository, runtime: RuntimeAda
  */
 function foreignCommits(repoPath: string, base: string, goalId: string): string[] {
   try {
-    const rows = execFileSync('git', ['-C', repoPath, 'log', '--format=%H%x09%ae', `${base}..HEAD`, '--', `.apos/goals/${goalId}/evidence/`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split(/\r?\n/).filter(Boolean);
+    const rows = execFileSync(
+      'git',
+      ['-C', repoPath, 'log', '--format=%H%x09%ae', `${base}..HEAD`, '--', `.apos/goals/${goalId}/evidence/`],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    )
+      .split(/\r?\n/)
+      .filter(Boolean);
     return rows.filter(row => row.split('\t')[1] !== 'apos@local.invalid').map(row => row.slice(0, 12));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 /** The owner's own account of unfinished work: its "Remaining" section, else the end of the report. */
@@ -278,12 +574,24 @@ function remaining(report: string): string {
   const lines = report.split(/\r?\n/);
   const start = lines.findIndex(line => /^#+\s*Remaining/i.test(line));
   const end = start < 0 ? -1 : lines.findIndex((line, index) => index > start && /^#+\s/.test(line));
-  const section = start < 0 ? '' : lines.slice(start + 1, end < 0 ? undefined : end).join(' ').trim();
+  const section =
+    start < 0
+      ? ''
+      : lines
+          .slice(start + 1, end < 0 ? undefined : end)
+          .join(' ')
+          .trim();
   return (section || report.trim().slice(-800)).slice(0, 1500);
 }
 
 function describe(gate: GateReport): string {
-  return gate.checks.filter(item => item.status !== 'pass').map(item => `${item.checkId} ${item.status} (${item.reason}${item.newFailures.length ? `; new: ${item.newFailures.join(', ')}` : ''})`).join('; ');
+  return gate.checks
+    .filter(item => item.status !== 'pass')
+    .map(
+      item =>
+        `${item.checkId} ${item.status} (${item.reason}${item.newFailures.length ? `; new: ${item.newFailures.join(', ')}` : ''})`,
+    )
+    .join('; ');
 }
 
 /**
@@ -294,7 +602,11 @@ function describe(gate: GateReport): string {
 export class MultiSupervisor {
   private readonly gate: GateService;
   private readonly now: () => number;
-  constructor(private readonly store: GoalRepository, private readonly runtime: RuntimeAdapter & PackageRuntime, private readonly options: SupervisorOptions = {}) {
+  constructor(
+    private readonly store: GoalRepository,
+    private readonly runtime: RuntimeAdapter & PackageRuntime,
+    private readonly options: SupervisorOptions = {},
+  ) {
     this.gate = options.gate ?? new GateService(store);
     this.now = options.now ?? Date.now;
   }
@@ -306,7 +618,8 @@ export class MultiSupervisor {
   async step(goalId: string, repoPath: string, questions: string[] = []): Promise<string[]> {
     const actions: string[] = [];
     let state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'executing' || state.proposal?.mode !== 'multi-wp' || handingOff(state)) return actions;
+    if (!state || state.status !== 'executing' || state.proposal?.mode !== 'multi-wp' || handingOff(state))
+      return actions;
     const events: string[] = questions.map(item => `question ${item}`);
     for (const item of Object.values(state.packages ?? {})) {
       const ref = item.runtimeRef as PackageRuntimeRef | undefined;
@@ -314,51 +627,120 @@ export class MultiSupervisor {
       const outcome = state.settlements?.[ref.dispatchId];
       const attemptKey = `${item.spec.id}@${item.spec.version}:${item.attempts}`;
       if (!outcome) {
-        const since = [...this.store.events(goalId)].reverse().find(event => ['package-started', 'package-resumed'].includes(event.type) && JSON.stringify(event.data ?? '').includes(ref.dispatchId));
-        actions.push(...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, runId: ref.runId, repoPath, terminal: ref.terminal, role: 'worker', requested: ref.requested, packageId: item.spec.id, handoffHint: `apos handoff ${goalId} --package ${item.spec.id} --agent <other>` }));
-        actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at, requested: ref.requested }));
+        const since = [...this.store.events(goalId)]
+          .reverse()
+          .find(
+            event =>
+              ['package-started', 'package-resumed'].includes(event.type) &&
+              JSON.stringify(event.data ?? '').includes(ref.dispatchId),
+          );
+        actions.push(
+          ...(await watchDispatch(this.store, this.runtime, this.now, {
+            goalId,
+            dispatchId: ref.dispatchId,
+            runId: ref.runId,
+            repoPath,
+            terminal: ref.terminal,
+            role: 'worker',
+            requested: ref.requested,
+            packageId: item.spec.id,
+            handoffHint: `apos handoff ${goalId} --package ${item.spec.id} --agent <other>`,
+          })),
+        );
+        actions.push(
+          ...(await unstickDispatch(this.store, this.runtime, this.now, {
+            goalId,
+            dispatchId: ref.dispatchId,
+            terminal: ref.terminal,
+            since: since?.at,
+            requested: ref.requested,
+          })),
+        );
         continue;
       }
       if (item.gate?.attemptKey === attemptKey) continue;
       const tag = `${item.spec.id} v${item.spec.version} attempt ${item.attempts}`;
-      if (outcome === 'failed') { this.record(goalId, 'package-blocked', { packageId: item.spec.id, blocker: { kind: 'technical', note: `Worker reported failed on ${tag}` } }); events.push(`package ${tag} failed`); continue; }
+      if (outcome === 'failed') {
+        this.record(goalId, 'package-blocked', {
+          packageId: item.spec.id,
+          blocker: { kind: 'technical', note: `Worker reported failed on ${tag}` },
+        });
+        events.push(`package ${tag} failed`);
+        continue;
+      }
       const head = await this.runtime.deliveryHead?.(ref);
-      const report = head && show(repoPath, head, packageReportPath(goalId, item.spec.id, item.spec.version, item.attempts));
-      const line = ref.baseCommit ? activationLine(committedFileDigest(repoPath, ref.baseCommit, CORE_SKILL)) : undefined;
+      const report =
+        head && show(repoPath, head, packageReportPath(goalId, item.spec.id, item.spec.version, item.attempts));
+      const line = ref.baseCommit
+        ? activationLine(committedFileDigest(repoPath, ref.baseCommit, CORE_SKILL))
+        : undefined;
       if (!head || !report || !line || !report.includes(line)) {
         // Not gated, so it cannot verify; the Lead decides whether to revise and resume the owner.
         events.push(`package ${tag} settled without a delivery report carrying the core activation line`);
         continue;
       }
-      if (!item.spec.acceptance.some(criterion => criterion.checkIds?.length)) { events.push(`package ${tag} settled at ${head}; no controller checks, Lead must verify its evidence`); continue; }
+      if (!item.spec.acceptance.some(criterion => criterion.checkIds?.length)) {
+        events.push(`package ${tag} settled at ${head}; no controller checks, Lead must verify its evidence`);
+        continue;
+      }
       const gate = this.gate.runPackage(goalId, item.spec.id, repoPath, head);
       actions.push(`${item.spec.id} gate ${gate.result} on ${head}`);
       if (gate.result === 'green') {
         const service = new PackageService(this.store, this.runtime);
-        for (const criterion of item.spec.acceptance) service.submitEvidence(goalId, { packageId: item.spec.id, packageVersion: item.spec.version, owner: item.spec.owner, acceptanceId: criterion.id, result: 'pass', command: 'controller package gate', artifactRef: gate.gateId, commitRef: head });
-        if (!state.proposal.risks.length) { await service.verify(goalId, item.spec.id); events.push(`package ${tag} verified at ${head}`); }
-        else events.push(`package ${tag} green at ${head}; independent package review required`);
+        for (const criterion of item.spec.acceptance)
+          service.submitEvidence(goalId, {
+            packageId: item.spec.id,
+            packageVersion: item.spec.version,
+            owner: item.spec.owner,
+            acceptanceId: criterion.id,
+            result: 'pass',
+            command: 'controller package gate',
+            artifactRef: gate.gateId,
+            commitRef: head,
+          });
+        if (!state.proposal.risks.length) {
+          await service.verify(goalId, item.spec.id);
+          events.push(`package ${tag} verified at ${head}`);
+        } else events.push(`package ${tag} green at ${head}; independent package review required`);
         continue;
       }
       const latest = this.store.getGoal(goalId)!.packages![item.spec.id];
       const signature = latest.findings?.at(-1);
       const repeats = (latest.findings ?? []).filter(value => value === signature).length;
       if (gate.result === 'unverifiable' || repeats >= 3) {
-        this.record(goalId, 'human-notified', { kind: 'needs-decision', goalId, packageId: item.spec.id, note: gate.result === 'unverifiable' ? 'package gate unverifiable' : 'same package failure after two repairs' });
+        this.record(goalId, 'human-notified', {
+          kind: 'needs-decision',
+          goalId,
+          packageId: item.spec.id,
+          note: gate.result === 'unverifiable' ? 'package gate unverifiable' : 'same package failure after two repairs',
+        });
         events.push(`package ${tag} needs a decision: ${latest.finding}`);
       } else events.push(`package ${tag} red, returned to its owner: ${latest.finding}`);
     }
-    actions.push(...await this.goalReview(goalId, repoPath, events));
+    actions.push(...(await this.goalReview(goalId, repoPath, events)));
     state = this.store.getGoal(goalId)!;
     // Derived from the recorded review, not from the tick that read it: a wake Orca refuses is retried.
-    const verdict = state.gate && !state.integration ? [...state.reviews].reverse().find(item => item.subject === 'goal' && item.commitRef.toLowerCase() === state!.gate!.deliveryCommit.toLowerCase()) : undefined;
-    if (verdict) events.push(verdict.result === 'pass'
-      ? `Goal review passed on ${verdict.commitRef}: submit the acceptance evidence and run ${aposCommand(repoPath)} integration complete ${goalId} --file <json> for that commit`
-      : `Goal review requested changes on ${verdict.commitRef}: ${verdict.note}`);
+    const verdict =
+      state.gate && !state.integration
+        ? [...state.reviews]
+            .reverse()
+            .find(
+              item =>
+                item.subject === 'goal' && item.commitRef.toLowerCase() === state!.gate!.deliveryCommit.toLowerCase(),
+            )
+        : undefined;
+    if (verdict)
+      events.push(
+        verdict.result === 'pass'
+          ? `Goal review passed on ${verdict.commitRef}: submit the acceptance evidence and run ${aposCommand(repoPath)} integration complete ${goalId} --file <json> for that commit`
+          : `Goal review requested changes on ${verdict.commitRef}: ${verdict.note}`,
+      );
     const packages = Object.values(state.packages ?? {});
-    if (packages.length && packages.every(item => item.status === 'verified') && !state.integration) events.push('all packages verified: ready to integrate');
-    if (state.gate && state.gate.result !== 'green') events.push(`integration gate ${state.gate.result} on ${state.gate.deliveryCommit}`);
-    actions.push(...await this.wakeLead(goalId, repoPath, events));
+    if (packages.length && packages.every(item => item.status === 'verified') && !state.integration)
+      events.push('all packages verified: ready to integrate');
+    if (state.gate && state.gate.result !== 'green')
+      events.push(`integration gate ${state.gate.result} on ${state.gate.deliveryCommit}`);
+    actions.push(...(await this.wakeLead(goalId, repoPath, events)));
     return actions;
   }
 
@@ -376,39 +758,79 @@ export class MultiSupervisor {
     const gate = state.gate;
     const packages = Object.values(state.packages ?? {});
     if (state.reviewIntent) return this.recoverGoalReview(state, repoPath, actions);
-    if (state.integration || !gate || gate.result !== 'green' || !packages.length || !packages.every(item => item.status === 'verified')) return actions;
+    if (
+      state.integration ||
+      !gate ||
+      gate.result !== 'green' ||
+      !packages.length ||
+      !packages.every(item => item.status === 'verified')
+    )
+      return actions;
     if (!requiresIndependentReview(state)) return actions;
     const commit = gate.deliveryCommit;
-    if (state.reviews.some(item => item.subject === 'goal' && item.commitRef.toLowerCase() === commit.toLowerCase())) return actions;
+    if (state.reviews.some(item => item.subject === 'goal' && item.commitRef.toLowerCase() === commit.toLowerCase()))
+      return actions;
     const inspector = this.options.inspector ?? new GitCommitInspector();
     try {
       const prepared = new IntegrationService(this.store, inspector).prepare(goalId, repoPath);
       const missing = prepared.commits.filter(item => !inspector.contains(repoPath, item, commit));
       if (missing.length) {
         // Seen live: this returned silently and the Goal stalled until the Lead found the cause itself.
-        events.push(`Goal review waiting: gated integration commit ${commit} does not contain package commit(s) ${missing.join(', ')} as ancestors; rebuild it with "git merge --no-ff" of every package commit (no squash or rebase), then run the gate again`);
+        events.push(
+          `Goal review waiting: gated integration commit ${commit} does not contain package commit(s) ${missing.join(', ')} as ancestors; rebuild it with "git merge --no-ff" of every package commit (no squash or rebase), then run the gate again`,
+        );
         return actions;
       }
-    } catch { return actions; }
+    } catch {
+      return actions;
+    }
     return this.startGoalReview(state, commit, repoPath, actions);
   }
 
   private reviewRun(state: GoalState): string | undefined {
-    return state.leadTerminal?.runId ?? Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId).find(Boolean);
+    return (
+      state.leadTerminal?.runId ??
+      Object.values(state.packages ?? {})
+        .map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId)
+        .find(Boolean)
+    );
   }
 
-  private async startGoalReview(state: GoalState, commit: string, repoPath: string, actions: string[]): Promise<string[]> {
+  private async startGoalReview(
+    state: GoalState,
+    commit: string,
+    repoPath: string,
+    actions: string[],
+  ): Promise<string[]> {
     const goalId = state.spec.id;
     const runId = this.reviewRun(state);
     if (!runId || !state.proposal?.baseCommit) return actions;
     const key = randomUUID();
     this.record(goalId, 'review-intended', { key, commit });
     try {
-      const reviewer = await this.runtime.startReviewer!({ repoPath, goalId, baseCommit: state.proposal.baseCommit, commit, reasons: reviewReasons(state), idempotencyKey: key, runId });
-      this.record(goalId, 'review-dispatched', { dispatchId: reviewer.dispatchId, runId: reviewer.runId, key, commit, worktreeId: reviewer.worktreeId, terminal: reviewer.terminal, requested: reviewer.requested });
+      const reviewer = await this.runtime.startReviewer!({
+        repoPath,
+        goalId,
+        baseCommit: state.proposal.baseCommit,
+        commit,
+        reasons: reviewReasons(state),
+        idempotencyKey: key,
+        runId,
+      });
+      this.record(goalId, 'review-dispatched', {
+        dispatchId: reviewer.dispatchId,
+        runId: reviewer.runId,
+        key,
+        commit,
+        worktreeId: reviewer.worktreeId,
+        terminal: reviewer.terminal,
+        requested: reviewer.requested,
+      });
       actions.push(`Goal reviewer ${reviewer.dispatchId} on ${commit}`);
     } catch (error) {
-      actions.push(`Goal reviewer start outcome unknown, will recover by key: ${error instanceof Error ? error.message : String(error)}`);
+      actions.push(
+        `Goal reviewer start outcome unknown, will recover by key: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     return actions;
   }
@@ -419,15 +841,29 @@ export class MultiSupervisor {
     const runId = this.reviewRun(state);
     const found = await this.runtime.recover?.(intent.key, runId ?? '');
     if (found) {
-      this.record(goalId, 'review-dispatched', { dispatchId: found.dispatchId, runId: found.runId, key: intent.key, commit: intent.commit, worktreeId: found.worktreeId, terminal: found.terminal });
+      this.record(goalId, 'review-dispatched', {
+        dispatchId: found.dispatchId,
+        runId: found.runId,
+        key: intent.key,
+        commit: intent.commit,
+        worktreeId: found.worktreeId,
+        terminal: found.terminal,
+      });
       actions.push(`recovered Goal reviewer ${found.dispatchId}`);
       return actions;
     }
     if (this.now() - Date.parse(intent.at) < 3 * 60_000) return actions;
     const tries = this.store.events(goalId).filter(item => item.type === 'review-intended').length;
     if (tries >= 3) {
-      this.record(goalId, 'blocked', { kind: 'technical', note: `needs-decision: Goal reviewer for ${intent.commit} could not be started or found after ${tries} tries` });
-      this.record(goalId, 'human-notified', { kind: 'needs-decision', goalId, note: `Goal reviewer for ${intent.commit} could not be started or found after ${tries} tries` });
+      this.record(goalId, 'blocked', {
+        kind: 'technical',
+        note: `needs-decision: Goal reviewer for ${intent.commit} could not be started or found after ${tries} tries`,
+      });
+      this.record(goalId, 'human-notified', {
+        kind: 'needs-decision',
+        goalId,
+        note: `Goal reviewer for ${intent.commit} could not be started or found after ${tries} tries`,
+      });
       actions.push('needs-decision: Goal reviewer could not be started');
       return actions;
     }
@@ -438,17 +874,46 @@ export class MultiSupervisor {
     const goalId = state.spec.id;
     const actions: string[] = [];
     const pending = state.reviewDispatch!;
-    const observation = await this.runtime.inspect({ runId: pending.runId, taskId: '', dispatchId: pending.dispatchId, owner: 'lead', repoPath });
+    const observation = await this.runtime.inspect({
+      runId: pending.runId,
+      taskId: '',
+      dispatchId: pending.dispatchId,
+      owner: 'lead',
+      repoPath,
+    });
     if (!observation.outcome) {
       const since = [...this.store.events(goalId)].reverse().find(item => item.type === 'review-dispatched');
-      actions.push(...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, runId: pending.runId, repoPath, terminal: pending.terminal, role: 'reviewer', requested: pending.requested, handoffHint: `apos handoff ${goalId} --reviewer --agent <other>` }));
-      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at, requested: pending.requested }));
+      actions.push(
+        ...(await watchDispatch(this.store, this.runtime, this.now, {
+          goalId,
+          dispatchId: pending.dispatchId,
+          runId: pending.runId,
+          repoPath,
+          terminal: pending.terminal,
+          role: 'reviewer',
+          requested: pending.requested,
+          handoffHint: `apos handoff ${goalId} --reviewer --agent <other>`,
+        })),
+      );
+      actions.push(
+        ...(await unstickDispatch(this.store, this.runtime, this.now, {
+          goalId,
+          dispatchId: pending.dispatchId,
+          terminal: pending.terminal,
+          since: since?.at,
+          requested: pending.requested,
+        })),
+      );
       return actions;
     }
     const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId, dispatchId: pending.dispatchId });
     const raw = head && show(repoPath, head, reviewResultPath(goalId, pending.key));
     let result: { result?: string; note?: string } | undefined;
-    try { result = raw ? JSON.parse(raw.replace(/^\uFEFF/, '')) : undefined; } catch { result = undefined; }
+    try {
+      result = raw ? JSON.parse(raw.replace(/^\uFEFF/, '')) : undefined;
+    } catch {
+      result = undefined;
+    }
     if (!result || !['pass', 'changes'].includes(result.result ?? '') || !result.note?.trim()) {
       const note = `Goal reviewer ${pending.dispatchId} left no valid review at ${reviewResultPath(goalId, pending.key)}`;
       this.record(goalId, 'blocked', { kind: 'technical', note: `needs-decision: ${note}` });
@@ -456,7 +921,14 @@ export class MultiSupervisor {
       actions.push(`needs-decision: ${note}`);
       return actions;
     }
-    this.record(goalId, 'review-submitted', { subject: 'goal', reviewer: 'apos-reviewer', session: pending.dispatchId, result: result.result, commitRef: pending.commit, note: result.note });
+    this.record(goalId, 'review-submitted', {
+      subject: 'goal',
+      reviewer: 'apos-reviewer',
+      session: pending.dispatchId,
+      result: result.result,
+      commitRef: pending.commit,
+      note: result.note,
+    });
     actions.push(`Goal review ${result.result}`);
     void events; // the Lead is told from the recorded review, so a refused wake is retried (see step)
     return actions;
@@ -469,39 +941,92 @@ export class MultiSupervisor {
     if (!fresh.length) return [];
     const lead = state.leadTerminal;
     if (!lead || !this.runtime.wakeLead) {
-      const asked = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'lead-unreachable');
+      const asked = this.store
+        .events(goalId)
+        .some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'lead-unreachable');
       if (!asked) this.record(goalId, 'human-notified', { kind: 'lead-unreachable', goalId, events: fresh });
       return [`Lead unreachable for: ${fresh.join('; ')}`];
     }
     // The Lead's latest turn: its last wake, or a fresh agent a handoff started (which must settle and be retained first).
-    const lastWake = [...this.store.events(goalId)].reverse().find(item => (item.type === 'lead-woken' && (item.data as { dispatchId?: string }).dispatchId) || (item.type === 'owner-handed-off' && (item.data as { target?: { kind?: string } }).target?.kind === 'lead'));
-    const lastDispatch = lastWake?.type === 'owner-handed-off' ? (lastWake.data as { ref?: { dispatchId?: string } }).ref?.dispatchId : (lastWake?.data as { dispatchId?: string } | undefined)?.dispatchId;
+    const lastWake = [...this.store.events(goalId)]
+      .reverse()
+      .find(
+        item =>
+          (item.type === 'lead-woken' && (item.data as { dispatchId?: string }).dispatchId) ||
+          (item.type === 'owner-handed-off' && (item.data as { target?: { kind?: string } }).target?.kind === 'lead'),
+      );
+    const lastDispatch =
+      lastWake?.type === 'owner-handed-off'
+        ? (lastWake.data as { ref?: { dispatchId?: string } }).ref?.dispatchId
+        : (lastWake?.data as { dispatchId?: string } | undefined)?.dispatchId;
     if (lastDispatch) {
-      const observation = await this.runtime.inspect({ runId: lead.runId ?? '', taskId: '', dispatchId: lastDispatch, owner: 'lead', repoPath });
+      const observation = await this.runtime.inspect({
+        runId: lead.runId ?? '',
+        taskId: '',
+        dispatchId: lastDispatch,
+        owner: 'lead',
+        repoPath,
+      });
       if (!observation.outcome) {
         const requested = state.lead?.ref.requested as { agent?: string; model?: string } | undefined;
         return [
-          ...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: lastDispatch, runId: lead.runId ?? '', repoPath, terminal: lead.terminal, role: 'lead', requested, handoffHint: `apos handoff ${goalId} --agent <other>` }),
-          ...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: lastDispatch, terminal: lead.terminal, since: lastWake!.at, requested }),
-          `Lead busy; holding ${fresh.length} event(s)`
+          ...(await watchDispatch(this.store, this.runtime, this.now, {
+            goalId,
+            dispatchId: lastDispatch,
+            runId: lead.runId ?? '',
+            repoPath,
+            terminal: lead.terminal,
+            role: 'lead',
+            requested,
+            handoffHint: `apos handoff ${goalId} --agent <other>`,
+          })),
+          ...(await unstickDispatch(this.store, this.runtime, this.now, {
+            goalId,
+            dispatchId: lastDispatch,
+            terminal: lead.terminal,
+            since: lastWake!.at,
+            requested,
+          })),
+          `Lead busy; holding ${fresh.length} event(s)`,
         ];
       }
       // Orca keeps the terminal bound to a settled dispatch until it is retained, and refuses the next wake (seen live:
       // agent_unconfigured). The Lead's dispatches live on its own Run, which the inbox does not read, so retain here.
       await this.runtime.retainWorker?.(lastDispatch);
     }
-    const runId = lead.runId ?? (Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId).find(Boolean));
+    const runId =
+      lead.runId ??
+      Object.values(state.packages ?? {})
+        .map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId)
+        .find(Boolean);
     if (!runId) return [];
     // One key per Lead turn: a wake whose response was lost is recovered by it instead of starting a second fresh Lead.
     let woken: Awaited<ReturnType<NonNullable<RuntimeAdapter['wakeLead']>>>;
-    try { woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: lead.terminal, worktree: lead.worktree, runId, events: fresh, idempotencyKey: `wake-${lastDispatch ?? state.lead?.current ?? randomUUID()}`, requested: state.lead?.ref.requested as { agent?: string; model?: string } | undefined, baseCommit: state.lead?.ref.baseCommit, goalVersion: state.spec.version }); }
-    catch (error) {
+    try {
+      woken = await this.runtime.wakeLead({
+        repoPath,
+        goalId,
+        terminal: lead.terminal,
+        worktree: lead.worktree,
+        runId,
+        events: fresh,
+        idempotencyKey: `wake-${lastDispatch ?? state.lead?.current ?? randomUUID()}`,
+        requested: state.lead?.ref.requested as { agent?: string; model?: string } | undefined,
+        baseCommit: state.lead?.ref.baseCommit,
+        goalVersion: state.spec.version,
+      });
+    } catch (error) {
       // The session that owned this wake has ended (chat closed): retrying cannot work. A fresh Lead takes over the worktree and finds the pending events itself.
       if (!isDeadSession(error) || !this.options.freshLead) throw error;
       await this.options.freshLead(goalId, repoPath);
       return [`Lead session ended; started a fresh Lead for: ${fresh.join('; ')}`];
     }
-    this.record(goalId, 'lead-woken', { dispatchId: woken.dispatchId, events: fresh, runId, ...(woken.terminal ? { terminal: woken.terminal, worktree: lead.worktree, requested: woken.requested } : {}) });
+    this.record(goalId, 'lead-woken', {
+      dispatchId: woken.dispatchId,
+      events: fresh,
+      runId,
+      ...(woken.terminal ? { terminal: woken.terminal, worktree: lead.worktree, requested: woken.requested } : {}),
+    });
     return [`woke Lead ${woken.dispatchId}: ${fresh.join('; ')}`];
   }
 }

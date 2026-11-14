@@ -9,26 +9,42 @@ import { initProject } from './init-project.js';
 import { MergeService } from './merge.js';
 
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+});
 
 it('merges only the gated commit, only after the Human authorizes that one merge', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-merge-')); dirs.push(dir);
+  const dir = mkdtempSync(join(tmpdir(), 'apos-merge-'));
+  dirs.push(dir);
   const git = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
-  git(['init', '-q']); await initProject(dir);
+  git(['init', '-q']);
+  await initProject(dir);
   const target = git(['branch', '--show-current']);
   git(['switch', '-q', '-c', 'feature']);
-  writeFileSync(join(dir, 'feature.txt'), 'done'); git(['add', 'feature.txt']);
+  writeFileSync(join(dir, 'feature.txt'), 'done');
+  git(['add', 'feature.txt']);
   git(['-c', 'user.name=APOS', '-c', 'user.email=apos@local.invalid', 'commit', '-qm', 'feature']);
   const source = git(['rev-parse', 'HEAD']);
   git(['switch', '-q', target]);
   const store = SqliteStore.open(join(dir, '.apos', 'state.sqlite'));
   let n = 0;
-  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
-  add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected');
-  add('proposal-drafted', proposal); add('proposal-approved'); add('execution-started', { runId: 'run_1' });
+  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+    store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+  add('goal-drafted', spec);
+  add('goal-approved', approval);
+  add('goal-selected');
+  add('proposal-drafted', proposal);
+  add('proposal-approved');
+  add('execution-started', { runId: 'run_1' });
   // The owner reports a different commit than the one the controller gated: only the gated one may merge.
   const stale = '0'.repeat(40);
-  add('evidence-submitted', { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:goal', commitRef: stale });
+  add('evidence-submitted', {
+    acceptanceId: 'AC-1',
+    result: 'pass',
+    command: 'npm test',
+    artifactRef: 'log:goal',
+    commitRef: stale,
+  });
   add('gate-recorded', gateReport(source));
   add('verified');
   const service = new MergeService(store);

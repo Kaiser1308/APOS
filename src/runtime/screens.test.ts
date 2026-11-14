@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { quotaMessage, rulesFor, SCREENS, unsentBrief } from './screens.js';
 
-const fixture = (agent: string, name: string) => readFileSync(fileURLToPath(new URL(`./fixtures/screens/${agent}/${name}.txt`, import.meta.url)), 'utf8').split(/\r?\n/).filter((line, index, all) => index < all.length - 1 || line);
+const fixture = (agent: string, name: string) =>
+  readFileSync(fileURLToPath(new URL(`./fixtures/screens/${agent}/${name}.txt`, import.meta.url)), 'utf8')
+    .split(/\r?\n/)
+    .filter((line, index, all) => index < all.length - 1 || line);
 
 describe('screen rules per agent', () => {
   it('codex keeps its existing rules', () => {
@@ -26,16 +29,30 @@ describe('screen rules per agent', () => {
   });
 
   it('names the quota line', () => {
-    expect(quotaMessage('claude', fixture('claude', 'quota-weekly'))).toBe("You've hit your weekly limit · resets 1am (Asia/Ho_Chi_Minh)");
+    expect(quotaMessage('claude', fixture('claude', 'quota-weekly'))).toBe(
+      "You've hit your weekly limit · resets 1am (Asia/Ho_Chi_Minh)",
+    );
     expect(quotaMessage('claude', fixture('claude', 'quota-5h'))).toMatch(/5-hour limit · resets 12:20pm/);
     expect(quotaMessage('codex', fixture('codex', 'quota'))).toMatch(/^You’ve hit your usage limit\./);
     expect(quotaMessage('antigravity', fixture('claude', 'quota-weekly'))).toBeUndefined();
   });
 
   it('does not fire on an agent discussing limits, or while it is working', () => {
-    expect(quotaMessage('claude', ['[assistant] The API returns 429 when you hit your rate limit; add a retry.', "[assistant] Note: \"You've hit your weekly limit\" is what Claude prints."])).toBeUndefined();
-    expect(quotaMessage('codex', ['• The test expects the string You’ve hit your usage limit in the banner.', '› Ask Codex to do anything'])).toBeUndefined();
-    expect(quotaMessage('claude', [...fixture('claude', 'quota-weekly'), '[assistant] [tool Bash] {"command":"npm test"}'])).toBeUndefined();
+    expect(
+      quotaMessage('claude', [
+        '[assistant] The API returns 429 when you hit your rate limit; add a retry.',
+        '[assistant] Note: "You\'ve hit your weekly limit" is what Claude prints.',
+      ]),
+    ).toBeUndefined();
+    expect(
+      quotaMessage('codex', [
+        '• The test expects the string You’ve hit your usage limit in the banner.',
+        '› Ask Codex to do anything',
+      ]),
+    ).toBeUndefined();
+    expect(
+      quotaMessage('claude', [...fixture('claude', 'quota-weekly'), '[assistant] [tool Bash] {"command":"npm test"}']),
+    ).toBeUndefined();
   });
 
   it('an unknown agent tries every rule set', () => {
@@ -46,11 +63,30 @@ describe('screen rules per agent', () => {
   });
 });
 
-describe('quota lines are the agent\'s own last word, not text it printed', () => {
+describe("quota lines are the agent's own last word, not text it printed", () => {
   it('ignores an indented line, and a quota line followed by more agent output', () => {
-    expect(quotaMessage('codex', ['• Ran cat banner.txt', '  You’ve hit your usage limit · resets 3pm', '› Ask Codex to do anything'])).toBeUndefined();
+    expect(
+      quotaMessage('codex', [
+        '• Ran cat banner.txt',
+        '  You’ve hit your usage limit · resets 3pm',
+        '› Ask Codex to do anything',
+      ]),
+    ).toBeUndefined();
     expect(quotaMessage('claude', ["  You've hit your weekly limit · resets 1am", '[assistant] done'])).toBeUndefined();
-    expect(quotaMessage('claude', ["[assistant] You've hit your weekly limit · resets 1am", '[user] Continue', '[assistant] Picking up where I left off.'])).toBeUndefined();
-    expect(quotaMessage('codex', ['■ You’ve hit your usage limit. Try again later.', '', '• Ran npm test', '› Ask Codex to do anything'])).toBeUndefined();
+    expect(
+      quotaMessage('claude', [
+        "[assistant] You've hit your weekly limit · resets 1am",
+        '[user] Continue',
+        '[assistant] Picking up where I left off.',
+      ]),
+    ).toBeUndefined();
+    expect(
+      quotaMessage('codex', [
+        '■ You’ve hit your usage limit. Try again later.',
+        '',
+        '• Ran npm test',
+        '› Ask Codex to do anything',
+      ]),
+    ).toBeUndefined();
   });
 });

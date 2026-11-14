@@ -6,15 +6,38 @@ import type { RuntimeAdapter } from '../runtime/orca.js';
 
 it('blocks product replanning while Solo ownership is still live, then resets state for approval', async () => {
   let n = 0;
-  const event = (type: GoalEventType, data?: unknown): GoalEvent => ({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-08T00:00:00.000Z' });
+  const event = (type: GoalEventType, data?: unknown): GoalEvent => ({
+    id: `EV-${++n}`,
+    goalId: spec.id,
+    type,
+    data,
+    at: '2026-11-08T00:00:00.000Z',
+  });
   let state = applyEvent(undefined, event('goal-drafted', spec));
-  state = applyEvent(state, event('goal-approved', approval)); state = applyEvent(state, event('goal-selected'));
+  state = applyEvent(state, event('goal-approved', approval));
+  state = applyEvent(state, event('goal-selected'));
   state = applyEvent(state, event('proposal-drafted', proposal));
   state = applyEvent(state, event('proposal-approved'));
-  state = applyEvent(state, event('execution-started', { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'lead', repoPath: 'C:/project' }));
+  state = applyEvent(
+    state,
+    event('execution-started', {
+      runId: 'run_1',
+      taskId: 'task_1',
+      dispatchId: 'ctx_1',
+      owner: 'lead',
+      repoPath: 'C:/project',
+    }),
+  );
   const runtime: RuntimeAdapter = {
-    async startLead() { throw new Error('not used'); }, async resumeSolo() { throw new Error('not used'); },
-    async inspect(ref) { return { state: 'live', ref }; }
+    async startLead() {
+      throw new Error('not used');
+    },
+    async resumeSolo() {
+      throw new Error('not used');
+    },
+    async inspect(ref) {
+      return { state: 'live', ref };
+    },
   };
   await expect(assertExecutionSettled(state, runtime)).rejects.toThrow(/must settle/);
   runtime.inspect = async ref => ({ state: 'settled', outcome: 'completed', ref });

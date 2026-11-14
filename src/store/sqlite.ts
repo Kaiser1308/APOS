@@ -6,22 +6,33 @@ export class SqliteStore {
 
   static open(path: string): SqliteStore {
     const db = new DatabaseSync(path);
-    db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, goal_id TEXT NOT NULL, payload TEXT NOT NULL)');
+    db.exec(
+      'PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, goal_id TEXT NOT NULL, payload TEXT NOT NULL)',
+    );
     return new SqliteStore(db);
   }
 
   append(event: GoalEvent): void {
     applyEvent(this.getGoal(event.goalId), event);
-    this.db.prepare('INSERT INTO events (id, goal_id, payload) VALUES (?, ?, ?)').run(event.id, event.goalId, JSON.stringify(event));
+    this.db
+      .prepare('INSERT INTO events (id, goal_id, payload) VALUES (?, ?, ?)')
+      .run(event.id, event.goalId, JSON.stringify(event));
   }
 
   getGoal(id: string): GoalState | undefined {
-    const rows = this.db.prepare('SELECT payload FROM events WHERE goal_id = ? ORDER BY seq').all(id) as Array<{ payload: string }>;
-    return rows.reduce<GoalState | undefined>((state, row) => applyEvent(state, JSON.parse(row.payload) as GoalEvent), undefined);
+    const rows = this.db.prepare('SELECT payload FROM events WHERE goal_id = ? ORDER BY seq').all(id) as Array<{
+      payload: string;
+    }>;
+    return rows.reduce<GoalState | undefined>(
+      (state, row) => applyEvent(state, JSON.parse(row.payload) as GoalEvent),
+      undefined,
+    );
   }
 
   listGoals(): GoalState[] {
-    const rows = this.db.prepare('SELECT DISTINCT goal_id FROM events ORDER BY goal_id').all() as Array<{ goal_id: string }>;
+    const rows = this.db.prepare('SELECT DISTINCT goal_id FROM events ORDER BY goal_id').all() as Array<{
+      goal_id: string;
+    }>;
     return rows.map(row => this.getGoal(row.goal_id)).filter((state): state is GoalState => Boolean(state));
   }
 
@@ -30,11 +41,17 @@ export class SqliteStore {
   }
 
   eventIds(goalId: string): string[] {
-    return (this.db.prepare('SELECT id FROM events WHERE goal_id = ? ORDER BY seq').all(goalId) as Array<{ id: string }>).map(row => row.id);
+    return (
+      this.db.prepare('SELECT id FROM events WHERE goal_id = ? ORDER BY seq').all(goalId) as Array<{ id: string }>
+    ).map(row => row.id);
   }
 
   events(goalId: string): GoalEvent[] {
-    return (this.db.prepare('SELECT payload FROM events WHERE goal_id = ? ORDER BY seq').all(goalId) as Array<{ payload: string }>).map(row => JSON.parse(row.payload) as GoalEvent);
+    return (
+      this.db.prepare('SELECT payload FROM events WHERE goal_id = ? ORDER BY seq').all(goalId) as Array<{
+        payload: string;
+      }>
+    ).map(row => JSON.parse(row.payload) as GoalEvent);
   }
 
   replaceGoalEvents(goalId: string, events: GoalEvent[]): void {
@@ -55,5 +72,7 @@ export class SqliteStore {
     }
   }
 
-  close(): void { this.db.close(); }
+  close(): void {
+    this.db.close();
+  }
 }

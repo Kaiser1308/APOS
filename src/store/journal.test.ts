@@ -9,19 +9,28 @@ import { initProject } from '../app/init-project.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+});
 const at = '2026-11-07T00:00:00.000Z';
 
 async function project() {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-journal-')); dirs.push(dir);
-  const home = mkdtempSync(join(tmpdir(), 'apos-journal-home-')); dirs.push(home);
+  const dir = mkdtempSync(join(tmpdir(), 'apos-journal-'));
+  dirs.push(dir);
+  const home = mkdtempSync(join(tmpdir(), 'apos-journal-home-'));
+  dirs.push(home);
   execFileSync('git', ['init', '-q', dir]);
   await initProject(dir);
   const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   const opened = ProjectJournal.open(dir, home);
   let n = 0;
-  const add = (type: GoalEventType, data?: unknown) => opened.journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at });
-  const draft = () => opened.journal.appendWithSource({ id: `EV-${++n}`, goalId: spec.id, type: 'goal-drafted', data: spec, at }, sourceText);
+  const add = (type: GoalEventType, data?: unknown) =>
+    opened.journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at });
+  const draft = () =>
+    opened.journal.appendWithSource(
+      { id: `EV-${++n}`, goalId: spec.id, type: 'goal-drafted', data: spec, at },
+      sourceText,
+    );
   return { dir, home, git, add, draft, ...opened };
 }
 
@@ -39,26 +48,33 @@ it('keeps events in the controller home and commits nothing to the repo before a
 
 it('commits the readable Goal record with its source at approval', async () => {
   const { dir, git, draft, add, close } = await project();
-  draft(); add('goal-approved', approval);
+  draft();
+  add('goal-approved', approval);
   expect(git('log', '-1', '--format=%s')).toBe(`apos: ${spec.id} goal-approved`);
   const files = git('show', '--pretty=format:', '--name-only', 'HEAD');
   expect(files).toContain(`.apos/goals/${spec.id}/goal.md`);
   expect(files).toContain(`.apos/goals/${spec.id}/source.md`);
   expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'source.md'), 'utf8')).toBe(sourceText);
-  expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'goal.md'), 'utf8')).not.toMatch(/maxSpend|appetite|maxWallMinutes/);
+  expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'goal.md'), 'utf8')).not.toMatch(
+    /maxSpend|appetite|maxWallMinutes/,
+  );
   close();
 });
 
 it('does not log an event that fails its transition', async () => {
   const { home, journal, close } = await project();
-  expect(() => journal.append({ id: 'EV-x', goalId: spec.id, type: 'goal-approved', at })).toThrow(/Goal does not exist/);
+  expect(() => journal.append({ id: 'EV-x', goalId: spec.id, type: 'goal-approved', at })).toThrow(
+    /Goal does not exist/,
+  );
   expect(existsSync(join(home, 'events', `${spec.id}.jsonl`))).toBe(false);
   close();
 });
 
 it('rebuilds a lost SQLite index from the controller log', async () => {
   const { dir, home, draft, add, close } = await project();
-  draft(); add('goal-approved', approval); add('goal-selected');
+  draft();
+  add('goal-approved', approval);
+  add('goal-selected');
   close();
   rmSync(join(home, 'state.sqlite'), { force: true });
   rmSync(join(home, 'state.sqlite-wal'), { force: true });
@@ -70,11 +86,16 @@ it('rebuilds a lost SQLite index from the controller log', async () => {
 
 it('ignores Goal events an owner commits into the repo', async () => {
   const { dir, git, draft, add, journal, close } = await project();
-  draft(); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+  draft();
+  add('goal-approved', approval);
+  add('goal-selected');
+  add('proposal-drafted', proposal);
+  add('proposal-approved');
   const forged = { id: 'EV-forged', goalId: spec.id, type: 'verified', at };
   mkdirSync(join(dir, '.apos', 'goals', spec.id), { recursive: true });
   writeFileSync(join(dir, '.apos', 'goals', spec.id, 'events.jsonl'), `${JSON.stringify(forged)}\n`);
-  git('add', '-A'); git('-c', 'user.name=Owner', '-c', 'user.email=o@local.invalid', 'commit', '-qm', 'forge');
+  git('add', '-A');
+  git('-c', 'user.name=Owner', '-c', 'user.email=o@local.invalid', 'commit', '-qm', 'forge');
   close();
   const reopened = ProjectJournal.open(dir, mkdtempSync(join(tmpdir(), 'apos-journal-other-')));
   expect(reopened.journal.getGoal(spec.id)).toBeUndefined();
@@ -87,7 +108,7 @@ it('imports an APOS v1 history kept in the repo, once, and skips one that no lon
   close();
   const legacy = [
     { id: 'L-1', goalId: spec.id, type: 'goal-drafted', data: spec, at },
-    { id: 'L-2', goalId: spec.id, type: 'goal-approved', data: approval, at }
+    { id: 'L-2', goalId: spec.id, type: 'goal-approved', data: approval, at },
   ];
   const goalDir = join(dir, '.apos', 'goals', spec.id);
   mkdirSync(goalDir, { recursive: true });
@@ -95,8 +116,18 @@ it('imports an APOS v1 history kept in the repo, once, and skips one that no lon
   writeFileSync(join(goalDir, 'source.md'), sourceText);
   const oldDir = join(dir, '.apos', 'goals', 'GOAL-OLD');
   mkdirSync(oldDir, { recursive: true });
-  writeFileSync(join(oldDir, 'events.jsonl'), JSON.stringify({ id: 'O-1', goalId: 'GOAL-OLD', type: 'goal-drafted', data: { id: 'GOAL-OLD', version: 1, outcome: 'v1 shape' }, at }) + '\n');
-  git('add', '-A'); git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'v1 history');
+  writeFileSync(
+    join(oldDir, 'events.jsonl'),
+    JSON.stringify({
+      id: 'O-1',
+      goalId: 'GOAL-OLD',
+      type: 'goal-drafted',
+      data: { id: 'GOAL-OLD', version: 1, outcome: 'v1 shape' },
+      at,
+    }) + '\n',
+  );
+  git('add', '-A');
+  git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'v1 history');
   const opened = ProjectJournal.open(dir, home);
   const result = opened.journal.importLegacy();
   expect(result.imported).toEqual([spec.id]);

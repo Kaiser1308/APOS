@@ -22,14 +22,26 @@ import { approval } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
-const spec: GoalSpec = { ...baseSpec, checks: [{ id: 'CHK-1', kind: 'command', command: 'node harness.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} }] };
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+});
+const spec: GoalSpec = {
+  ...baseSpec,
+  checks: [
+    { id: 'CHK-1', kind: 'command', command: 'node harness.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} },
+  ],
+};
 const APPETITE = ['--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3'];
 /** Runs `fn` as the Lead Orca dispatched: its terminal handle is the one APOS recorded. */
 async function asLead<T>(terminal: string, fn: () => Promise<T>): Promise<T> {
   const before = process.env.ORCA_TERMINAL_HANDLE;
   process.env.ORCA_TERMINAL_HANDLE = terminal;
-  try { return await fn(); } finally { if (before === undefined) delete process.env.ORCA_TERMINAL_HANDLE; else process.env.ORCA_TERMINAL_HANDLE = before; }
+  try {
+    return await fn();
+  } finally {
+    if (before === undefined) delete process.env.ORCA_TERMINAL_HANDLE;
+    else process.env.ORCA_TERMINAL_HANDLE = before;
+  }
 }
 
 /**
@@ -37,20 +49,50 @@ async function asLead<T>(terminal: string, fn: () => Promise<T>): Promise<T> {
  * scripted work for that attempt, then settles. Everything else - gate, findings, resume, review,
  * verification, merge - is the real controller on real Git.
  */
-async function setup(work: (attempt: number, commit: (files: Record<string, string>, message: string) => void, line: string) => void, options: { risks?: string[]; reviewer?: (commit: (files: Record<string, string>) => void, key: string) => void; launched?: string; intrude?: boolean; failed?: (attempt: number) => boolean; inbox?: OrcaMessage[]; reviewerUnknown?: boolean; refuseResumes?: number; hungIdleMinutes?: number } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-auto-')); dirs.push(dir);
-  const artifacts = mkdtempSync(join(tmpdir(), 'apos-auto-art-')); dirs.push(artifacts);
+async function setup(
+  work: (attempt: number, commit: (files: Record<string, string>, message: string) => void, line: string) => void,
+  options: {
+    risks?: string[];
+    reviewer?: (commit: (files: Record<string, string>) => void, key: string) => void;
+    launched?: string;
+    intrude?: boolean;
+    failed?: (attempt: number) => boolean;
+    inbox?: OrcaMessage[];
+    reviewerUnknown?: boolean;
+    refuseResumes?: number;
+    hungIdleMinutes?: number;
+  } = {},
+) {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-auto-'));
+  dirs.push(dir);
+  const artifacts = mkdtempSync(join(tmpdir(), 'apos-auto-art-'));
+  dirs.push(artifacts);
   execFileSync('git', ['init', '-q', dir]);
   const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   writeFileSync(join(dir, 'harness.js'), "require('./feature.js');");
-  git('add', 'harness.js'); git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'harness');
+  git('add', 'harness.js');
+  git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'harness');
   let owner = '';
   const commitIn = (cwd: string) => (files: Record<string, string>, message: string) => {
-    for (const [name, content] of Object.entries(files)) { mkdirSync(join(cwd, name, '..'), { recursive: true }); writeFileSync(join(cwd, name), content); }
+    for (const [name, content] of Object.entries(files)) {
+      mkdirSync(join(cwd, name, '..'), { recursive: true });
+      writeFileSync(join(cwd, name), content);
+    }
     execFileSync('git', ['-C', cwd, 'add', '--', ...Object.keys(files)]);
-    execFileSync('git', ['-C', cwd, '-c', 'user.name=Owner', '-c', 'user.email=o@local.invalid', 'commit', '-qm', message]);
+    execFileSync('git', [
+      '-C',
+      cwd,
+      '-c',
+      'user.name=Owner',
+      '-c',
+      'user.email=o@local.invalid',
+      'commit',
+      '-qm',
+      message,
+    ]);
   };
-  const commit = (files: Record<string, string>, message: string) => commitIn(options.intrude ? dir : owner)(files, message);
+  const commit = (files: Record<string, string>, message: string) =>
+    commitIn(options.intrude ? dir : owner)(files, message);
   let attempt = 0;
   const dispatches: string[] = [];
   const settled = new Set<string>();
@@ -63,7 +105,17 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
   let reviewKey: string | undefined;
   let lostReviewer: RuntimeRef | undefined;
   let refusals = 0;
-  const ref = (n: number): RuntimeRef => ({ runId: 'run_1', taskId: `task_${n}`, dispatchId: `ctx_${n}`, owner: 'lead', repoPath: dir, terminal: 'term_1', worktreeId: `repo::${owner}`, baseCommit: base, requested: { agent: 'codex', model: 'gpt-6.1-terra' } });
+  const ref = (n: number): RuntimeRef => ({
+    runId: 'run_1',
+    taskId: `task_${n}`,
+    dispatchId: `ctx_${n}`,
+    owner: 'lead',
+    repoPath: dir,
+    terminal: 'term_1',
+    worktreeId: `repo::${owner}`,
+    baseCommit: base,
+    requested: { agent: 'codex', model: 'gpt-6.1-terra' },
+  });
   let base = '';
   const runOwner = () => {
     attempt += 1;
@@ -75,37 +127,93 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
     // The Lead: its own worktree at the base it plans from. It delivers (runOwner) after lead commit accepts its Solo plan.
     async startLead(input) {
       budgets.push(input.budget);
-      base = git('rev-parse', 'HEAD'); dispatches.push('start');
-      owner = join(mkdtempSync(join(tmpdir(), 'apos-auto-wt-')), 'wt'); dirs.push(join(owner, '..'));
+      base = git('rev-parse', 'HEAD');
+      dispatches.push('start');
+      owner = join(mkdtempSync(join(tmpdir(), 'apos-auto-wt-')), 'wt');
+      dirs.push(join(owner, '..'));
       git('worktree', 'add', '-q', '-b', 'owner', owner, base);
       return ref(1);
     },
     async resumeSolo(_ref, _checkpoint, _key, budget) {
-      if (refusals < (options.refuseResumes ?? 0)) { refusals += 1; throw new OrcaRefused('agent_unconfigured', 'agent_unconfigured'); }
-      budgets.push(budget); dispatches.push('resume'); const r = ref(attempt + 1); runOwner(); return r; },
-    async inspect(r) { if (options.hungIdleMinutes !== undefined && !settled.has(r.dispatchId)) return { state: 'live', idleMinutes: options.hungIdleMinutes, ref: r }; return settled.has(r.dispatchId) ? { state: 'settled', outcome: failedDispatches.has(r.dispatchId) ? 'failed' : 'completed', ref: r } : { state: 'live', ref: r }; },
-    async deliveryHead(r) { return execFileSync('git', ['-C', r.worktreeId ? r.worktreeId.split('::')[1] : owner, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); },
-    async launchReceipt() { return { agent: 'codex', model: options.launched ?? 'gpt-6.1-terra' }; },
+      if (refusals < (options.refuseResumes ?? 0)) {
+        refusals += 1;
+        throw new OrcaRefused('agent_unconfigured', 'agent_unconfigured');
+      }
+      budgets.push(budget);
+      dispatches.push('resume');
+      const r = ref(attempt + 1);
+      runOwner();
+      return r;
+    },
+    async inspect(r) {
+      if (options.hungIdleMinutes !== undefined && !settled.has(r.dispatchId))
+        return { state: 'live', idleMinutes: options.hungIdleMinutes, ref: r };
+      return settled.has(r.dispatchId)
+        ? { state: 'settled', outcome: failedDispatches.has(r.dispatchId) ? 'failed' : 'completed', ref: r }
+        : { state: 'live', ref: r };
+    },
+    async deliveryHead(r) {
+      return execFileSync('git', ['-C', r.worktreeId ? r.worktreeId.split('::')[1] : owner, 'rev-parse', 'HEAD'], {
+        encoding: 'utf8',
+      }).trim();
+    },
+    async launchReceipt() {
+      return { agent: 'codex', model: options.launched ?? 'gpt-6.1-terra' };
+    },
     async startReviewer(input) {
       reviewKey = input.idempotencyKey;
-      const reviewWt = join(mkdtempSync(join(tmpdir(), 'apos-auto-rv-')), 'wt'); dirs.push(join(reviewWt, '..'));
+      const reviewWt = join(mkdtempSync(join(tmpdir(), 'apos-auto-rv-')), 'wt');
+      dirs.push(join(reviewWt, '..'));
       git('worktree', 'add', '-q', '--detach', reviewWt, input.commit);
       options.reviewer?.(files => commitIn(reviewWt)(files, 'review'), input.idempotencyKey);
       settled.add('ctx_review');
-      if (options.reviewerUnknown) { lostReviewer = { runId: 'run_1', taskId: 'task_r', dispatchId: 'ctx_review', owner: 'lead', repoPath: dir, worktreeId: `repo::${reviewWt}` }; throw new Error('Orca orchestration worker-start failed: state=outcome_unknown'); }
-      return { runId: 'run_1', taskId: 'task_r', dispatchId: 'ctx_review', owner: 'reviewer', repoPath: dir, worktreeId: `repo::${reviewWt}`, key: input.idempotencyKey, commit: input.commit };
+      if (options.reviewerUnknown) {
+        lostReviewer = {
+          runId: 'run_1',
+          taskId: 'task_r',
+          dispatchId: 'ctx_review',
+          owner: 'lead',
+          repoPath: dir,
+          worktreeId: `repo::${reviewWt}`,
+        };
+        throw new Error('Orca orchestration worker-start failed: state=outcome_unknown');
+      }
+      return {
+        runId: 'run_1',
+        taskId: 'task_r',
+        dispatchId: 'ctx_review',
+        owner: 'reviewer',
+        repoPath: dir,
+        worktreeId: `repo::${reviewWt}`,
+        key: input.idempotencyKey,
+        commit: input.commit,
+      };
     },
-    async releaseWorker(dispatchId) { released.push(dispatchId); },
-    async recover(key) { return lostReviewer && key === reviewKey ? lostReviewer : undefined; },
-    ...(options.inbox ? {
-      async checkRun() { return inbox.length ? { deliveryId: 'delivery_1', messages: inbox } : { messages: [] }; },
-      async ackRun(_run: string, deliveryId: string) { acked.push(deliveryId); inbox = []; },
-      async retainWorker() {},
-      async replyMessage(_run: string, messageId: string, body: string) { replies.push({ messageId, body }); }
-    } : {})
+    async releaseWorker(dispatchId) {
+      released.push(dispatchId);
+    },
+    async recover(key) {
+      return lostReviewer && key === reviewKey ? lostReviewer : undefined;
+    },
+    ...(options.inbox
+      ? {
+          async checkRun() {
+            return inbox.length ? { deliveryId: 'delivery_1', messages: inbox } : { messages: [] };
+          },
+          async ackRun(_run: string, deliveryId: string) {
+            acked.push(deliveryId);
+            inbox = [];
+          },
+          async retainWorker() {},
+          async replyMessage(_run: string, messageId: string, body: string) {
+            replies.push({ messageId, body });
+          },
+        }
+      : {}),
   };
   const output: string[] = [];
-  const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, gate: { artifactRoot: artifacts }, write: line => output.push(line) });
+  const invoke = (...args: string[]) =>
+    runCli(['--repo', dir, ...args], { runtime, gate: { artifactRoot: artifacts }, write: line => output.push(line) });
   writeFileSync(join(dir, 'goal.json'), JSON.stringify(spec));
   writeFileSync(join(dir, 'brief.md'), sourceText);
   writeFileSync(join(dir, 'plan.json'), JSON.stringify({ ...proposal, risks: options.risks ?? [] }));
@@ -119,17 +227,45 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
     await invoke('lead', 'commit', spec.id);
   });
   runOwner();
-  const tick = async () => { await invoke('controller', 'tick'); return output.at(-1)!; };
-  const state = () => { const opened = ProjectJournal.open(dir); try { return opened.journal.getGoal(spec.id)!; } finally { opened.close(); } };
-  return { dir, git, invoke, tick, state, dispatches, released, output, reviewKeyOf: () => reviewKey, budgets, replies, acked };
+  const tick = async () => {
+    await invoke('controller', 'tick');
+    return output.at(-1)!;
+  };
+  const state = () => {
+    const opened = ProjectJournal.open(dir);
+    try {
+      return opened.journal.getGoal(spec.id)!;
+    } finally {
+      opened.close();
+    }
+  };
+  return {
+    dir,
+    git,
+    invoke,
+    tick,
+    state,
+    dispatches,
+    released,
+    output,
+    reviewKeyOf: () => reviewKey,
+    budgets,
+    replies,
+    acked,
+  };
 }
 
-const report = (attempt: number, line: string) => ({ [soloReportPath(spec.id, attempt)]: `# Delivery\n\n${line}\nreviewedHead: HEAD\n` });
+const report = (attempt: number, line: string) => ({
+  [soloReportPath(spec.id, attempt)]: `# Delivery\n\n${line}\nreviewedHead: HEAD\n`,
+});
 
 describe('Solo autopilot', () => {
   it('turns a red gate into a machine finding, resumes the same owner, then verifies the fix', async () => {
     const { tick, state, dispatches, invoke, git, released } = await setup((attempt, commit, line) => {
-      commit({ 'feature.js': attempt === 1 ? 'process.exit(1);' : 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`);
+      commit(
+        { 'feature.js': attempt === 1 ? 'process.exit(1);' : 'process.exit(0);', ...report(attempt, line) },
+        `attempt ${attempt}`,
+      );
     });
     await tick();
     await tick();
@@ -147,39 +283,71 @@ describe('Solo autopilot', () => {
   }, 90_000);
 
   it('sends the Goal to a Human decision when the same failure survives two repairs', async () => {
-    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(1);', ...report(attempt, line) }, `attempt ${attempt}`));
+    const { tick, state, dispatches } = await setup((attempt, commit, line) =>
+      commit({ 'feature.js': 'process.exit(1);', ...report(attempt, line) }, `attempt ${attempt}`),
+    );
     for (let i = 0; i < 4; i++) await tick();
     expect(dispatches).toEqual(['start', 'resume', 'resume']);
-    expect(state()).toMatchObject({ status: 'blocked', blocker: { note: expect.stringMatching(/needs-decision: same failure after two repairs/) } });
+    expect(state()).toMatchObject({
+      status: 'blocked',
+      blocker: { note: expect.stringMatching(/needs-decision: same failure after two repairs/) },
+    });
   }, 90_000);
 
   it('does not accept a delivery whose report lacks the core activation line', async () => {
-    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, attempt === 1 ? 'no activation' : line) }, `attempt ${attempt}`));
-    await tick(); await tick(); await tick();
+    const { tick, state, dispatches } = await setup((attempt, commit, line) =>
+      commit(
+        { 'feature.js': 'process.exit(0);', ...report(attempt, attempt === 1 ? 'no activation' : line) },
+        `attempt ${attempt}`,
+      ),
+    );
+    await tick();
+    await tick();
+    await tick();
     expect(dispatches).toEqual(['start', 'resume']);
     expect(state().findings![0].note).toMatch(/activation line/);
     expect(state().status).toBe('verified');
   }, 90_000);
 
   it('tells the Human once when an unsettled owner has sat idle past the quiet spell (a dead launch looks like this)', async () => {
-    const { tick, state, output } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), { hungIdleMinutes: 20 });
-    await tick(); await tick(); await tick();
+    const { tick, state, output } = await setup(
+      (attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'),
+      { hungIdleMinutes: 20 },
+    );
+    await tick();
+    await tick();
+    await tick();
     expect(state().status).toBe('executing');
     expect(output.filter(line => line.includes('idle 20 min; Human notified'))).toHaveLength(1);
     expect(state().findings ?? []).toHaveLength(0);
   }, 90_000);
 
   it('stops for a decision when the runtime launched a different model than planned', async () => {
-    const { tick, state } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), { launched: 'gpt-6-luna' });
-    await tick(); await tick();
-    expect(state().blocker).toMatchObject({ note: expect.stringMatching(/launched codex\/gpt-6-luna, plan requires codex\/gpt-6.1-terra/) });
+    const { tick, state } = await setup(
+      (attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'),
+      { launched: 'gpt-6-luna' },
+    );
+    await tick();
+    await tick();
+    expect(state().blocker).toMatchObject({
+      note: expect.stringMatching(/launched codex\/gpt-6-luna, plan requires codex\/gpt-6.1-terra/),
+    });
   }, 90_000);
 
   it('sends a risky green delivery to a separate reviewer session and verifies only on its pass', async () => {
-    const { tick, state } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), {
-      risks: ['auth regression'],
-      reviewer: (commit, key) => commit({ [reviewResultPath(spec.id, key)]: JSON.stringify({ result: 'pass', note: 'Checked auth paths and boundaries' }) })
-    });
+    const { tick, state } = await setup(
+      (attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'),
+      {
+        risks: ['auth regression'],
+        reviewer: (commit, key) =>
+          commit({
+            [reviewResultPath(spec.id, key)]: JSON.stringify({
+              result: 'pass',
+              note: 'Checked auth paths and boundaries',
+            }),
+          }),
+      },
+    );
     // lead commit dispatched the owner; the first tick gates its delivery green and starts the reviewer.
     expect(await tick()).toContain('reviewer ctx_review');
     expect(state()).toMatchObject({ status: 'executing', reviewDispatch: { dispatchId: 'ctx_review' } });
@@ -189,10 +357,15 @@ describe('Solo autopilot', () => {
   }, 90_000);
 
   it('recovers a reviewer Orca created but reported as outcome unknown (seen live on SQLFMT)', async () => {
-    const { tick, state } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), {
-      risks: ['auth regression'], reviewerUnknown: true,
-      reviewer: (commit, key) => commit({ [reviewResultPath(spec.id, key)]: JSON.stringify({ result: 'pass', note: 'Checked auth paths' }) })
-    });
+    const { tick, state } = await setup(
+      (attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'),
+      {
+        risks: ['auth regression'],
+        reviewerUnknown: true,
+        reviewer: (commit, key) =>
+          commit({ [reviewResultPath(spec.id, key)]: JSON.stringify({ result: 'pass', note: 'Checked auth paths' }) }),
+      },
+    );
     expect(await tick()).toContain('reviewer start outcome unknown');
     expect(state()).toMatchObject({ status: 'executing', reviewIntent: { commit: expect.any(String) } });
     expect(await tick()).toContain('recovered reviewer ctx_review');
@@ -201,10 +374,22 @@ describe('Solo autopilot', () => {
   }, 90_000);
 
   it('retries a refused resume after a review asks for changes on a green gate (seen live on SQLFMT)', async () => {
-    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`), {
-      risks: ['auth regression'], refuseResumes: 1,
-      reviewer: (commit, key) => commit({ [reviewResultPath(spec.id, key)]: JSON.stringify(dispatches.length === 1 ? { result: 'changes', note: 'Comma lands inside a comment' } : { result: 'pass', note: 'Fixed' }) })
-    });
+    const { tick, state, dispatches } = await setup(
+      (attempt, commit, line) =>
+        commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`),
+      {
+        risks: ['auth regression'],
+        refuseResumes: 1,
+        reviewer: (commit, key) =>
+          commit({
+            [reviewResultPath(spec.id, key)]: JSON.stringify(
+              dispatches.length === 1
+                ? { result: 'changes', note: 'Comma lands inside a comment' }
+                : { result: 'pass', note: 'Fixed' },
+            ),
+          }),
+      },
+    );
     await tick();
     expect(await tick()).toContain('resume refused, will retry');
     expect(await tick()).toContain('resumed owner');
@@ -213,44 +398,72 @@ describe('Solo autopilot', () => {
 
   it('turns a reviewer request for changes into a finding for the same owner', async () => {
     let reviews = 0;
-    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`), {
-      risks: ['auth regression'],
-      reviewer: (commit, key) => { reviews += 1; commit({ [reviewResultPath(spec.id, key)]: JSON.stringify(reviews === 1 ? { result: 'changes', note: 'src/auth.ts: expired token still accepted' } : { result: 'pass', note: 'Fixed' }) }); }
-    });
-    await tick(); await tick();
+    const { tick, state, dispatches } = await setup(
+      (attempt, commit, line) =>
+        commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`),
+      {
+        risks: ['auth regression'],
+        reviewer: (commit, key) => {
+          reviews += 1;
+          commit({
+            [reviewResultPath(spec.id, key)]: JSON.stringify(
+              reviews === 1
+                ? { result: 'changes', note: 'src/auth.ts: expired token still accepted' }
+                : { result: 'pass', note: 'Fixed' },
+            ),
+          });
+        },
+      },
+    );
+    await tick();
+    await tick();
     expect(dispatches).toEqual(['start', 'resume']);
     expect(state().findings![0].note).toMatch(/expired token still accepted/);
-    await tick(); await tick();
+    await tick();
+    await tick();
     expect(state().status).toBe('verified');
   }, 90_000);
 
   it('does not block a Goal for an ordinary Human commit on the managed checkout during the attempt', async () => {
-    const { tick, state, git, dir } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'));
+    const { tick, state, git, dir } = await setup((attempt, commit, line) =>
+      commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'),
+    );
     // The owner is done; meanwhile anh commits unrelated work on the managed checkout.
     writeFileSync(join(dir, 'notes.md'), 'unrelated');
-    git('add', 'notes.md'); git('-c', 'user.name=Anh', '-c', 'user.email=anh@local.invalid', 'commit', '-qm', 'unrelated human work');
+    git('add', 'notes.md');
+    git('-c', 'user.name=Anh', '-c', 'user.email=anh@local.invalid', 'commit', '-qm', 'unrelated human work');
     await tick();
     expect(state().status).toBe('verified');
   }, 90_000);
 
   it('stops for a decision when the owner commits into the managed checkout instead of its worktree', async () => {
-    const { tick, state } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work in the wrong place'), { intrude: true });
+    const { tick, state } = await setup(
+      (attempt, commit, line) =>
+        commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work in the wrong place'),
+      { intrude: true },
+    );
     await tick();
-    expect(state().blocker).toMatchObject({ note: expect.stringMatching(/needs-decision: the owner.s delivery landed in the managed checkout/) });
+    expect(state().blocker).toMatchObject({
+      note: expect.stringMatching(/needs-decision: the owner.s delivery landed in the managed checkout/),
+    });
   }, 90_000);
 });
 
 describe('owner stops early (seen live on SQLFMT)', () => {
   it('resumes an owner that reported failed with budget left, quoting its own Remaining list, and tells it the budget', async () => {
-    const { tick, state, dispatches, budgets } = await setup((attempt, commit, line) => {
-      const body = attempt === 1 ? `# Solo attempt: incomplete
+    const { tick, state, dispatches, budgets } = await setup(
+      (attempt, commit, line) => {
+        const body =
+          attempt === 1
+            ? `# Solo attempt: incomplete
 
 ${line}
 
 ## Remaining
 
 Lowercase TRUE and FALSE literals.
-` : `# Delivery
+`
+            : `# Delivery
 
 ${line}
 
@@ -258,8 +471,10 @@ ${line}
 
 none
 `;
-      commit({ 'feature.js': 'process.exit(0);', [soloReportPath(spec.id, attempt)]: body }, `attempt ${attempt}`);
-    }, { failed: attempt => attempt === 1 });
+        commit({ 'feature.js': 'process.exit(0);', [soloReportPath(spec.id, attempt)]: body }, `attempt ${attempt}`);
+      },
+      { failed: attempt => attempt === 1 },
+    );
     await tick();
     expect(dispatches).toEqual(['start', 'resume']);
     expect(state().findings![0]).toMatchObject({ kind: 'patch', by: 'controller', signature: 'owner-incomplete' });
@@ -272,28 +487,53 @@ none
   }, 90_000);
 
   it('still stops for a decision when an owner reports failed without a delivery report', async () => {
-    const { tick, state, dispatches } = await setup((attempt, commit) => commit({ 'feature.js': 'process.exit(0);' }, 'work'), { failed: () => true });
+    const { tick, state, dispatches } = await setup(
+      (attempt, commit) => commit({ 'feature.js': 'process.exit(0);' }, 'work'),
+      { failed: () => true },
+    );
     await tick();
     expect(dispatches).toEqual(['start']);
-    expect(state().blocker).toMatchObject({ note: expect.stringMatching(/reported failed on attempt 1 without a delivery report/) });
+    expect(state().blocker).toMatchObject({
+      note: expect.stringMatching(/reported failed on attempt 1 without a delivery report/),
+    });
   }, 90_000);
 
   it('stops when an owner keeps reporting failed and the attempt budget is spent', async () => {
-    const { tick, state, dispatches } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', [soloReportPath(spec.id, attempt)]: `${line}
+    const { tick, state, dispatches } = await setup(
+      (attempt, commit, line) =>
+        commit(
+          {
+            'feature.js': 'process.exit(0);',
+            [soloReportPath(spec.id, attempt)]: `${line}
 ## Remaining
 more
-` }, `a${attempt}`), { failed: () => true });
+`,
+          },
+          `a${attempt}`,
+        ),
+      { failed: () => true },
+    );
     for (let i = 0; i < 4; i++) await tick();
     expect(dispatches).toEqual(['start', 'resume', 'resume']);
     expect(state().status).toBe('blocked');
   }, 90_000);
 
   it('notifies the Human of an owner escalation once, answers with the standing rule, and acks the delivery', async () => {
-    const message: OrcaMessage = { id: 'msg_1', type: 'escalation', subject: 'Conflicting oracle', body: 'An existing fixture contradicts AC-1.' };
-    const { tick, state, replies, acked, dir } = await setup((attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'), { inbox: [message] });
+    const message: OrcaMessage = {
+      id: 'msg_1',
+      type: 'escalation',
+      subject: 'Conflicting oracle',
+      body: 'An existing fixture contradicts AC-1.',
+    };
+    const { tick, state, replies, acked, dir } = await setup(
+      (attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'),
+      { inbox: [message] },
+    );
     await tick();
     const opened = ProjectJournal.open(dir);
-    const notices = opened.journal.events(spec.id).filter(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'escalation');
+    const notices = opened.journal
+      .events(spec.id)
+      .filter(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'escalation');
     opened.close();
     expect(notices).toHaveLength(1);
     expect(notices[0].data).toMatchObject({ messageId: 'msg_1', subject: 'Conflicting oracle' });
@@ -307,43 +547,109 @@ more
 
 describe('stalled Codex input', () => {
   it('reads the screen: presses Enter up to three times a minute apart while the brief is unsent, then tells the Human', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'apos-stall-')); dirs.push(dir);
+    const dir = mkdtempSync(join(tmpdir(), 'apos-stall-'));
+    dirs.push(dir);
     const store = SqliteStore.open(join(dir, 'state.sqlite'));
     const t0 = Date.parse('2026-11-08T00:00:00.000Z');
     let n = 0;
-    const add = (type: GoalEventType, data?: unknown) => store.append({ id: `S-${++n}`, goalId: spec.id, type, data, at: new Date(t0).toISOString() });
-    add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
-    const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_1' };
-    add('dispatch-intended', 'k'); add('execution-started', ref);
+    const add = (type: GoalEventType, data?: unknown) =>
+      store.append({ id: `S-${++n}`, goalId: spec.id, type, data, at: new Date(t0).toISOString() });
+    add('goal-drafted', spec);
+    add('goal-approved', approval);
+    add('goal-selected');
+    add('proposal-drafted', proposal);
+    add('proposal-approved');
+    const ref: RuntimeRef = {
+      runId: 'r',
+      taskId: 't',
+      dispatchId: 'ctx_1',
+      owner: 'lead',
+      repoPath: dir,
+      terminal: 'term_1',
+    };
+    add('dispatch-intended', 'k');
+    add('execution-started', ref);
     const nudges: string[] = [];
     let screen = ['› [Pasted Content 7848 chars]', '  GPT-6.1 Terra medium'];
-    const runtime: RuntimeAdapter = { async startLead() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; }, async composerPending() { return composerHasUnsentBrief(screen); }, async nudge(terminal) { nudges.push(terminal); } };
+    const runtime: RuntimeAdapter = {
+      async startLead() {
+        return ref;
+      },
+      async resumeSolo() {
+        return ref;
+      },
+      async inspect() {
+        return { state: 'live', ref };
+      },
+      async composerPending() {
+        return composerHasUnsentBrief(screen);
+      },
+      async nudge(terminal) {
+        nudges.push(terminal);
+      },
+    };
     let now = t0 + 30_000;
     const supervisor = new SoloSupervisor(store, runtime, { now: () => now });
     expect(await supervisor.step(spec.id, dir)).toEqual([]);
     now = t0 + 70_000;
     expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (1/3)']);
     expect(await supervisor.step(spec.id, dir)).toEqual([]);
-    now = t0 + 140_000; expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (2/3)']);
-    now = t0 + 210_000; expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (3/3)']);
-    now = t0 + 280_000; expect(await supervisor.step(spec.id, dir)).toEqual(['stalled ctx_1; Human notified']);
+    now = t0 + 140_000;
+    expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (2/3)']);
+    now = t0 + 210_000;
+    expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (3/3)']);
+    now = t0 + 280_000;
+    expect(await supervisor.step(spec.id, dir)).toEqual(['stalled ctx_1; Human notified']);
     expect(await supervisor.step(spec.id, dir)).toEqual([]);
     expect(nudges).toHaveLength(3);
     store.close();
   });
 
   it('reads the screen with the rules of the agent the owner was launched with', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'apos-stall-agy-')); dirs.push(dir);
+    const dir = mkdtempSync(join(tmpdir(), 'apos-stall-agy-'));
+    dirs.push(dir);
     const store = SqliteStore.open(join(dir, 'state.sqlite'));
     const t0 = Date.parse('2026-11-08T00:00:00.000Z');
     let n = 0;
-    const add = (type: GoalEventType, data?: unknown) => store.append({ id: `S-${++n}`, goalId: spec.id, type, data, at: new Date(t0).toISOString() });
-    add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
-    const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_1', requested: { agent: 'antigravity' } };
-    add('dispatch-intended', 'k'); add('execution-started', ref);
-    const screen = readFileSync(join(fileURLToPath(new URL('../runtime/fixtures/screens/antigravity/unsent.txt', import.meta.url))), 'utf8').split(/\r?\n/);
+    const add = (type: GoalEventType, data?: unknown) =>
+      store.append({ id: `S-${++n}`, goalId: spec.id, type, data, at: new Date(t0).toISOString() });
+    add('goal-drafted', spec);
+    add('goal-approved', approval);
+    add('goal-selected');
+    add('proposal-drafted', proposal);
+    add('proposal-approved');
+    const ref: RuntimeRef = {
+      runId: 'r',
+      taskId: 't',
+      dispatchId: 'ctx_1',
+      owner: 'lead',
+      repoPath: dir,
+      terminal: 'term_1',
+      requested: { agent: 'antigravity' },
+    };
+    add('dispatch-intended', 'k');
+    add('execution-started', ref);
+    const screen = readFileSync(
+      join(fileURLToPath(new URL('../runtime/fixtures/screens/antigravity/unsent.txt', import.meta.url))),
+      'utf8',
+    ).split(/\r?\n/);
     const agents: (string | undefined)[] = [];
-    const runtime: RuntimeAdapter = { async startLead() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; }, async composerPending(_terminal, agent) { agents.push(agent); return unsentBrief(agent, screen); }, async nudge() {} };
+    const runtime: RuntimeAdapter = {
+      async startLead() {
+        return ref;
+      },
+      async resumeSolo() {
+        return ref;
+      },
+      async inspect() {
+        return { state: 'live', ref };
+      },
+      async composerPending(_terminal, agent) {
+        agents.push(agent);
+        return unsentBrief(agent, screen);
+      },
+      async nudge() {},
+    };
     const supervisor = new SoloSupervisor(store, runtime, { now: () => t0 + 70_000 });
     expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (1/3)']);
     expect(agents).toEqual(['antigravity']);
@@ -353,25 +659,56 @@ describe('stalled Codex input', () => {
   it('never reports an agent that is visibly working, whatever Orca says (seen live: false stalled notice)', () => {
     expect(composerHasUnsentBrief(['• Working (50s • esc to interrupt)', '› Ask Codex to do anything'])).toBe(false);
     expect(composerHasUnsentBrief(['› Ask Codex to do anything', '  GPT-6.1 Terra medium'])).toBe(false);
-    expect(composerHasUnsentBrief(['› [Pasted Content 1285 chars]  orca orchestration send --from term --type worker_done --subject', '  "<short status[Pasted Content 2313 chars]'])).toBe(true);
+    expect(
+      composerHasUnsentBrief([
+        '› [Pasted Content 1285 chars]  orca orchestration send --from term --type worker_done --subject',
+        '  "<short status[Pasted Content 2313 chars]',
+      ]),
+    ).toBe(true);
   });
 });
 
 describe('Orca refusing a resume', () => {
   it('drops a refused resume intent so the next try is a clean retry, but keeps an unknown outcome for recovery', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'apos-refuse-')); dirs.push(dir);
+    const dir = mkdtempSync(join(tmpdir(), 'apos-refuse-'));
+    dirs.push(dir);
     const store = SqliteStore.open(join(dir, 'state.sqlite'));
     let n = 0;
-    const add = (type: GoalEventType, data?: unknown) => store.append({ id: `F-${++n}`, goalId: spec.id, type, data, at: '2026-11-08T00:00:00.000Z' });
-    add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
-    const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_1', worktreeId: 'repo::wt' };
-    add('dispatch-intended', 'k'); add('execution-started', ref); add('checkpointed', { phase: 'repair', progress: 'fix', evidenceRefs: [] });
+    const add = (type: GoalEventType, data?: unknown) =>
+      store.append({ id: `F-${++n}`, goalId: spec.id, type, data, at: '2026-11-08T00:00:00.000Z' });
+    add('goal-drafted', spec);
+    add('goal-approved', approval);
+    add('goal-selected');
+    add('proposal-drafted', proposal);
+    add('proposal-approved');
+    const ref: RuntimeRef = {
+      runId: 'r',
+      taskId: 't',
+      dispatchId: 'ctx_1',
+      owner: 'lead',
+      repoPath: dir,
+      terminal: 'term_1',
+      worktreeId: 'repo::wt',
+    };
+    add('dispatch-intended', 'k');
+    add('execution-started', ref);
+    add('checkpointed', { phase: 'repair', progress: 'fix', evidenceRefs: [] });
     let mode: 'refuse' | 'unknown' | 'ok' = 'refuse';
     const runtime: RuntimeAdapter = {
-      async startLead() { return ref; },
-      async resumeSolo() { if (mode === 'refuse') throw new OrcaRefused('agent_unconfigured', 'agent_unconfigured'); if (mode === 'unknown') throw new Error('state=outcome_unknown'); return { ...ref, dispatchId: 'ctx_2' }; },
-      async inspect(r) { return { state: 'settled', outcome: 'completed', ref: r }; },
-      async recover() { return { ...ref, dispatchId: 'ctx_2' }; }
+      async startLead() {
+        return ref;
+      },
+      async resumeSolo() {
+        if (mode === 'refuse') throw new OrcaRefused('agent_unconfigured', 'agent_unconfigured');
+        if (mode === 'unknown') throw new Error('state=outcome_unknown');
+        return { ...ref, dispatchId: 'ctx_2' };
+      },
+      async inspect(r) {
+        return { state: 'settled', outcome: 'completed', ref: r };
+      },
+      async recover() {
+        return { ...ref, dispatchId: 'ctx_2' };
+      },
     };
     const solo = new SoloService(store, runtime);
     await expect(solo.resume(spec.id)).rejects.toThrow(/agent_unconfigured/);

@@ -6,14 +6,25 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 const script = fileURLToPath(new URL('./promote-skills.mjs', import.meta.url));
 const bundled = fileURLToPath(new URL('../skills', import.meta.url));
 const run = (...args: string[]) => {
-  try { return { code: 0, out: execFileSync(process.execPath, [script, ...args], { encoding: 'utf8' }) }; }
-  catch (error) { const failure = error as { status: number; stdout: string }; return { code: failure.status, out: failure.stdout }; }
+  try {
+    return { code: 0, out: execFileSync(process.execPath, [script, ...args], { encoding: 'utf8' }) };
+  } catch (error) {
+    const failure = error as { status: number; stdout: string };
+    return { code: failure.status, out: failure.stdout };
+  }
 };
-const copyOfStable = () => { const dir = mkdtempSync(join(tmpdir(), 'apos-skills-')); dirs.push(dir); cpSync(bundled, dir, { recursive: true }); return dir; };
+const copyOfStable = () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-skills-'));
+  dirs.push(dir);
+  cpSync(bundled, dir, { recursive: true });
+  return dir;
+};
 
 it('reports drift without writing, and brings the development copy over only when asked', () => {
   const dev = copyOfStable();
@@ -32,7 +43,7 @@ it('reports drift without writing, and brings the development copy over only whe
 
 it('takes the development dir as the first argument when no --to is given', () => {
   const dev = copyOfStable();
-  const result = run("--check", dev); // the real stable copy, read only
+  const result = run('--check', dev); // the real stable copy, read only
   expect(result.out).toMatch(/same {2,}apos-core/);
 });
 
@@ -45,8 +56,19 @@ it('refuses a development skill that does not declare the contract version', () 
 });
 
 it('--check without a development copy validates the bundled skills instead of crashing (GitHub #10)', () => {
-  const env = { ...process.env }; delete env.APOS_DEV_SKILLS;
-  const check = (stable: string) => { try { return { code: 0, out: execFileSync(process.execPath, [script, '--check', '--to', stable], { encoding: 'utf8', env }) }; } catch (error) { const failure = error as { status: number; stdout: string }; return { code: failure.status, out: failure.stdout }; } };
+  const env = { ...process.env };
+  delete env.APOS_DEV_SKILLS;
+  const check = (stable: string) => {
+    try {
+      return {
+        code: 0,
+        out: execFileSync(process.execPath, [script, '--check', '--to', stable], { encoding: 'utf8', env }),
+      };
+    } catch (error) {
+      const failure = error as { status: number; stdout: string };
+      return { code: failure.status, out: failure.stdout };
+    }
+  };
   const stable = copyOfStable();
   expect(check(stable)).toMatchObject({ code: 0, out: expect.stringMatching(/bundled skills OK/) });
   const broken = join(stable, 'apos-lead', 'SKILL.md');

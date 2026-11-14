@@ -25,3 +25,15 @@ it('attributes tokens per dispatch when a resume continues the same cumulative C
   expect(probe.usage({ worktreePath: 'C:/wt/owner', since: '2026-11-08T01:30:00Z', until: '2026-11-08T01:32:00Z' })).toMatchObject({ inputTokens: 250, cachedInputTokens: 240, outputTokens: 15 });
   expect(probe.usage({ worktreePath: 'C:/wt/nobody', since: '2026-11-08T01:26:30Z', until: '2026-11-08T01:32:00Z' })).toBeUndefined();
 });
+
+it('does not credit a Codex session on a worktree to the Claude agent that took it over later', () => {
+  const root = mkdtempSync(join(tmpdir(), 'apos-codex-')); dirs.push(root);
+  const day = join(root, '2026', '11', '14'); mkdirSync(day, { recursive: true });
+  const row = (timestamp: string, type: string, payload: unknown) => JSON.stringify({ timestamp, type, payload });
+  writeFileSync(join(day, 'rollout-before-handoff.jsonl'), [
+    row('2026-11-14T01:00:00Z', 'session_meta', { cwd: 'C:\wt\owner' }),
+    row('2026-11-14T01:05:00Z', 'event_msg', { type: 'token_count', info: { total_token_usage: { input_tokens: 500, cached_input_tokens: 400, output_tokens: 50 } } })
+  ].join('\n'));
+  // The Claude dispatch starts on the same worktree after the handoff; Codex wrote nothing in its window.
+  expect(new CodexSessionProbe(root).usage({ worktreePath: 'C:/wt/owner', since: '2026-11-14T01:20:00Z', until: '2026-11-14T01:40:00Z' })).toBeUndefined();
+});

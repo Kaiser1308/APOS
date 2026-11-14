@@ -14,6 +14,8 @@ import { parseAppetite, parseExecutionProposal, parseGoalSpec, type Evidence, ty
 import type { GoalEventType } from './domain/transitions.js';
 import { initProject } from './app/init-project.js';
 import { SoloService } from './app/solo.js';
+import { HandoffService } from './app/handoff.js';
+import type { HandoffTarget } from './domain/transitions.js';
 import { LeadService, assertLeadTerminal, currentLeadRef } from './app/lead.js';
 import { PackageService, type PackageRuntime } from './app/packages.js';
 import { IntegrationService, type CommitInspector } from './app/integration.js';
@@ -420,6 +422,23 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     journal.append(event(id, 'unblocked'));
     write(`Unblocked ${id}`);
   }));
+  program.command('handoff').argument('<goalId>')
+    .description('Human: move a stuck owner (for example out of quota) to a fresh agent on the same worktree; no attempt is spent')
+    .option('--package <id>', 'the Worker of this package instead of the Lead').option('--reviewer', 'the reviewer instead of the Lead')
+    .option('--agent <id>', 'also make this agent the profile of that role (as `profile set`)').option('--model <id>').option('--effort <level>', 'needs --model')
+    .action((goalId: string, flags: { package?: string; reviewer?: boolean; agent?: string; model?: string; effort?: string }) => withJournalAsync(async journal => {
+      assertHuman(journal, 'handoff');
+      if (flags.package && flags.reviewer) throw new Error('Pass --package or --reviewer, not both');
+      if ((flags.model || flags.effort) && !flags.agent) throw new Error('--model and --effort need --agent');
+      const target: HandoffTarget = flags.package ? { kind: 'package', packageId: flags.package } : flags.reviewer ? { kind: 'reviewer' } : { kind: 'lead' };
+      const role: Role = target.kind === 'package' ? 'worker' : target.kind === 'reviewer' ? 'reviewer' : 'lead';
+      // Written first: the runtime reads the role profile when it starts the new agent.
+      if (flags.agent) applyProfile([role], { agent: flags.agent, model: flags.model, effort: flags.effort });
+      const result = await new HandoffService(journal, runtime, () => loadProfiles(home())).handoff(goalId, target, repo());
+      write(`handed off ${goalId}${flags.package ? ` ${flags.package}` : flags.reviewer ? ' reviewer' : ''} to ${loadProfiles(home())[role].agent} (${result.dispatchId})`);
+      if (result.warning) write(`warning: ${result.warning}`);
+    }));
+
   const outcome = program.command('outcome');
   // Gate D: the Human reads the Verification Report, decides the outcome and, only here, whether to merge.
   for (const decision of ['close', 'revise', 'stop'] as const) {

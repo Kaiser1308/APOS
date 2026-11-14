@@ -235,3 +235,38 @@ it('apos profile shows, sets and resets role profiles, and only the Human may ch
     await expect(invoke('profile', 'reset')).rejects.toThrow(/Human decision/);
   });
 });
+
+it('apos handoff moves the Lead to a fresh agent and, with --agent, changes only that role profile', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-cli-handoff-')); dirs.push(dir);
+  const home = mkdtempSync(join(tmpdir(), 'apos-cli-handoff-home-')); dirs.push(home);
+  execFileSync('git', ['init', '-q', dir]);
+  const ref: RuntimeRef = { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_lead', worktreeId: 'repo::C:/lead-wt' };
+  const stops: string[] = [];
+  const runtime: RuntimeAdapter = {
+    async startLead() { ref.baseCommit = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); return ref; },
+    async resumeSolo() { return ref; },
+    async inspect(r) { return { state: 'live', ref: r }; },
+    async stopWorker(dispatchId) { stops.push(dispatchId); return 'stopped'; },
+    async handoff(input) { return { runId: input.runId, taskId: 'task_2', dispatchId: 'ctx_2', owner: 'lead', repoPath: dir, terminal: 'term_2', worktreeId: input.worktreeId, baseCommit: input.baseCommit, requested: { agent: 'claude' } }; }
+  };
+  const output: string[] = [];
+  const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, home, write: line => output.push(line) });
+  await invoke('init');
+  writeFileSync(join(dir, 'goal-input.json'), JSON.stringify(spec)); writeFileSync(join(dir, 'brief.md'), sourceText);
+  await invoke('goal', 'create', '--file', join(dir, 'goal-input.json'), '--source', join(dir, 'brief.md'));
+  await invoke('goal', 'approve', spec.id, '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3');
+  await invoke('goal', 'select', spec.id);
+  await asLead('term_lead', async () => {
+    await expect(invoke('handoff', spec.id, '--agent', 'claude')).rejects.toThrow(/Human decision/);
+  });
+  await invoke('handoff', spec.id, '--agent', 'claude');
+  expect(stops).toEqual(['ctx_1']);
+  expect(output.at(-1)).toBe(`handed off ${spec.id} to claude (ctx_2)`);
+  const { loadProfiles } = await import('./runtime/brief.js');
+  expect(loadProfiles(home).lead).toEqual({ agent: 'claude' });
+  expect(loadProfiles(home).worker.agent).toBe('codex');
+  // A package handoff changes the worker profile only, even when there is no such package to hand off.
+  await expect(invoke('handoff', spec.id, '--package', 'WP-X', '--agent', 'antigravity')).rejects.toThrow(/no package WP-X/);
+  expect(loadProfiles(home).worker).toEqual({ agent: 'antigravity' });
+  expect(loadProfiles(home).lead).toEqual({ agent: 'claude' });
+});

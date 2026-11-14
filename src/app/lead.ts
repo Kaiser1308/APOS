@@ -3,6 +3,7 @@ import type { GoalEventType, GoalState, LeadState } from '../domain/transitions.
 import type { GoalRepository } from '../store/journal.js';
 import { resolve, sep } from 'node:path';
 import { OrcaRefused, worktreePath, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
+import { exhaustedAgent, exhaustedNote } from './watch.js';
 
 /** How long a Lead dispatch may stay unknown before the Human is asked to look in Orca. */
 export const LEAD_INTENT_MINUTES = 10;
@@ -114,7 +115,12 @@ export class LeadService {
       actions.push(`Lead ${lead.current} settled ${observation.outcome} before a plan was accepted; Human notified`);
       return actions;
     }
-    if (observation.idleMinutes !== undefined && observation.idleMinutes >= LEAD_IDLE_MINUTES) {
+    const exhausted = await exhaustedAgent(this.runtime, { dispatchId: lead.current, terminal: lead.ref.terminal, requested: ref.requested, idleMinutes: observation.idleMinutes });
+    if (exhausted) {
+      if (this.notifyOnce(goalId, 'agent-exhausted', data => data.dispatchId === lead.current, { dispatchId: lead.current, role: 'lead', agent: exhausted.agent, model: ref.requested?.model, message: exhausted.message, note: exhaustedNote('lead', exhausted.agent, exhausted.message, `apos handoff ${goalId} --agent <other>`) })) actions.push(`lead ${lead.current} out of quota (${exhausted.agent ?? 'unknown agent'}); Human notified`);
+    } else if (this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string; dispatchId?: string }).kind === 'agent-exhausted' && (item.data as { dispatchId?: string }).dispatchId === lead.current)) {
+      // Already reported as out of quota: not reported again as idle.
+    } else if (observation.idleMinutes !== undefined && observation.idleMinutes >= LEAD_IDLE_MINUTES) {
       if (this.notifyOnce(goalId, 'lead-idle', data => data.dispatchId === lead.current, { dispatchId: lead.current, idleMinutes: Math.round(observation.idleMinutes), note: `the Lead has been idle for ${Math.round(observation.idleMinutes)} min without reporting worker_done; it may have died (wrong model, auth, crash). Check its terminal in Orca or \`orca orchestration worker-show --dispatch ${lead.current}\`.` })) actions.push(`Lead ${lead.current} idle; Human notified`);
     }
     const started = clockStart(this.store.events(goalId));

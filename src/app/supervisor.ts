@@ -14,9 +14,7 @@ import { SoloService } from './solo.js';
 import { VerificationService } from './verification.js';
 import { PackageService, type PackageRuntime, type PackageRuntimeRef } from './packages.js';
 import { GitCommitInspector, IntegrationService, type CommitInspector } from './integration.js';
-
-/** Minutes an unsettled owner may sit idle before the Human is told (the same quiet spell as the controller's idle watchdog). */
-const OWNER_IDLE_MINUTES = 15;
+import { dispatchAgent, watchDispatch } from './watch.js';
 
 const show = (repo: string, commit: string, path: string): string | undefined => {
   try { return execFileSync('git', ['-C', repo, 'show', `${commit}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
@@ -55,22 +53,6 @@ export class SoloSupervisor {
     return started ? (this.now() - Date.parse(started)) / 60_000 : 0;
   }
 
-  /**
-   * Seen live: an owner's turn died at launch (`model_not_found`), Orca kept it `live idle`, no worker_done ever came and
-   * the Goal sat `executing` with nothing in the inbox. An owner that is still unsettled yet idle for OWNER_IDLE_MINUTES is
-   * reported once per dispatch, with how to look and how to recover.
-   */
-  private async noticeIdleOwner(goalId: string, ref: RuntimeRef): Promise<string[]> {
-    if (!this.runtime.inspect) return [];
-    let idleMinutes: number | undefined;
-    try { idleMinutes = (await this.runtime.inspect(ref)).idleMinutes; } catch { return []; }
-    if (idleMinutes === undefined || idleMinutes < OWNER_IDLE_MINUTES) return [];
-    const noticed = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string; dispatchId?: string }).kind === 'owner-idle' && (item.data as { dispatchId?: string }).dispatchId === ref.dispatchId);
-    if (noticed) return [];
-    this.record(goalId, 'human-notified', { kind: 'owner-idle', goalId, dispatchId: ref.dispatchId, idleMinutes: Math.round(idleMinutes), note: `owner has been idle for ${Math.round(idleMinutes)} min without reporting worker_done; it may have died (wrong model, auth, crash). Check the terminal in Orca or \`orca orchestration worker-show --dispatch ${ref.dispatchId}\`, then \`apos execution abandon-intent\` or \`apos outcome stop\`.` });
-    return [`owner ${ref.dispatchId} idle ${Math.round(idleMinutes)} min; Human notified`];
-  }
-
   async step(goalId: string, repoPath: string): Promise<string[]> {
     const actions: string[] = [];
     const state = this.store.getGoal(goalId);
@@ -82,7 +64,8 @@ export class SoloSupervisor {
       const noticed = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'overrun');
       if (overTime && !noticed) { this.record(goalId, 'human-notified', { kind: 'overrun', goalId, note: 'owner still running past the approved wall time' }); actions.push('notified overrun'); }
       const since = [...this.store.events(goalId)].reverse().find(item => ['execution-started', 'runtime-resumed'].includes(item.type));
-      actions.push(...await this.noticeIdleOwner(goalId, ref));
+      // Seen live: an owner's turn died at launch (`model_not_found`) and Orca kept it `live idle` with nothing in the inbox.
+      actions.push(...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, runId: ref.runId, repoPath: ref.repoPath, terminal: ref.terminal, role: 'lead', requested: ref.requested, handoffHint: `apos handoff ${goalId} --agent <other>` }));
       actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at, requested: ref.requested }));
       return actions;
     }
@@ -211,6 +194,7 @@ export class SoloSupervisor {
     if (!observation.outcome) {
       // Seen live: the reviewer's brief sat in the composer like the owner's did.
       const since = [...this.store.events(goalId)].reverse().find(item => item.type === 'review-dispatched');
+      actions.push(...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, runId: pending.runId, repoPath, terminal: pending.terminal, role: 'reviewer', requested: pending.requested, handoffHint: `apos handoff ${goalId} --reviewer --agent <other>` }));
       actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at, requested: pending.requested }));
       return actions;
     }
@@ -249,12 +233,6 @@ export class SoloSupervisor {
       usage: usage ?? 'unknown', ...(started ? { wallMs: this.now() - Date.parse(started.at) } : {})
     });
   }
-}
-
-/** The agent a dispatch runs: the profile APOS asked for, else what Orca says it launched; undefined when neither says. */
-export async function dispatchAgent(runtime: RuntimeAdapter, dispatchId: string, requested?: { agent?: string }): Promise<string | undefined> {
-  if (requested?.agent) return requested.agent;
-  try { return (await runtime.launchReceipt?.(dispatchId))?.agent ?? undefined; } catch { return undefined; }
 }
 
 /**
@@ -337,6 +315,7 @@ export class MultiSupervisor {
       const attemptKey = `${item.spec.id}@${item.spec.version}:${item.attempts}`;
       if (!outcome) {
         const since = [...this.store.events(goalId)].reverse().find(event => ['package-started', 'package-resumed'].includes(event.type) && JSON.stringify(event.data ?? '').includes(ref.dispatchId));
+        actions.push(...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, runId: ref.runId, repoPath, terminal: ref.terminal, role: 'worker', requested: ref.requested, packageId: item.spec.id, handoffHint: `apos handoff ${goalId} --package ${item.spec.id} --agent <other>` }));
         actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at, requested: ref.requested }));
         continue;
       }
@@ -462,6 +441,7 @@ export class MultiSupervisor {
     const observation = await this.runtime.inspect({ runId: pending.runId, taskId: '', dispatchId: pending.dispatchId, owner: 'lead', repoPath });
     if (!observation.outcome) {
       const since = [...this.store.events(goalId)].reverse().find(item => item.type === 'review-dispatched');
+      actions.push(...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, runId: pending.runId, repoPath, terminal: pending.terminal, role: 'reviewer', requested: pending.requested, handoffHint: `apos handoff ${goalId} --reviewer --agent <other>` }));
       actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at, requested: pending.requested }));
       return actions;
     }
@@ -497,7 +477,14 @@ export class MultiSupervisor {
     const lastDispatch = (lastWake?.data as { dispatchId?: string } | undefined)?.dispatchId;
     if (lastDispatch) {
       const observation = await this.runtime.inspect({ runId: lead.runId ?? '', taskId: '', dispatchId: lastDispatch, owner: 'lead', repoPath });
-      if (!observation.outcome) return [...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: lastDispatch, terminal: lead.terminal, since: lastWake!.at, requested: state.lead?.ref.requested as { agent?: string } | undefined }), `Lead busy; holding ${fresh.length} event(s)`];
+      if (!observation.outcome) {
+        const requested = state.lead?.ref.requested as { agent?: string; model?: string } | undefined;
+        return [
+          ...await watchDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: lastDispatch, runId: lead.runId ?? '', repoPath, terminal: lead.terminal, role: 'lead', requested, handoffHint: `apos handoff ${goalId} --agent <other>` }),
+          ...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: lastDispatch, terminal: lead.terminal, since: lastWake!.at, requested }),
+          `Lead busy; holding ${fresh.length} event(s)`
+        ];
+      }
       // Orca keeps the terminal bound to a settled dispatch until it is retained, and refuses the next wake (seen live:
       // agent_unconfigured). The Lead's dispatches live on its own Run, which the inbox does not read, so retain here.
       await this.runtime.retainWorker?.(lastDispatch);

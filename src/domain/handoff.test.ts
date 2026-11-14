@@ -73,3 +73,15 @@ describe('handing an owner to another agent', () => {
     expect(state.reviewDispatch).toMatchObject({ dispatchId: 'ctx_r2', key: 'rk2', commit: 'c'.repeat(40) });
   });
 });
+
+describe('a Lead woken on a new agent', () => {
+  it('records the new terminal and profile, so the next wake does not hand off again', () => {
+    let state = applyEvent(start(), event('goal-approved', approval));
+    state = applyEvent(state, event('goal-selected'));
+    state = applyEvent(state, event('lead-dispatch-intended', 'lk'));
+    state = applyEvent(state, event('lead-started', { runId: 'run_1', taskId: 't1', dispatchId: 'ctx_1', repoPath: 'C:/repo', terminal: 'term_1', worktreeId: 'repo::C:/wt', baseCommit: 'b'.repeat(40), requested: { agent: 'codex' } }));
+    state = applyEvent(state, event('lead-woken', { dispatchId: 'ctx_w', events: ['e1'], runId: 'run_1', terminal: 'term_new', worktree: 'id:repo::C:/wt', requested: { agent: 'claude' } }));
+    expect(state.lead?.ref).toMatchObject({ terminal: 'term_new', requested: { agent: 'claude' } });
+    expect(state.leadTerminal?.terminal).toBe('term_new');
+  });
+});

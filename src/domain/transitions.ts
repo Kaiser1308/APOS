@@ -387,10 +387,12 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, telemetry: [...(state.telemetry ?? []).filter(item => item.dispatchId !== data.dispatchId), data] };
     }
     case 'lead-woken': {
-      const data = event.data as { dispatchId?: string; events?: string[]; terminal?: string; worktree?: string; runId?: string };
+      const data = event.data as { dispatchId?: string; events?: string[]; terminal?: string; worktree?: string; runId?: string; requested?: unknown };
       requireThat(Array.isArray(data?.events), 'Woken events required');
       const leadTerminal = data.terminal && data.worktree ? { terminal: data.terminal, worktree: data.worktree, runId: data.runId } : state.leadTerminal;
-      const lead = state.lead && data.dispatchId ? { ...state.lead, current: data.dispatchId, settled: undefined } : state.lead;
+      // A wake on a changed lead profile starts a fresh agent: remember its terminal and profile, or the next wake hands off again.
+      const ref = state.lead && data.requested ? { ...state.lead.ref, terminal: data.terminal ?? state.lead.ref.terminal, requested: data.requested } : state.lead?.ref;
+      const lead = state.lead && data.dispatchId ? { ...state.lead, ref: ref!, current: data.dispatchId, settled: undefined } : state.lead;
       return { ...state, leadTerminal, lead, wokenFor: [...(state.wokenFor ?? []), ...data.events!] };
     }
     case 'lead-dispatch-intended':

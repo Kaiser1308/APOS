@@ -18,10 +18,16 @@ export type OrcaMessage = { id: string; type: string; subject?: string; body?: s
 export type OrcaDelivery = { deliveryId?: string; messages: OrcaMessage[] };
 /** The Lead the controller dispatches when the Human selects a Goal; in Solo it is also the owner. */
 export type HandoffInput = {
-  kind: HandoffKind; role: Role; repoPath: string; goalId: string; goalVersion: number; runId: string; worktreeId: string; baseCommit: string;
+  kind: HandoffKind; role: Role; repoPath: string; goalId: string; goalVersion?: number; runId: string; worktreeId: string; baseCommit: string;
   idempotencyKey: string; attempt: number; fromAgent?: string; packageId?: string; packageVersion?: number; owner?: string; outcome?: string; extra?: string; budget?: Budget;
 };
-export type LeadInput ={ repoPath: string; goalId: string; goalVersion: number; idempotencyKey: string; budget?: Budget };
+export type WakeInput = { repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string; phase?: 'plan' | 'multi'; requested?: { agent?: string; model?: string }; baseCommit?: string; goalVersion?: number };
+/** True when the role's profile now names another agent or model than the dispatch runs; an unknown running profile is not a change. */
+export function profileChanged(running: { agent?: string; model?: string } | undefined, wanted: RuntimeProfile): boolean {
+  if (!running?.agent) return false;
+  return running.agent !== wanted.agent || (running.model ?? undefined) !== (wanted.model ?? undefined);
+}
+export type LeadInput = { repoPath: string; goalId: string; goalVersion: number; idempotencyKey: string; budget?: Budget };
 export interface RuntimeAdapter {
   startLead(input: LeadInput): Promise<RuntimeRef>;
   resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string, budget?: Budget): Promise<RuntimeRef>;
@@ -52,7 +58,8 @@ export interface RuntimeAdapter {
   stopWorker?(dispatchId: string): Promise<'stopped' | 'unknown'>;
   /** A fresh agent with the role's current profile on an existing worktree and Run (`handoffBrief`). */
   handoff?(input: HandoffInput): Promise<RuntimeRef>;
-  wakeLead?(input:{ repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string; phase?: 'plan' | 'multi' }): Promise<{ dispatchId: string }>;
+  /** With `requested` and `baseCommit`, a changed lead profile wakes a fresh agent on the Lead worktree and returns its terminal. */
+  wakeLead?(input: WakeInput): Promise<{ dispatchId: string; terminal?: string; requested?: RuntimeProfile }>;
 }
 /** The worktree a terminal lives in, so a Lead wake targets the Lead's own worktree even when it passed only `--terminal`. */
 export function terminalWorktree(handle: string, execute: (args: string[]) => Record<string, unknown> = runOrca): string {
@@ -276,6 +283,11 @@ export class OrcaRuntime implements RuntimeAdapter {
 
   async resumePackage(input: { package: WorkPackageSpec; prior: PackageRuntimeRef; idempotencyKey: string; finding?: string; attempt?: number }): Promise<PackageRuntimeRef> {
     const { prior, package: item } = input;
+    // The Human changed the worker profile: the new agent has no memory of this package, so it gets the full brief.
+    if (prior.worktreeId && prior.baseCommit && profileChanged(prior.requested, this.profile('worker'))) {
+      const ref = await this.handoff({ kind: 'worker', role: 'worker', repoPath: prior.repoPath, goalId: item.goalId, goalVersion: item.goalVersion, runId: prior.runId, worktreeId: prior.worktreeId, baseCommit: prior.baseCommit, idempotencyKey: input.idempotencyKey, attempt: input.attempt ?? 2, fromAgent: prior.requested?.agent, packageId: item.id, packageVersion: item.version, owner: item.owner, outcome: item.outcome, extra: input.finding ? `The controller ran the package checks itself on the last commit. Its finding: ${input.finding}` : undefined });
+      return { ...ref, owner: 'worker' };
+    }
     if (!prior.terminal || !prior.worktreeId) throw new Error('Original Worker terminal and worktree required');
     this.execute(['orchestration', 'run-use', '--id', prior.runId]);
     const spec = [
@@ -295,15 +307,19 @@ export class OrcaRuntime implements RuntimeAdapter {
     }
     const ref = extractStartedRef(started, prior.repoPath);
     if (ref.runId !== prior.runId) throw new Error('Resumed Worker belongs to an unexpected Run');
-    return { ...ref, owner: 'worker', worktreeId: ref.worktreeId ?? prior.worktreeId, baseCommit: prior.baseCommit };
+    return { ...ref, owner: 'worker', worktreeId: ref.worktreeId ?? prior.worktreeId, baseCommit: prior.baseCommit, requested: prior.requested };
   }
 
   async resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string, budget?: Budget): Promise<RuntimeRef> {
+    const goalId = /^GOAL-[A-Z0-9-]+$/.test(checkpoint.goalId ?? '') ? checkpoint.goalId! : 'GOAL';
+    const finding = `${checkpoint.phase}: ${checkpoint.progress}${checkpoint.evidenceRefs.length ? `\nLogs: ${checkpoint.evidenceRefs.join(', ')}` : ''}`;
+    // The Human changed the lead profile: a fresh agent on the same worktree, with the full owner brief and the finding.
+    if (ref.worktreeId && ref.baseCommit && profileChanged(ref.requested, this.profile('lead'))) {
+      return this.handoff({ kind: 'solo-owner', role: 'lead', repoPath: ref.repoPath, goalId, runId: ref.runId, worktreeId: ref.worktreeId, baseCommit: ref.baseCommit, idempotencyKey, attempt: checkpoint.attempt ?? 2, fromAgent: ref.requested?.agent, extra: `The controller's finding on the last attempt: ${finding}`, budget });
+    }
     if (!ref.terminal) throw new Error('Orca terminal identity required to resume same owner');
     this.execute(['orchestration', 'run-use', '--id', ref.runId]);
     if (!ref.worktreeId) throw new Error('Solo owner worktree identity required to resume same owner');
-    const goalId = /^GOAL-[A-Z0-9-]+$/.test(checkpoint.goalId ?? '') ? checkpoint.goalId! : 'GOAL';
-    const finding = `${checkpoint.phase}: ${checkpoint.progress}${checkpoint.evidenceRefs.length ? `\nLogs: ${checkpoint.evidenceRefs.join(', ')}` : ''}`;
     const spec = repairBrief({ repoPath: ref.repoPath, goalId, attempt: checkpoint.attempt ?? 2, finding: this.spill(finding, idempotencyKey), idempotencyKey, baseCommit: ref.baseCommit, budget });
     const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--terminal', ref.terminal, '--worktree', `id:${ref.worktreeId}`, '--timeout-ms', '240000', '--run', ref.runId]);
     const next = extractStartedRef(started, ref.repoPath);
@@ -432,7 +448,12 @@ export class OrcaRuntime implements RuntimeAdapter {
     return { ...ref, owner: 'reviewer', key: input.idempotencyKey, commit: input.commit, requested };
   }
 
-  async wakeLead(input: { repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string; phase?: 'plan' | 'multi' }): Promise<{ dispatchId: string }> {
+  async wakeLead(input: WakeInput): Promise<{ dispatchId: string; terminal?: string; requested?: RuntimeProfile }> {
+    if (input.baseCommit && input.worktree.startsWith('id:') && profileChanged(input.requested, this.profile('lead'))) {
+      const events = input.events.map((item, index) => `(${index + 1}) ${item}`).join('\n');
+      const ref = await this.handoff({ kind: input.phase === 'plan' ? 'lead-plan' : 'lead-multi', role: 'lead', repoPath: input.repoPath, goalId: input.goalId, goalVersion: input.goalVersion, runId: input.runId, worktreeId: input.worktree.slice(3), baseCommit: input.baseCommit, idempotencyKey: input.idempotencyKey, attempt: 1, fromAgent: input.requested?.agent, extra: `Events since the previous agent's last turn:\n${events}` });
+      return { dispatchId: ref.dispatchId, terminal: ref.terminal, requested: ref.requested };
+    }
     this.execute(['orchestration', 'run-use', '--id', input.runId]);
     const joined = input.events.map((item, index) => `(${index + 1}) ${item}`).join('\n');
     const events = joined.length > SPILL_LIMIT ? [`${input.events.length} events: ${this.spill(joined, input.idempotencyKey)}`] : input.events;

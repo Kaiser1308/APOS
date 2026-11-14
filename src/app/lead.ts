@@ -80,8 +80,8 @@ export class LeadService {
     if (!['selected', 'planned', 'ready'].includes(state.status)) throw new Error(`${goalId} is ${state.status}: the controller resumes its owner itself`);
     if (!this.runtime.wakeLead) throw new Error('Configured runtime cannot wake the Lead');
     const event = `human (${new Date(this.now()).toISOString()}): ${note}`;
-    const woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: state.lead.ref.terminal, worktree: `id:${state.lead.ref.worktreeId}`, runId: state.lead.ref.runId, events: [event], idempotencyKey: randomUUID(), phase: 'plan' });
-    this.record(goalId, 'lead-woken', { dispatchId: woken.dispatchId, events: [event], runId: state.lead.ref.runId });
+    const woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: state.lead.ref.terminal, worktree: `id:${state.lead.ref.worktreeId}`, runId: state.lead.ref.runId, events: [event], idempotencyKey: randomUUID(), phase: 'plan', requested: state.lead.ref.requested as { agent?: string; model?: string } | undefined, baseCommit: state.lead.ref.baseCommit, goalVersion: state.spec.version });
+    this.record(goalId, 'lead-woken', { dispatchId: woken.dispatchId, events: [event], runId: state.lead.ref.runId, ...(woken.terminal ? { terminal: woken.terminal, worktree: `id:${state.lead.ref.worktreeId}`, requested: woken.requested } : {}) });
     return woken.dispatchId;
   }
 

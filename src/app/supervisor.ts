@@ -491,8 +491,8 @@ export class MultiSupervisor {
     }
     const runId = lead.runId ?? (Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId).find(Boolean));
     if (!runId) return [];
-    const woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: lead.terminal, worktree: lead.worktree, runId, events: fresh, idempotencyKey: randomUUID() });
-    this.record(goalId, 'lead-woken', { dispatchId: woken.dispatchId, events: fresh, runId });
+    const woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: lead.terminal, worktree: lead.worktree, runId, events: fresh, idempotencyKey: randomUUID(), requested: state.lead?.ref.requested as { agent?: string; model?: string } | undefined, baseCommit: state.lead?.ref.baseCommit, goalVersion: state.spec.version });
+    this.record(goalId, 'lead-woken', { dispatchId: woken.dispatchId, events: fresh, runId, ...(woken.terminal ? { terminal: woken.terminal, worktree: lead.worktree, requested: woken.requested } : {}) });
     return [`woke Lead ${woken.dispatchId}: ${fresh.join('; ')}`];
   }
 }

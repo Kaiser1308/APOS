@@ -333,3 +333,56 @@ describe('handing work to another agent', () => {
     expect(ref).toMatchObject({ dispatchId: 'ctx_2', terminal: 'term_2', worktreeId: 'repo::C:/wt', baseCommit: 'b'.repeat(40), requested: { agent: 'claude', model: 'm1' } });
   });
 });
+
+describe('resumes and wakes after the role profile changed', () => {
+  const setup = (profiles: typeof DEFAULT_PROFILES) => {
+    const calls: string[][] = [];
+    const runtime = new OrcaRuntime(args => {
+      calls.push(args);
+      if (args[1] === 'worker-start') return { runId: 'run_1', taskId: 't2', dispatchId: 'ctx_2', effects: [{ kind: 'terminal', role: 'agent', id: 'term_new' }] };
+      return {};
+    }, () => 'a'.repeat(40), profiles, () => 'd'.repeat(64));
+    const start = () => calls.find(args => args[1] === 'worker-start')!;
+    return { runtime, calls, start };
+  };
+  const claudeLead = { ...DEFAULT_PROFILES, lead: { agent: 'claude' } };
+  const soloRef = { runId: 'run_1', taskId: 't', dispatchId: 'ctx_1', owner: 'lead' as const, repoPath: 'C:/repo', terminal: 'term_old', worktreeId: 'repo::C:/wt', baseCommit: 'b'.repeat(40), requested: { agent: 'codex', model: 'gpt-6.1-terra' } };
+  const checkpoint = { phase: 'controller finding', progress: 'CHK-1 fail', evidenceRefs: [], goalId: 'GOAL-X', attempt: 2 };
+
+  it('resumeSolo starts the new agent on a fresh terminal with the full brief and the finding', async () => {
+    const { runtime, calls, start } = setup(claudeLead);
+    const next = await runtime.resumeSolo(soloRef, checkpoint, 'rk');
+    expect(start()).not.toContain('--terminal');
+    expect(start()).toEqual(expect.arrayContaining(['--worktree', 'id:repo::C:/wt', '--agent', 'claude', '--run', 'run_1']));
+    const spec = start()[start().indexOf('--spec') + 1];
+    expect(spec).toMatch(/taking over from a previous agent \(codex\)/);
+    expect(spec).toContain('CHK-1 fail');
+    expect(spec).toContain('.apos/goals/GOAL-X/evidence/solo-a2.md');
+    expect(calls.some(args => args[1] === 'worker-stop')).toBe(false);
+    expect(next).toMatchObject({ dispatchId: 'ctx_2', terminal: 'term_new', requested: { agent: 'claude' } });
+  });
+
+  it('resumeSolo keeps the same terminal when the profile did not change', async () => {
+    const { runtime, start } = setup({ ...DEFAULT_PROFILES });
+    await runtime.resumeSolo(soloRef, checkpoint, 'rk');
+    expect(start()).toEqual(expect.arrayContaining(['--terminal', 'term_old']));
+  });
+
+  it('resumePackage starts the new Worker agent on a fresh terminal', async () => {
+    const { runtime, start } = setup({ ...DEFAULT_PROFILES, worker: { agent: 'antigravity' } });
+    const item = { id: 'WP-01', goalId: 'GOAL-X', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR', scope: ['s'], exclusions: [], dependencies: [], interfaces: ['x()@v1'], acceptance: [{ id: 'WP-AC-1', text: 's' }], integration: 'Lead' };
+    const next = await runtime.resumePackage({ package: item, prior: { runId: 'run_1', taskId: 't', dispatchId: 'ctx_1', owner: 'worker', repoPath: 'C:/repo', terminal: 'term_old', worktreeId: 'repo::C:/p', baseCommit: 'b'.repeat(40), requested: { agent: 'codex' } }, idempotencyKey: 'pk', finding: 'CHK-A fail', attempt: 2 });
+    expect(start()).not.toContain('--terminal');
+    expect(start()).toEqual(expect.arrayContaining(['--worktree', 'id:repo::C:/p', '--agent', 'antigravity']));
+    expect(start()[start().indexOf('--spec') + 1]).toContain('.apos/goals/GOAL-X/evidence/WP-01-v1-a2.md');
+    expect(next).toMatchObject({ owner: 'worker', dispatchId: 'ctx_2', requested: { agent: 'antigravity' } });
+  });
+
+  it('wakeLead wakes the new agent on a fresh terminal and says where it is', async () => {
+    const { runtime, start } = setup(claudeLead);
+    const woken = await runtime.wakeLead({ repoPath: 'C:/repo', goalId: 'GOAL-X', terminal: 'term_old', worktree: 'id:repo::C:/wt', runId: 'run_1', events: ['package WP-01 verified'], idempotencyKey: 'wk', requested: { agent: 'codex' }, baseCommit: 'b'.repeat(40), goalVersion: 1 });
+    expect(start()).not.toContain('--terminal');
+    expect(start()[start().indexOf('--spec') + 1]).toContain('package WP-01 verified');
+    expect(woken).toEqual({ dispatchId: 'ctx_2', terminal: 'term_new', requested: { agent: 'claude' } });
+  });
+});

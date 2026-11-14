@@ -181,7 +181,7 @@ export const handoffRole = (kind: HandoffKind): Role => kind === 'worker' ? 'wor
  * profile changed). It is the role brief in full, skills and activation line included, because the new agent has
  * none of the previous session's memory; never a "continue as before" brief.
  */
-export function handoffBrief(input: BriefBase & { kind: HandoffKind; fromAgent?: string; goalVersion: number; attempt: number; packageId?: string; packageVersion?: number; owner?: string; outcome?: string; extra?: string; budget?: Budget }): string {
+export function handoffBrief(input: BriefBase & { kind: HandoffKind; fromAgent?: string; goalVersion?: number; attempt: number; packageId?: string; packageVersion?: number; owner?: string; outcome?: string; extra?: string; budget?: Budget }): string {
   const apos = `apos --repo "${input.repoPath}"`;
   const goal = input.goalId;
   const body: Record<HandoffKind, string[]> = {
@@ -203,7 +203,7 @@ export function handoffBrief(input: BriefBase & { kind: HandoffKind; fromAgent?:
     ]
   };
   return [
-    `${goal}${input.packageId ? `, ${input.packageId}` : ''}: APOS ${handoffRole(input.kind) === 'lead' ? `Lead for Goal v${input.goalVersion}` : 'Worker'}, attempt ${input.attempt}, taking over from a previous agent${input.fromAgent ? ` (${input.fromAgent})` : ''} that stopped before finishing.`,
+    `${goal}${input.packageId ? `, ${input.packageId}` : ''}: APOS ${handoffRole(input.kind) === 'lead' ? `Lead${input.goalVersion ? ` for Goal v${input.goalVersion}` : ''}` : 'Worker'}, attempt ${input.attempt}, taking over from a previous agent${input.fromAgent ? ` (${input.fromAgent})` : ''} that stopped before finishing.`,
     WORKSPACE,
     `Your current worktree holds all of its work, including uncommitted changes. Before anything else read git status, git log ${input.baseCommit}..HEAD and the reports under .apos/goals/${goal}/; continue from there and do not start over.`,
     ...skillLines(input, handoffRole(input.kind)),

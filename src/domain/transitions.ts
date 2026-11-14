@@ -8,6 +8,7 @@ export type GoalEventType =
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
   | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-intended' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken' | 'lead-dispatch-intended' | 'lead-started' | 'lead-settled' | 'package-gate-recorded' | 'intent-abandoned'
+  | 'handoff-intended' | 'owner-handed-off'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -57,7 +58,12 @@ export type GoalState = {
    * in Solo that dispatch is the owner. `settled` is set when a turn ended before any plan was accepted.
    */
   lead?: LeadState;
+  /** A handoff to another agent in flight: the controller leaves `from` alone until it is handed off or abandoned. */
+  handoffIntent?: { key: string; target: HandoffTarget; from: string; at: string };
 };
+/** Whose dispatch a handoff replaces: the Goal's Lead (planning, Solo owner or Multi-WP), a package Worker, or the reviewer. */
+export type HandoffTarget = { kind: 'lead' } | { kind: 'package'; packageId: string } | { kind: 'reviewer' };
+export const handingOff = (state: GoalState | undefined): boolean => Boolean(state?.handoffIntent);
 export type LeadState = { ref: { runId: string; taskId: string; dispatchId: string; repoPath: string; terminal: string; worktreeId: string; baseCommit: string; requested?: unknown }; current: string; settled?: 'completed' | 'failed' };
 export type Telemetry = { dispatchId: string; role: 'lead' | 'worker' | 'reviewer'; requestedModel?: string; launchedModel?: string | null; usage?: { model?: string; inputTokens: number; cachedInputTokens: number; outputTokens: number; sessions: number } | 'unknown'; wallMs?: number };
 export type MergeAuthorization = { goalId: string; goalVersion: number; integrationCommit: string; targetBranch: string; scope: 'goal'; once: true; by: string };
@@ -265,6 +271,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const data = event.data as { key?: string; reason?: string };
       requireThat(data?.key && data.reason?.trim(), 'Abandoning an intent needs its key and a reason');
       if (state.resumeIntent === data.key) return { ...state, resumeIntent: undefined };
+      if (state.handoffIntent?.key === data.key) return { ...state, handoffIntent: undefined };
       if (state.leadIntent === data.key) return { ...state, leadIntent: undefined };
       if (state.dispatchIntent === data.key && state.status === 'ready') return { ...state, dispatchIntent: undefined };
       // Seen live: a refused package resume left the package 'resuming' forever. It goes back to 'stale' to be retried.
@@ -403,6 +410,37 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(data.outcome === 'completed' || data.outcome === 'failed', 'Lead settlement outcome required');
       requireThat(['selected', 'planned', 'ready'].includes(state.status), 'Lead settles on its own only before execution starts');
       return { ...state, lead: { ...state.lead, settled: data.outcome } };
+    }
+    case 'handoff-intended': {
+      const data = event.data as { key?: string; target?: HandoffTarget; from?: string };
+      requireThat(!state.handoffIntent, 'A handoff is already pending for this Goal');
+      requireThat(['selected', 'planned', 'ready', 'executing', 'blocked'].includes(state.status), 'Handoff needs a Goal whose owner is running');
+      requireThat(data?.key && data.from && data.target && ['lead', 'package', 'reviewer'].includes(data.target.kind), 'Handoff needs key, target and the dispatch it replaces');
+      return { ...state, handoffIntent: { key: data.key, target: data.target, from: data.from, at: event.at } };
+    }
+    case 'owner-handed-off': {
+      // A new agent on the same worktree replaces `from`. It is the same owner continuing: no attempt is spent.
+      const data = event.data as { key?: string; target?: HandoffTarget; from?: string; ref?: Record<string, unknown> & { dispatchId?: string }; unblock?: boolean };
+      requireThat(state.handoffIntent && data?.key === state.handoffIntent.key, 'Handoff must settle the pending handoff');
+      requireThat(data.ref?.dispatchId && data.from === state.handoffIntent.from, 'Handoff needs the new dispatch and the one it replaces');
+      const target = state.handoffIntent.target;
+      let next: GoalState = { ...state, handoffIntent: undefined };
+      if (target.kind === 'lead') {
+        requireThat(state.lead, 'Lead handoff needs an APOS-dispatched Lead');
+        const prior = state.lead.ref;
+        const ref = { ...prior, runId: String(data.ref.runId ?? prior.runId), taskId: String(data.ref.taskId ?? prior.taskId), dispatchId: data.ref.dispatchId, terminal: String(data.ref.terminal ?? prior.terminal), requested: data.ref.requested ?? prior.requested };
+        next = { ...next, lead: { ref, current: ref.dispatchId }, leadTerminal: { terminal: ref.terminal, worktree: `id:${ref.worktreeId}`, runId: ref.runId } };
+        if ((state.runtimeRef as { dispatchId?: string } | undefined)?.dispatchId === data.from) next.runtimeRef = { ...(state.runtimeRef as object), ...ref, owner: 'lead' };
+      } else if (target.kind === 'package') {
+        const item = state.packages?.[target.packageId];
+        requireThat(item && (item.runtimeRef as { dispatchId?: string } | undefined)?.dispatchId === data.from, 'Package handoff must replace its current Worker');
+        next = { ...next, packages: { ...state.packages, [target.packageId]: { ...item, status: 'executing', runtimeRef: data.ref, dispatchIntent: undefined, ...(data.unblock ? { blocker: undefined } : {}) } } };
+      } else {
+        requireThat(state.reviewDispatch?.dispatchId === data.from, 'Reviewer handoff must replace the current reviewer');
+        next = { ...next, reviewDispatch: data.ref as unknown as GoalState['reviewDispatch'] };
+      }
+      if (data.unblock && state.status === 'blocked') next = { ...next, status: 'executing', blocker: undefined };
+      return next;
     }
     case 'human-notified':
       requireThat(event.data && typeof event.data === 'object', 'Notification details required');

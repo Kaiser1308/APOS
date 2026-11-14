@@ -2,7 +2,7 @@ import { clockStart } from './lead.js';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { GoalEventType, GoalState } from '../domain/transitions.js';
-import { attemptLimit } from '../domain/transitions.js';
+import { attemptLimit, handingOff } from '../domain/transitions.js';
 import { requiresIndependentReview, reviewReasons } from '../domain/reviews.js';
 import type { GateReport } from '../domain/gate.js';
 import type { GoalRepository } from '../store/journal.js';
@@ -56,7 +56,7 @@ export class SoloSupervisor {
   async step(goalId: string, repoPath: string): Promise<string[]> {
     const actions: string[] = [];
     const state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'executing' || !state.proposal?.mode.startsWith('solo') || !state.runtimeRef) return actions;
+    if (!state || state.status !== 'executing' || !state.proposal?.mode.startsWith('solo') || !state.runtimeRef || handingOff(state)) return actions;
     const ref = state.runtimeRef as RuntimeRef;
     const overTime = state.appetite && this.wallMinutesUsed(goalId) > state.appetite.maxWallMinutes;
     const outcome = state.settlements?.[ref.dispatchId];
@@ -306,7 +306,7 @@ export class MultiSupervisor {
   async step(goalId: string, repoPath: string, questions: string[] = []): Promise<string[]> {
     const actions: string[] = [];
     let state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'executing' || state.proposal?.mode !== 'multi-wp') return actions;
+    if (!state || state.status !== 'executing' || state.proposal?.mode !== 'multi-wp' || handingOff(state)) return actions;
     const events: string[] = questions.map(item => `question ${item}`);
     for (const item of Object.values(state.packages ?? {})) {
       const ref = item.runtimeRef as PackageRuntimeRef | undefined;

@@ -4,6 +4,7 @@ import { LeadService } from './lead.js';
 import type { OrcaMessage, RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
 import type { GoalRepository } from '../store/journal.js';
 import { randomUUID } from 'node:crypto';
+import { handingOff } from '../domain/transitions.js';
 import { MultiSupervisor, SoloSupervisor, type SupervisorOptions } from './supervisor.js';
 
 export const IDLE_MINUTES = 15;
@@ -136,7 +137,9 @@ export class ControllerService {
           result.dispatched.push(...refs.map((ref: PackageRuntimeRef) => ref.dispatchId));
           const state = this.store.getGoal(goalId)!;
           for (const [packageId, item] of Object.entries(state.packages ?? {})) {
-            if (item.status === 'executing' && item.runtimeRef && this.runtime.inspectPackage && !state.settlements?.[(item.runtimeRef as PackageRuntimeRef).dispatchId]) {
+            // A Worker being handed off was stopped on purpose and reads failed (seen live); it is not a settlement.
+            const handedOff = state.handoffIntent?.from === (item.runtimeRef as PackageRuntimeRef | undefined)?.dispatchId;
+            if (!handedOff && item.status === 'executing' && item.runtimeRef && this.runtime.inspectPackage && !state.settlements?.[(item.runtimeRef as PackageRuntimeRef).dispatchId]) {
               const ref = item.runtimeRef as PackageRuntimeRef;
               const outcome = await this.runtime.inspectPackage(ref);
               if (outcome === 'completed' || outcome === 'failed') {
@@ -181,7 +184,7 @@ export class ControllerService {
               }
             }
             const current = this.store.getGoal(goalId)!;
-            if (current.runtimeRef && !current.settlements?.[(current.runtimeRef as RuntimeRef).dispatchId]) {
+            if (current.runtimeRef && !handingOff(current) && !current.settlements?.[(current.runtimeRef as RuntimeRef).dispatchId]) {
               const observation = await this.runtime.inspect(current.runtimeRef as RuntimeRef);
               if (observation.outcome) {
                 this.store.append({ id: randomUUID(), goalId, type: 'worker-settled', data: { dispatchId: observation.ref.dispatchId, outcome: observation.outcome }, at: new Date().toISOString() });

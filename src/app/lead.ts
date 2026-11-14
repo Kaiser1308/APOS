@@ -104,7 +104,8 @@ export class LeadService {
       state = this.store.getGoal(goalId)!;
     }
     const lead = state.lead;
-    if (!lead || lead.settled) return actions;
+    // A Lead being handed off was stopped on purpose (it reads failed); it did not end its turn.
+    if (!lead || lead.settled || state.handoffIntent) return actions;
     const ref = currentLeadRef(lead);
     const observation = await this.runtime.inspect(ref);
     if (observation.outcome) {

@@ -82,7 +82,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
       if (state.leadTerminal) terminals.add(state.leadTerminal.terminal);
       if (state.lead) add(state.lead.ref);
       // The Lead is an agent from the moment APOS dispatches it, long before it commits a plan.
-      for (const item of journal.events(state.spec.id)) if (['lead-started', 'execution-started', 'runtime-resumed', 'package-started', 'package-resumed'].includes(item.type)) add((item.data as { ref?: unknown })?.ref ?? item.data);
+      for (const item of journal.events(state.spec.id)) if (['lead-started', 'execution-started', 'runtime-resumed', 'package-started', 'package-resumed', 'owner-handed-off'].includes(item.type)) add((item.data as { ref?: unknown })?.ref ?? item.data);
     }
     const here = resolve(process.cwd()).toLowerCase();
     const handle = process.env.ORCA_TERMINAL_HANDLE;

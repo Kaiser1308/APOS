@@ -171,3 +171,46 @@ export function leadWakeBrief(input: { repoPath: string; goalId: string; events:
     `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}.`
   ].join(' ');
 }
+
+/** What a fresh agent takes over: the Lead before or after its plan, the Solo owner, or a package Worker. */
+export type HandoffKind = 'lead-plan' | 'solo-owner' | 'lead-multi' | 'worker';
+export const handoffRole = (kind: HandoffKind): Role => kind === 'worker' ? 'worker' : 'lead';
+
+/**
+ * The brief for an agent that takes over another agent's work on the same worktree (out of quota, or the role's
+ * profile changed). It is the role brief in full, skills and activation line included, because the new agent has
+ * none of the previous session's memory; never a "continue as before" brief.
+ */
+export function handoffBrief(input: BriefBase & { kind: HandoffKind; fromAgent?: string; goalVersion: number; attempt: number; packageId?: string; packageVersion?: number; owner?: string; outcome?: string; extra?: string; budget?: Budget }): string {
+  const apos = `apos --repo "${input.repoPath}"`;
+  const goal = input.goalId;
+  const body: Record<HandoffKind, string[]> = {
+    'lead-plan': [
+      `Contract: .apos/goals/${goal}/goal.md and source.md at base commit ${input.baseCommit}. No plan of yours is accepted yet: decide Solo or Multi-WP under the lead skill.`,
+      `Run APOS from this terminal only: ${apos} lead propose --file <execution.json> (leave baseCommit out or set it to ${input.baseCommit}), then ${apos} lead commit ${goal}.`,
+      `Solo: once lead commit is accepted you are the owner. Keep going in this same turn and commit your delivery report at ${soloReportPath(goal, input.attempt)}.`,
+      'Multi-WP: once lead commit has dispatched the packages, report worker_done and end your turn; APOS wakes you here when there is work.'
+    ],
+    'solo-owner': [
+      `You are the owner of the accepted Solo plan (.apos/goals/${goal}/execution.md). Deliver in this worktree under ${CORE_SKILL}: recheck every acceptance criterion and commit your delivery report at ${soloReportPath(goal, input.attempt)}; the controller runs every Goal check itself on your final commit.`
+    ],
+    'lead-multi': [
+      `You are the Lead of this Multi-WP Goal; its packages run in their own worktrees. See where they stand with ${apos} package list ${goal}, handle what is pending under the lead skill (answer within the approved Goal, revise packages or integrate), then report worker_done once and end your turn; APOS wakes you here when there is work.`
+    ],
+    worker: [
+      `Contract: .apos/goals/${goal}/goal.md, source.md, execution.md and packages/${input.packageId}.md (v${input.packageVersion}). Ownership: ${input.owner} owns this Work Package end to end; deliver ${input.outcome}.`,
+      `Commit your delivery report at ${packageReportPath(goal, input.packageId ?? '', input.packageVersion ?? 1, input.attempt)}.`
+    ]
+  };
+  return [
+    `${goal}${input.packageId ? `, ${input.packageId}` : ''}: APOS ${handoffRole(input.kind) === 'lead' ? `Lead for Goal v${input.goalVersion}` : 'Worker'}, attempt ${input.attempt}, taking over from a previous agent${input.fromAgent ? ` (${input.fromAgent})` : ''} that stopped before finishing.`,
+    WORKSPACE,
+    `Your current worktree holds all of its work, including uncommitted changes. Before anything else read git status, git log ${input.baseCommit}..HEAD and the reports under .apos/goals/${goal}/; continue from there and do not start over.`,
+    ...skillLines(input, handoffRole(input.kind)),
+    ...body[input.kind],
+    ...(input.extra ? [`Controller note: ${oneLine(input.extra)}`] : []),
+    ...(budgetLine(input.budget) ? [budgetLine(input.budget)!] : []),
+    'Follow the injected Orca preamble; report worker_done exactly once with succeeded or failed, then idle. Do not merge.',
+    `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`
+  ].join(' ');
+}

@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_PROFILES, describeProfiles, leadBrief, leadWakeBrief, loadProfiles, repairBrief, resetProfile, setProfile } from './brief.js';
+import { DEFAULT_PROFILES, describeProfiles, handoffBrief, packageReportPath, soloReportPath, leadBrief, leadWakeBrief, loadProfiles, repairBrief, resetProfile, setProfile } from './brief.js';
 
 const base = { repoPath: 'C:/repo', goalId: 'GOAL-X', baseCommit: 'a'.repeat(40), idempotencyKey: 'k', digest: () => 'f'.repeat(64) };
 
@@ -51,4 +51,25 @@ it('setProfile replaces a role profile and drops the old model when the agent ch
     expect(existsSync(join(home, 'runtime.json'))).toBe(false);
     expect(loadProfiles(home)).toEqual(DEFAULT_PROFILES);
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+it('a handoff brief is the role brief in full plus how to pick up the previous agent work', () => {
+  const kinds = ['lead-plan', 'solo-owner', 'lead-multi', 'worker'] as const;
+  for (const kind of kinds) {
+    const brief = handoffBrief({ ...base, kind, fromAgent: 'claude', goalVersion: 2, attempt: 2, packageId: 'WP-A', packageVersion: 3, owner: 'worker-a', outcome: 'scanner', extra: 'line one\nline two' });
+    const role = kind === 'worker' ? 'worker' : 'lead';
+    expect(brief).toContain(`.apos/skills/${role}.md (sha256 ${'f'.repeat(64)})`);
+    expect(brief).toContain(`apos-core: ${'f'.repeat(16)}`);
+    expect(brief).toContain('APOS dispatch key: k.');
+    expect(brief).toContain(`APOS base commit: ${'a'.repeat(40)}.`);
+    expect(brief).toMatch(/taking over from a previous agent \(claude\)/);
+    expect(brief).toContain('git status');
+    expect(brief).toContain(`git log ${'a'.repeat(40)}..HEAD`);
+    expect(brief).toContain('line one / line two');
+    expect(brief).not.toMatch(/\n/);
+  }
+  expect(handoffBrief({ ...base, kind: 'solo-owner', goalVersion: 2, attempt: 2 })).toContain(soloReportPath('GOAL-X', 2));
+  expect(handoffBrief({ ...base, kind: 'worker', goalVersion: 2, attempt: 2, packageId: 'WP-A', packageVersion: 3, owner: 'worker-a', outcome: 'scanner' })).toContain(packageReportPath('GOAL-X', 'WP-A', 3, 2));
+  expect(handoffBrief({ ...base, kind: 'lead-multi', goalVersion: 2, attempt: 1 })).toContain('apos --repo "C:/repo" package list GOAL-X');
+  expect(handoffBrief({ ...base, kind: 'lead-plan', goalVersion: 2, attempt: 1 })).toContain('lead propose');
 });

@@ -6,7 +6,7 @@ import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntimeRef } from '../app/packages.js';
 import { SCREENS, quotaMessage, unsentBrief } from './screens.js';
-import { DEFAULT_PROFILES, committedFileDigest, leadWakeBrief, oneLine, packageBrief, packageReportPath, parseRepoMarker, repoMarker, repairBrief, reviewBrief, leadBrief, type Budget, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
+import { DEFAULT_PROFILES, committedFileDigest, handoffBrief, type HandoffKind, leadWakeBrief, oneLine, packageBrief, packageReportPath, parseRepoMarker, repoMarker, repairBrief, reviewBrief, leadBrief, type Budget, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
 
 export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string; requested?: RuntimeProfile };
 /** What Orca says actually launched; compared with the requested profile. */
@@ -17,7 +17,11 @@ export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; o
 export type OrcaMessage = { id: string; type: string; subject?: string; body?: string; payload?: unknown; dispatch_id?: string; dispatchId?: string };
 export type OrcaDelivery = { deliveryId?: string; messages: OrcaMessage[] };
 /** The Lead the controller dispatches when the Human selects a Goal; in Solo it is also the owner. */
-export type LeadInput = { repoPath: string; goalId: string; goalVersion: number; idempotencyKey: string; budget?: Budget };
+export type HandoffInput = {
+  kind: HandoffKind; role: Role; repoPath: string; goalId: string; goalVersion: number; runId: string; worktreeId: string; baseCommit: string;
+  idempotencyKey: string; attempt: number; fromAgent?: string; packageId?: string; packageVersion?: number; owner?: string; outcome?: string; extra?: string; budget?: Budget;
+};
+export type LeadInput ={ repoPath: string; goalId: string; goalVersion: number; idempotencyKey: string; budget?: Budget };
 export interface RuntimeAdapter {
   startLead(input: LeadInput): Promise<RuntimeRef>;
   resumeSolo(ref: RuntimeRef, checkpoint: PhaseCheckpoint, idempotencyKey: string, budget?: Budget): Promise<RuntimeRef>;
@@ -44,7 +48,11 @@ export interface RuntimeAdapter {
   /** Presses Enter once in the owner's terminal. */
   nudge?(terminal: string): Promise<void>;
   startReviewer?(input: { repoPath: string; goalId: string; baseCommit: string; commit: string; reasons: string[]; idempotencyKey: string; runId: string }): Promise<ReviewerRef>;
-  wakeLead?(input: { repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string; phase?: 'plan' | 'multi' }): Promise<{ dispatchId: string }>;
+  /** Fences a dispatch and closes its agent; 'unknown' when Orca cannot confirm the agent stopped. */
+  stopWorker?(dispatchId: string): Promise<'stopped' | 'unknown'>;
+  /** A fresh agent with the role's current profile on an existing worktree and Run (`handoffBrief`). */
+  handoff?(input: HandoffInput): Promise<RuntimeRef>;
+  wakeLead?(input:{ repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string; phase?: 'plan' | 'multi' }): Promise<{ dispatchId: string }>;
 }
 /** The worktree a terminal lives in, so a Lead wake targets the Lead's own worktree even when it passed only `--terminal`. */
 export function terminalWorktree(handle: string, execute: (args: string[]) => Record<string, unknown> = runOrca): string {
@@ -346,6 +354,32 @@ export class OrcaRuntime implements RuntimeAdapter {
     const status = object(shown.dispatch).status;
     if (status !== 'completed' && status !== 'failed') throw new Error('Orca Worker must settle before release');
     this.execute(['orchestration', 'worker-release', '--dispatch', dispatchId]);
+  }
+
+  /**
+   * Fences a dispatch and closes its agent. Sure only when Orca says it closed the agent terminal, or the dispatch
+   * reads settled afterwards (seen live: a stopped dispatch reads `failed`); anything else may still be running.
+   */
+  async stopWorker(dispatchId: string): Promise<'stopped' | 'unknown'> {
+    try {
+      const stopped = this.execute(['orchestration', 'worker-stop', '--dispatch', dispatchId]);
+      if (stopped.processAction === 'closed_agent_terminal' || stopped.alreadySettled === true) return 'stopped';
+    } catch { /* fall through to what Orca now reports */ }
+    try {
+      const status = object(this.execute(['orchestration', 'worker-show', '--dispatch', dispatchId]).dispatch).status;
+      return status === 'completed' || status === 'failed' ? 'stopped' : 'unknown';
+    } catch { return 'unknown'; }
+  }
+
+  /** Starts the role's current profile on an existing worktree and Run with a handoff brief: a fresh agent, never the old terminal. */
+  async handoff(input: HandoffInput): Promise<RuntimeRef> {
+    this.execute(['orchestration', 'run-use', '--id', input.runId]);
+    const requested = this.profile(input.role);
+    const spec = handoffBrief({ ...input, extra: input.extra ? this.spill(input.extra, input.idempotencyKey) : undefined, digest: path => this.fileDigest(input.repoPath, input.baseCommit, path) });
+    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', `id:${input.worktreeId}`, ...launchArgs(requested), '--run', input.runId]);
+    const ref = extractStartedRef(started, input.repoPath);
+    if (ref.runId !== input.runId) throw new Error('Handed-off agent belongs to an unexpected Run');
+    return { ...ref, worktreeId: ref.worktreeId ?? input.worktreeId, baseCommit: input.baseCommit, requested };
   }
 
   async deliveryHead(ref: { worktreeId?: string; dispatchId?: string }): Promise<string | undefined> {

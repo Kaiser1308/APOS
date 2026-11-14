@@ -301,3 +301,35 @@ describe('the agent behind each dispatch', () => {
     expect(await fake(['[assistant] done']).agentQuota('term_1', 'claude')).toBeUndefined();
   });
 });
+
+describe('handing work to another agent', () => {
+  it('stopWorker is sure only when Orca closed the agent or the dispatch has settled', async () => {
+    const calls: string[][] = [];
+    const stop = (result: Record<string, unknown> | Error, status = 'dispatched') => new OrcaRuntime(args => {
+      calls.push(args);
+      if (args[1] === 'worker-stop') { if (result instanceof Error) throw result; return result; }
+      return { dispatch: { status } };
+    });
+    expect(await stop({ state: 'stopped', processAction: 'closed_agent_terminal' }).stopWorker('ctx_1')).toBe('stopped');
+    expect(calls[0]).toEqual(['orchestration', 'worker-stop', '--dispatch', 'ctx_1']);
+    expect(await stop({ state: 'stopped', processAction: 'stop_unknown' }).stopWorker('ctx_1')).toBe('unknown');
+    expect(await stop(new Error('Orca orchestration worker-stop failed'), 'dispatched').stopWorker('ctx_1')).toBe('unknown');
+    expect(await stop({ state: 'stopped', processAction: 'stop_unknown' }, 'failed').stopWorker('ctx_1')).toBe('stopped');
+  });
+
+  it('starts the role profile on the same worktree and Run, never on the old terminal or a new worktree', async () => {
+    const calls: string[][] = [];
+    const runtime = new OrcaRuntime(args => {
+      calls.push(args);
+      return { runId: 'run_1', taskId: 'task_2', dispatchId: 'ctx_2', effects: [{ kind: 'terminal', role: 'agent', id: 'term_2' }] };
+    }, () => 'a'.repeat(40), { ...DEFAULT_PROFILES, worker: { agent: 'claude', model: 'm1' } }, () => 'd'.repeat(64));
+    const ref = await runtime.handoff({ kind: 'worker', role: 'worker', repoPath: 'C:/project', goalId: 'GOAL-001', goalVersion: 1, runId: 'run_1', worktreeId: 'repo::C:/wt', baseCommit: 'b'.repeat(40), idempotencyKey: 'hk', attempt: 1, fromAgent: 'codex', packageId: 'WP-01', packageVersion: 1, owner: 'worker-a', outcome: 'scanner' });
+    const start = calls.find(args => args[1] === 'worker-start')!;
+    expect(start).toEqual(expect.arrayContaining(['--worktree', 'id:repo::C:/wt', '--run', 'run_1', '--agent', 'claude', '--model', 'm1']));
+    expect(start).not.toContain('--terminal');
+    expect(start).not.toContain('new-top-level');
+    expect(start[start.indexOf('--spec') + 1]).toContain('APOS dispatch key: hk.');
+    expect(calls.some(args => args[1] === 'run-use' && args.includes('run_1'))).toBe(true);
+    expect(ref).toMatchObject({ dispatchId: 'ctx_2', terminal: 'term_2', worktreeId: 'repo::C:/wt', baseCommit: 'b'.repeat(40), requested: { agent: 'claude', model: 'm1' } });
+  });
+});

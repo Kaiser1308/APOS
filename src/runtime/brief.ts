@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -58,6 +59,9 @@ export function resetProfile(home: string, roles: Role[]): RuntimeProfiles {
 export const CORE_SKILL = '.apos/skills/_core/execute.md';
 export const roleSkill = (role: Role | 'pm') => `.apos/skills/${role}.md`;
 
+/** The CLI this process runs from; briefs spell it out because `apos` is on no agent's PATH until someone runs npm link (GitHub #2). */
+export const aposCommand = (repoPath: string, entry: string = fileURLToPath(new URL('../cli.js', import.meta.url))) => `node "${entry}" --repo "${repoPath}"`;
+
 /** sha256 of a file as committed at `commit`, so the brief pins exactly what the owner's worktree contains. */
 export function committedFileDigest(repoPath: string, commit: string, path: string): string {
   const text = execFileSync('git', ['-C', repoPath, 'show', `${commit}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -106,7 +110,7 @@ function skillLines(input: BriefBase, role: Role): string[] {
  * and the controller records it only after this worktree was cut.
  */
 export function leadBrief(input: BriefBase & { goalVersion: number; budget?: Budget }): string {
-  const apos = `apos --repo "${input.repoPath}"`;
+  const apos = aposCommand(input.repoPath);
   return [
     `${input.goalId}: APOS Lead for Goal v${input.goalVersion}, attempt 1.`,
     WORKSPACE,
@@ -166,7 +170,7 @@ export function leadWakeBrief(input: { repoPath: string; goalId: string; events:
     'Events since your last turn:',
     ...input.events.map((item, index) => `(${index + 1}) ${oneLine(item)}`),
     planning
-      ? `Continue under ${roleSkill('lead')} with what you already know: revise and resubmit with apos --repo "${input.repoPath}" lead propose / lead commit ${input.goalId}. Solo: once accepted, deliver in this same turn as your first brief said. Report worker_done exactly once.`
+      ? `Continue under ${roleSkill('lead')} with what you already know: revise and resubmit with ${aposCommand(input.repoPath)} lead propose / lead commit ${input.goalId}. Solo: once accepted, deliver in this same turn as your first brief said. Report worker_done exactly once.`
       : `Handle them under ${roleSkill('lead')}: answer within the approved Goal, revise packages or integrate, then report worker_done once and end your turn.`,
     `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}.`
   ].join(' ');
@@ -182,7 +186,7 @@ export const handoffRole = (kind: HandoffKind): Role => kind === 'worker' ? 'wor
  * none of the previous session's memory; never a "continue as before" brief.
  */
 export function handoffBrief(input: BriefBase & { kind: HandoffKind; fromAgent?: string; goalVersion?: number; attempt: number; packageId?: string; packageVersion?: number; owner?: string; outcome?: string; extra?: string; budget?: Budget }): string {
-  const apos = `apos --repo "${input.repoPath}"`;
+  const apos = aposCommand(input.repoPath);
   const goal = input.goalId;
   const body: Record<HandoffKind, string[]> = {
     'lead-plan': [

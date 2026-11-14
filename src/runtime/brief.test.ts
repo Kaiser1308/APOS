@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_PROFILES, describeProfiles, handoffBrief, packageReportPath, soloReportPath, leadBrief, leadWakeBrief, loadProfiles, repairBrief, resetProfile, setProfile } from './brief.js';
+import { DEFAULT_PROFILES, aposCommand, describeProfiles, handoffBrief, packageReportPath, soloReportPath, leadBrief, leadWakeBrief, loadProfiles, repairBrief, resetProfile, setProfile } from './brief.js';
 
 const base = { repoPath: 'C:/repo', goalId: 'GOAL-X', baseCommit: 'a'.repeat(40), idempotencyKey: 'k', digest: () => 'f'.repeat(64) };
 
@@ -70,6 +70,16 @@ it('a handoff brief is the role brief in full plus how to pick up the previous a
   }
   expect(handoffBrief({ ...base, kind: 'solo-owner', goalVersion: 2, attempt: 2 })).toContain(soloReportPath('GOAL-X', 2));
   expect(handoffBrief({ ...base, kind: 'worker', goalVersion: 2, attempt: 2, packageId: 'WP-A', packageVersion: 3, owner: 'worker-a', outcome: 'scanner' })).toContain(packageReportPath('GOAL-X', 'WP-A', 3, 2));
-  expect(handoffBrief({ ...base, kind: 'lead-multi', goalVersion: 2, attempt: 1 })).toContain('apos --repo "C:/repo" package list GOAL-X');
+  expect(handoffBrief({ ...base, kind: 'lead-multi', goalVersion: 2, attempt: 1 })).toContain(`${aposCommand('C:/repo')} package list GOAL-X`);
   expect(handoffBrief({ ...base, kind: 'lead-plan', goalVersion: 2, attempt: 1 })).toContain('lead propose');
+});
+
+it('gives agents an APOS command they can run without apos on PATH (GitHub #2)', () => {
+  const entry = 'C:/tools/apos/dist/cli.js';
+  expect(aposCommand('C:/repo', entry)).toBe('node "C:/tools/apos/dist/cli.js" --repo "C:/repo"');
+  expect(aposCommand('C:/repo')).toMatch(/^node ".*cli\.js" --repo "C:\/repo"$/);
+  for (const brief of [leadBrief({ ...base, goalVersion: 1 }), leadWakeBrief({ repoPath: 'C:/repo', goalId: 'GOAL-X', events: ['e'], idempotencyKey: 'k', phase: 'plan' }), handoffBrief({ ...base, kind: 'lead-plan', attempt: 1 }), handoffBrief({ ...base, kind: 'lead-multi', attempt: 1 })]) {
+    expect(brief).toContain(aposCommand('C:/repo'));
+    expect(brief).not.toMatch(/(^|[ "])apos --repo/);
+  }
 });

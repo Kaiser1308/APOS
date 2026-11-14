@@ -28,7 +28,7 @@ import { GoalRegistryService } from './app/registry.js';
 import { VerificationService } from './app/verification.js';
 import { GateService, type GateOptions } from './app/gate.js';
 import { CodexSessionProbe, type TelemetryProbe } from './runtime/telemetry.js';
-import { loadProfiles } from './runtime/brief.js';
+import { KNOWN_AGENTS, ROLES, describeProfiles, loadProfiles, resetProfile, setProfile, type Role } from './runtime/brief.js';
 import { controllerHome } from './store/event-log.js';
 import { sourceDigest } from './domain/gate.js';
 import { assertMultiWpPlannable, parseWorkPackage } from './domain/packages.js';
@@ -104,6 +104,32 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   program.command('init').description('initialize .apos in a Git project').option('--skills <dir>', 'folder with apos-core/ and apos-<role>/ skills (default: APOS_SKILLS, else the copy bundled with APOS)').action(async (flags: { skills?: string }) => { await initProject(repo(), flags.skills); write(`Initialized ${repo()}`); });
   program.command('migrate').description('import APOS v1 Goal histories from the repo into the controller log').action(() => withJournal(journal => {
     write(JSON.stringify(journal.importLegacy()));
+  }));
+
+  const home = () => options.home ?? controllerHome(repo());
+  /** `all` or one role, as the profile and handoff commands take it. */
+  const rolesOf = (value: string): Role[] => {
+    if (value === 'all') return ROLES;
+    if (!(ROLES as string[]).includes(value)) throw new Error(`Unknown role ${value}: use lead, worker, reviewer or all`);
+    return [value as Role];
+  };
+  /** Writes a role profile for the Human, warning about an agent APOS has no screen rules for. */
+  const applyProfile = (roles: Role[], change: { agent: string; model?: string; effort?: string }) => {
+    setProfile(home(), roles, change);
+    if (!(KNOWN_AGENTS as readonly string[]).includes(change.agent)) write(`warning: ${change.agent} is not a known agent (${KNOWN_AGENTS.join(', ')}); Orca must accept it, and its screen is read with every rule set`);
+  };
+  const profile = program.command('profile').description('which agent, model and effort each role runs with (<controller home>/runtime.json)');
+  profile.command('show').action(() => {
+    for (const [role, item] of Object.entries(describeProfiles(home()))) write(`${role}: ${item.agent}${item.model ? ` model=${item.model}` : ''}${item.effort ? ` effort=${item.effort}` : ''} (${item.source})`);
+  });
+  profile.command('set').argument('<role>', 'lead, worker, reviewer or all').requiredOption('--agent <id>', 'Orca agent id: codex, claude, antigravity, ...').option('--model <id>').option('--effort <level>', 'needs --model')
+    .description('Human: change the agent of a role; the next dispatch of that role uses it').action((role: string, flags: { agent: string; model?: string; effort?: string }) => withJournal(journal => {
+      assertHuman(journal, 'profile set');
+      applyProfile(rolesOf(role), flags);
+    }));
+  profile.command('reset').argument('[role]', 'lead, worker, reviewer or all', 'all').description('Human: back to the default profile').action((role: string) => withJournal(journal => {
+    assertHuman(journal, 'profile reset');
+    resetProfile(home(), rolesOf(role));
   }));
 
   const goal = program.command('goal');

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export type Role = 'lead' | 'worker' | 'reviewer';
@@ -17,8 +17,42 @@ export const DEFAULT_PROFILES: RuntimeProfiles = {
 export function loadProfiles(home: string | undefined): RuntimeProfiles {
   const path = home && join(home, 'runtime.json');
   if (!path || !existsSync(path)) return DEFAULT_PROFILES;
-  const custom = JSON.parse(readFileSync(path, 'utf8').replace(/^﻿/, '')) as Partial<RuntimeProfiles>;
-  return { ...DEFAULT_PROFILES, ...custom };
+  return { ...DEFAULT_PROFILES, ...readCustom(path) };
+}
+
+/** Agent ids Orca launches and APOS has screen rules for; others still launch, with every rule set tried. */
+export const KNOWN_AGENTS = ['codex', 'claude', 'antigravity'] as const;
+export const ROLES: Role[] = ['lead', 'worker', 'reviewer'];
+export type ProfileSource = 'default' | 'runtime.json';
+
+const readCustom = (path: string): Partial<RuntimeProfiles> => existsSync(path) ? JSON.parse(readFileSync(path, 'utf8').replace(/^﻿/, '')) as Partial<RuntimeProfiles> : {};
+const writeCustom = (home: string, custom: Partial<RuntimeProfiles>): void => {
+  const path = join(home, 'runtime.json');
+  if (!Object.keys(custom).length) { if (existsSync(path)) rmSync(path); return; }
+  mkdirSync(home, { recursive: true });
+  writeFileSync(path, `${JSON.stringify(custom, null, 2)}\n`, 'utf8');
+};
+
+export function describeProfiles(home: string | undefined): Record<Role, RuntimeProfile & { source: ProfileSource }> {
+  const custom = home ? readCustom(join(home, 'runtime.json')) : {};
+  return Object.fromEntries(ROLES.map(role => [role, { ...(custom[role] ?? DEFAULT_PROFILES[role]), source: custom[role] ? 'runtime.json' : 'default' }])) as Record<Role, RuntimeProfile & { source: ProfileSource }>;
+}
+
+/** Replaces each role's whole profile: a model or effort of the previous agent never carries over to a new one. */
+export function setProfile(home: string, roles: Role[], change: { agent: string; model?: string; effort?: string }): RuntimeProfiles {
+  if (change.effort && !change.model) throw new Error('--effort requires --model');
+  const custom = readCustom(join(home, 'runtime.json'));
+  const profile: RuntimeProfile = { agent: change.agent, ...(change.model ? { model: change.model } : {}), ...(change.effort ? { effort: change.effort } : {}) };
+  for (const role of roles) custom[role] = profile;
+  writeCustom(home, custom);
+  return loadProfiles(home);
+}
+
+export function resetProfile(home: string, roles: Role[]): RuntimeProfiles {
+  const custom = readCustom(join(home, 'runtime.json'));
+  for (const role of roles) delete custom[role];
+  writeCustom(home, custom);
+  return loadProfiles(home);
 }
 
 export const CORE_SKILL = '.apos/skills/_core/execute.md';

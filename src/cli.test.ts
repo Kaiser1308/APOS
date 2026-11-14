@@ -205,3 +205,33 @@ it('refuses Human-only commands from an APOS agent terminal, so an owner cannot 
   } finally { delete process.env.ORCA_TERMINAL_HANDLE; }
 }, 30_000);
 
+
+it('apos profile shows, sets and resets role profiles, and only the Human may change them', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-cli-prof-')); dirs.push(dir);
+  const home = mkdtempSync(join(tmpdir(), 'apos-cli-prof-home-')); dirs.push(home);
+  execFileSync('git', ['init', '-q', dir]);
+  const ref: RuntimeRef = { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_lead', worktreeId: 'repo::C:/lead-wt' };
+  const runtime: RuntimeAdapter = { async startLead() { ref.baseCommit = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; } };
+  const output: string[] = [];
+  const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, home, write: line => output.push(line) });
+  await invoke('init');
+  await invoke('profile', 'set', 'all', '--agent', 'claude');
+  output.length = 0;
+  await invoke('profile', 'show');
+  expect(output).toEqual(['lead: claude (runtime.json)', 'worker: claude (runtime.json)', 'reviewer: claude (runtime.json)']);
+  output.length = 0;
+  await invoke('profile', 'set', 'lead', '--agent', 'foo');
+  expect(output.join('\n')).toMatch(/not a known agent/);
+  await invoke('profile', 'reset');
+  output.length = 0;
+  await invoke('profile', 'show');
+  expect(output[0]).toBe('lead: codex model=gpt-6.1-terra (default)');
+  writeFileSync(join(dir, 'goal-input.json'), JSON.stringify(spec)); writeFileSync(join(dir, 'brief.md'), sourceText);
+  await invoke('goal', 'create', '--file', join(dir, 'goal-input.json'), '--source', join(dir, 'brief.md'));
+  await invoke('goal', 'approve', spec.id, '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3');
+  await invoke('goal', 'select', spec.id);
+  await asLead('term_lead', async () => {
+    await expect(invoke('profile', 'set', 'worker', '--agent', 'claude')).rejects.toThrow(/Human decision/);
+    await expect(invoke('profile', 'reset')).rejects.toThrow(/Human decision/);
+  });
+});

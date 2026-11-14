@@ -1,5 +1,8 @@
 import { expect, it } from 'vitest';
-import { leadBrief, leadWakeBrief, repairBrief } from './brief.js';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DEFAULT_PROFILES, describeProfiles, leadBrief, leadWakeBrief, loadProfiles, repairBrief, resetProfile, setProfile } from './brief.js';
 
 const base = { repoPath: 'C:/repo', goalId: 'GOAL-X', baseCommit: 'a'.repeat(40), idempotencyKey: 'k', digest: () => 'f'.repeat(64) };
 
@@ -30,4 +33,22 @@ it('wakes a Lead whose plan is not accepted yet with the Human decision, on its 
   expect(brief).toContain('(1) human: appetite raised to 60 min');
   expect(brief).toContain('lead commit GOAL-X');
   expect(leadWakeBrief({ repoPath: 'C:/repo', goalId: 'GOAL-X', events: ['e'], idempotencyKey: 'w2' })).toContain('for Multi-WP');
+});
+
+it('setProfile replaces a role profile and drops the old model when the agent changes', () => {
+  const home = mkdtempSync(join(tmpdir(), 'apos-prof-'));
+  try {
+    writeFileSync(join(home, 'runtime.json'), JSON.stringify({ lead: { agent: 'codex', model: 'gpt-6-luna', effort: 'high' } }));
+    setProfile(home, ['lead'], { agent: 'claude' });
+    expect(loadProfiles(home).lead).toEqual({ agent: 'claude' });
+    expect(loadProfiles(home).worker).toEqual(DEFAULT_PROFILES.worker);
+    expect(describeProfiles(home).lead.source).toBe('runtime.json');
+    expect(describeProfiles(home).worker.source).toBe('default');
+    expect(() => setProfile(home, ['worker'], { agent: 'codex', effort: 'high' })).toThrow(/--effort requires --model/);
+    setProfile(home, ['worker', 'reviewer'], { agent: 'antigravity', model: 'g1', effort: 'medium' });
+    expect(loadProfiles(home).reviewer).toEqual({ agent: 'antigravity', model: 'g1', effort: 'medium' });
+    resetProfile(home, ['lead', 'worker', 'reviewer']);
+    expect(existsSync(join(home, 'runtime.json'))).toBe(false);
+    expect(loadProfiles(home)).toEqual(DEFAULT_PROFILES);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });

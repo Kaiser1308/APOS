@@ -43,3 +43,13 @@ it('refuses a development skill that does not declare the contract version', () 
   writeFileSync(file, readFileSync(file, 'utf8').replace(/^apos-contract:.*\r?\n/m, ''));
   expect(run('--to', stable, dev).code).toBe(1);
 });
+
+it('--check without a development copy validates the bundled skills instead of crashing (GitHub #10)', () => {
+  const env = { ...process.env }; delete env.APOS_DEV_SKILLS;
+  const check = (stable: string) => { try { return { code: 0, out: execFileSync(process.execPath, [script, '--check', '--to', stable], { encoding: 'utf8', env }) }; } catch (error) { const failure = error as { status: number; stdout: string }; return { code: failure.status, out: failure.stdout }; } };
+  const stable = copyOfStable();
+  expect(check(stable)).toMatchObject({ code: 0, out: expect.stringMatching(/bundled skills OK/) });
+  const broken = join(stable, 'apos-lead', 'SKILL.md');
+  writeFileSync(broken, readFileSync(broken, 'utf8').replace(/^apos-contract:.*$/m, ''));
+  expect(check(stable).code).toBe(1);
+});

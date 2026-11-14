@@ -16,6 +16,16 @@ const toIndex = args.indexOf('--to');
 const stable = toIndex >= 0 ? args[toIndex + 1] : fileURLToPath(new URL('../skills', import.meta.url));
 const positional = args.filter((arg, index) => !arg.startsWith('--') && (toIndex < 0 || index !== toIndex + 1));
 const dev = positional[0] ?? process.env.APOS_DEV_SKILLS;
+if (check && !dev && stable) {
+  // No development copy to compare with (the usual case for `npm run skills:check`): make sure the bundled skills are intact.
+  const broken = NAMES.filter(name => {
+    const file = join(stable, name, 'SKILL.md');
+    return !existsSync(file) || !/^apos-contract:\s*\d+\s*$/m.test(readFileSync(file, 'utf8'));
+  });
+  for (const name of broken) console.error(`bundled skill ${name} is missing or does not declare apos-contract`);
+  console.log(broken.length ? `${broken.length} bundled skill(s) are broken` : 'bundled skills OK (set APOS_DEV_SKILLS or pass a folder to compare with a development copy)');
+  process.exit(broken.length ? 1 : 0);
+}
 if (!dev || !stable) { console.error('Usage: promote-skills [--check] [--to <stable dir>] <dev skills dir>  (or set APOS_DEV_SKILLS)'); process.exit(2); }
 
 const normal = text => text.replace(/\r\n/g, '\n');

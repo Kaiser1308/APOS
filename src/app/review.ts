@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { parseReview, type ReviewRecord } from '../domain/reviews.js';
-import type { GoalRepository } from '../store/journal.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 export class ReviewService {
   constructor(private readonly store: GoalRepository) {}

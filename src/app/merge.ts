@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { GoalRepository } from '../store/journal.js';
 import { assertGitRoot } from '../store/project-history.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 const git = (repo: string, args: string[]): string =>
   execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();

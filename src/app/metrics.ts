@@ -1,4 +1,4 @@
-import type { GoalRepository } from '../store/journal.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 export type GoalMetrics = {
   goalId: string;

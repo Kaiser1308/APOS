@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { attemptLimit, type GoalEventType, type GoalState } from '../domain/transitions.js';
-import type { Budget } from '../runtime/brief.js';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
-import type { GoalRepository } from '../store/journal.js';
-import { OrcaRefused, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
+import { OrcaRefused } from '../runtime/orca.js';
 import { VerificationService, type VerificationResult } from './verification.js';
 import { clockStart, currentLeadRef } from './lead.js';
+import type { Budget, RuntimeRef } from '../domain/runtime-refs.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
+import type { RuntimeAdapter } from '../ports/runtime.js';
 
 export class SoloService {
   constructor(

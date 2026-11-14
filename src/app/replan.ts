@@ -1,7 +1,7 @@
 import type { GoalState } from '../domain/transitions.js';
-import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
-import type { PackageRuntime, PackageRuntimeRef } from './packages.js';
 import { currentLeadRef } from './lead.js';
+import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
+import type { PackageRuntimeRef, RuntimeRef } from '../domain/runtime-refs.js';
 
 /**
  * `includeLead`: a Goal revision must also wait for the Lead's turn to end. The Lead's own plan revision does not

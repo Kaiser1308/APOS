@@ -2,19 +2,20 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { attemptLimit, type GoalEventType, type GoalState, type HandoffTarget } from '../domain/transitions.js';
 import { reviewReasons } from '../domain/reviews.js';
-import type { GoalRepository } from '../store/journal.js';
-import { OrcaRefused, type HandoffInput, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
-import {
-  handoffRole,
-  packageReportPath,
-  type Budget,
-  type HandoffKind,
-  type Role,
-  type RuntimeProfile,
-  type RuntimeProfiles,
-} from '../runtime/brief.js';
-import type { PackageRuntime, PackageRuntimeRef } from './packages.js';
+import { OrcaRefused } from '../runtime/orca.js';
+import { handoffRole, packageReportPath } from '../runtime/brief.js';
 import { clockStart } from './lead.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
+import type { HandoffInput, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
+import type {
+  Budget,
+  HandoffKind,
+  PackageRuntimeRef,
+  Role,
+  RuntimeProfile,
+  RuntimeProfiles,
+  RuntimeRef,
+} from '../domain/runtime-refs.js';
 
 /** Blocks a handoff may clear: the ones the controller records when the very dispatch being replaced settles failed. */
 const FAILED_SETTLEMENT = [/^needs-decision: owner reported failed on attempt/, /^Worker reported failed on/];

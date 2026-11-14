@@ -18,10 +18,11 @@ import {
   type GateEnvironment,
   type GateReport,
 } from '../domain/gate.js';
-import type { GoalRepository } from '../store/journal.js';
 import { assertGitRoot } from '../store/project-history.js';
-import { GitCommitInspector, type CommitInspector } from './integration.js';
-import type { PackageRuntimeRef } from './packages.js';
+import { GitCommitInspector } from './integration.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
+import type { CommitInspector } from '../ports/commit-inspector.js';
+import type { PackageRuntimeRef } from '../domain/runtime-refs.js';
 
 export type ExecResult = { exitCode: number | null; timedOut: boolean; output: string };
 export interface CommandExecutor {

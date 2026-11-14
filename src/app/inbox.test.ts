@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import type { GoalRepository } from '../store/journal.js';
 import { buildInbox } from './inbox.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 const repoOf = (status: string, kinds: string[]) =>
   ({

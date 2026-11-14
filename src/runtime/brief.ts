@@ -3,11 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Budget, HandoffKind, Role, RuntimeProfile, RuntimeProfiles } from '../domain/runtime-refs.js';
 
-export type Role = 'lead' | 'worker' | 'reviewer';
-/** Which agent, model and effort each role runs with. Owners default to Codex terra, the measured configuration. */
-export type RuntimeProfile = { agent: string; model?: string; effort?: string };
-export type RuntimeProfiles = Record<Role, RuntimeProfile>;
 export const DEFAULT_PROFILES: RuntimeProfiles = {
   lead: { agent: 'codex', model: 'gpt-6.1-terra' },
   worker: { agent: 'codex', model: 'gpt-6.1-terra' },
@@ -107,8 +104,6 @@ export const repoMarker = (repoPath: string) => `APOS repo: <${repoPath}>.`;
 export const parseRepoMarker = (spec: string): string | undefined =>
   /APOS repo: <([^>]*)>/.exec(spec)?.[1] ?? /Target: (.*?), (?:GOAL-|APOS Solo Goal)/.exec(spec)?.[1];
 
-/** What the Human's appetite leaves for the owner. Seen live: an owner that did not know it stopped at 15 of 90 minutes. */
-export type Budget = { minutesLeft: number; attemptsLeft: number };
 export const budgetLine = (budget?: Budget) =>
   budget
     ? `Budget left for this Goal: about ${Math.max(0, Math.round(budget.minutesLeft))} min of wall time and ${budget.attemptsLeft} attempt(s) after this one. Use it: do not stop at partial work or report failed while budget remains, unless the Goal cannot be met within scope (then name the requirement that blocks it and why).`
@@ -226,8 +221,6 @@ export function leadWakeBrief(input: {
   ].join(' ');
 }
 
-/** What a fresh agent takes over: the Lead before or after its plan, the Solo owner, or a package Worker. */
-export type HandoffKind = 'lead-plan' | 'solo-owner' | 'lead-multi' | 'worker';
 export const handoffRole = (kind: HandoffKind): Role => (kind === 'worker' ? 'worker' : 'lead');
 
 /**

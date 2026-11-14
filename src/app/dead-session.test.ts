@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { approval, proposal, spec } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
-import { OrcaRefused, isDeadSession, type RuntimeAdapter } from '../runtime/orca.js';
-import type { PackageRuntime } from './packages.js';
+import { OrcaRefused, isDeadSession } from '../runtime/orca.js';
 import { MultiSupervisor } from './supervisor.js';
 import { ControllerService } from './controller.js';
 import { LeadService } from './lead.js';
+import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 
 const dirs: string[] = [];
 afterEach(() => {

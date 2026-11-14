@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { GoalRepository } from '../store/journal.js';
 import type { GoalState } from '../domain/transitions.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 export class GoalRegistryService {
   constructor(private readonly store: GoalRepository) {}

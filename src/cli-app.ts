@@ -23,8 +23,8 @@ import { SoloService } from './app/solo.js';
 import { HandoffService } from './app/handoff.js';
 import type { HandoffTarget } from './domain/transitions.js';
 import { LeadService, assertLeadTerminal, currentLeadRef } from './app/lead.js';
-import { PackageService, type PackageRuntime } from './app/packages.js';
-import { IntegrationService, parseIntegrationInput, type CommitInspector } from './app/integration.js';
+import { PackageService } from './app/packages.js';
+import { IntegrationService, parseIntegrationInput } from './app/integration.js';
 import { ControllerService } from './app/controller.js';
 import { MergeService } from './app/merge.js';
 import { ReviewService } from './app/review.js';
@@ -35,21 +35,17 @@ import { DEFAULT_UI_PORT, startUi } from './ui/server.js';
 import { GoalRegistryService } from './app/registry.js';
 import { VerificationService } from './app/verification.js';
 import { GateService, type GateOptions } from './app/gate.js';
-import { CodexSessionProbe, type TelemetryProbe } from './runtime/telemetry.js';
-import {
-  KNOWN_AGENTS,
-  ROLES,
-  describeProfiles,
-  loadProfiles,
-  resetProfile,
-  setProfile,
-  type Role,
-} from './runtime/brief.js';
+import { CodexSessionProbe } from './runtime/telemetry.js';
+import { KNOWN_AGENTS, ROLES, describeProfiles, loadProfiles, resetProfile, setProfile } from './runtime/brief.js';
 import { controllerHome } from './store/event-log.js';
 import { sourceDigest } from './domain/gate.js';
 import { assertMultiWpPlannable, parseWorkPackage } from './domain/packages.js';
-import { OrcaRuntime, worktreePath, type RuntimeAdapter } from './runtime/orca.js';
+import { OrcaRuntime, worktreePath } from './runtime/orca.js';
 import { ProjectJournal } from './store/journal.js';
+import type { PackageRuntime, RuntimeAdapter } from './ports/runtime.js';
+import type { CommitInspector } from './ports/commit-inspector.js';
+import type { TelemetryProbe } from './ports/telemetry.js';
+import type { Role } from './domain/runtime-refs.js';
 
 export type CliOptions = {
   runtime?: RuntimeAdapter & Partial<PackageRuntime>;

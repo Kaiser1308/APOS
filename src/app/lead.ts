@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { GoalEventType, GoalState, LeadState } from '../domain/transitions.js';
-import type { GoalRepository } from '../store/journal.js';
 import { resolve, sep } from 'node:path';
-import { OrcaRefused, worktreePath, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
+import { OrcaRefused, worktreePath } from '../runtime/orca.js';
 import { exhaustedAgent, exhaustedNote } from './watch.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
+import type { RuntimeAdapter } from '../ports/runtime.js';
+import type { RuntimeRef } from '../domain/runtime-refs.js';
 
 /** How long a Lead dispatch may stay unknown before the Human is asked to look in Orca. */
 export const LEAD_INTENT_MINUTES = 10;

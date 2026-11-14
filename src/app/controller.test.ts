@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
-import { PackageService, type PackageRuntime } from './packages.js';
+import { PackageService } from './packages.js';
 import { ControllerService } from './controller.js';
-import type { RuntimeAdapter } from '../runtime/orca.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
+import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 
 const dirs: string[] = [];
 afterEach(() => {

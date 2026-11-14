@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { applyEvent, type GoalEvent, type GoalEventType } from '../domain/transitions.js';
 import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
 import { assertExecutionSettled } from './replan.js';
-import type { RuntimeAdapter } from '../runtime/orca.js';
+import type { RuntimeAdapter } from '../ports/runtime.js';
 
 it('blocks product replanning while Solo ownership is still live, then resets state for approval', async () => {
   let n = 0;

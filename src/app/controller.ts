@@ -1,14 +1,15 @@
-import { PackageService, type PackageRuntime, type PackageRuntimeRef } from './packages.js';
+import { PackageService } from './packages.js';
 import { SoloService } from './solo.js';
 import { LeadService } from './lead.js';
-import type { OrcaMessage, RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
-import type { GoalRepository } from '../store/journal.js';
 import { randomUUID } from 'node:crypto';
 import { handingOff, type GoalState } from '../domain/transitions.js';
 /** Minutes a handoff may stay pending before the Human is told. */
 export const HANDOFF_PENDING_MINUTES = 10;
 import { dispatchAgent, ownerOf, quotaEscalation, recordExhausted } from './watch.js';
 import { MultiSupervisor, SoloSupervisor, type SupervisorOptions } from './supervisor.js';
+import type { OrcaMessage, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
+import type { PackageRuntimeRef, RuntimeRef } from '../domain/runtime-refs.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 export const IDLE_MINUTES = 15;
 export type ControllerTick = {

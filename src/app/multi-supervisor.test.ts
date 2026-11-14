@@ -7,8 +7,7 @@ import { runCli } from '../cli.js';
 import { spec as baseSpec, proposal, sourceText } from '../domain/fixtures.test-support.js';
 import type { GoalSpec } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
-import { OrcaRefused, type RuntimeAdapter } from '../runtime/orca.js';
-import type { PackageRuntime, PackageRuntimeRef } from './packages.js';
+import { OrcaRefused } from '../runtime/orca.js';
 import {
   CORE_SKILL,
   activationLine,
@@ -17,6 +16,8 @@ import {
   reviewResultPath,
 } from '../runtime/brief.js';
 import { ProjectJournal } from '../store/journal.js';
+import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
+import type { PackageRuntimeRef } from '../domain/runtime-refs.js';
 
 const dirs: string[] = [];
 afterEach(() => {

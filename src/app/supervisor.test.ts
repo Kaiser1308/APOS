@@ -6,8 +6,6 @@ import { join } from 'node:path';
 import { runCli } from '../cli.js';
 import { spec as baseSpec, proposal, sourceText } from '../domain/fixtures.test-support.js';
 import type { GoalSpec } from '../domain/contracts.js';
-import type { OrcaMessage, RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
-import type { Budget } from '../runtime/brief.js';
 import { ESCALATION_REPLY } from './controller.js';
 import { CORE_SKILL, activationLine, committedFileDigest, reviewResultPath, soloReportPath } from '../runtime/brief.js';
 import { ProjectJournal } from '../store/journal.js';
@@ -20,6 +18,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { approval } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
+import type { OrcaMessage, RuntimeAdapter } from '../ports/runtime.js';
+import type { Budget, RuntimeRef } from '../domain/runtime-refs.js';
 
 const dirs: string[] = [];
 afterEach(() => {

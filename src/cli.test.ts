@@ -20,9 +20,9 @@ const commitAll = (git: (args: string[]) => string, message: string) => {
   git(['-c', 'user.name=Owner', '-c', 'user.email=owner@local.invalid', 'commit', '-qm', message]);
   return git(['rev-parse', 'HEAD']);
 };
-import type { RuntimeAdapter, RuntimeRef } from './runtime/orca.js';
 import type { WorkPackageSpec } from './domain/packages.js';
-import type { PackageRuntime } from './app/packages.js';
+import type { PackageRuntime, RuntimeAdapter } from './ports/runtime.js';
+import type { RuntimeRef } from './domain/runtime-refs.js';
 
 const dirs: string[] = [];
 /** Runs `fn` as the Lead Orca dispatched: its terminal handle is the one APOS recorded. */

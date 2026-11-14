@@ -6,10 +6,10 @@ import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
-import type { HandoffInput, RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
-import { DEFAULT_PROFILES, type RuntimeProfiles } from '../runtime/brief.js';
-import type { PackageRuntime } from './packages.js';
+import { DEFAULT_PROFILES } from '../runtime/brief.js';
 import { HandoffService } from './handoff.js';
+import type { HandoffInput, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
+import type { RuntimeProfiles, RuntimeRef } from '../domain/runtime-refs.js';
 
 const dirs: string[] = [];
 const stores: SqliteStore[] = [];

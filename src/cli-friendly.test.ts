@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './cli.js';
 import { spec, sourceText } from './domain/fixtures.test-support.js';
-import type { RuntimeAdapter, RuntimeRef } from './runtime/orca.js';
+import type { RuntimeAdapter } from './ports/runtime.js';
+import type { RuntimeRef } from './domain/runtime-refs.js';
 
 const dirs: string[] = [];
 afterEach(() => {

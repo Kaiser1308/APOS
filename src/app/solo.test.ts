@@ -6,8 +6,9 @@ import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, gateReport, approval } from '../domain/fixtures.test-support.js';
 import { SoloService } from './solo.js';
 import { attemptKey } from '../domain/gate.js';
-import type { RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
 import type { GoalEventType } from '../domain/transitions.js';
+import type { RuntimeAdapter } from '../ports/runtime.js';
+import type { RuntimeRef } from '../domain/runtime-refs.js';
 
 const dirs: string[] = [];
 afterEach(() => {

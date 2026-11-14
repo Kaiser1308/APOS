@@ -6,10 +6,9 @@ import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
-import type { RuntimeAdapter } from '../runtime/orca.js';
-import type { PackageRuntime } from './packages.js';
 import { ControllerService } from './controller.js';
 import { LeadService } from './lead.js';
+import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 
 const dirs: string[] = [];
 const stores: SqliteStore[] = [];

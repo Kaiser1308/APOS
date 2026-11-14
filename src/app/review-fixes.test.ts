@@ -7,12 +7,13 @@ import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
-import { OrcaRefused, type HandoffInput, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
+import { OrcaRefused } from '../runtime/orca.js';
 import { DEFAULT_PROFILES, packageReportPath } from '../runtime/brief.js';
-import type { PackageRuntime } from './packages.js';
 import { HandoffService } from './handoff.js';
 import { MultiSupervisor } from './supervisor.js';
 import { ControllerService } from './controller.js';
+import type { HandoffInput, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
+import type { RuntimeRef } from '../domain/runtime-refs.js';
 
 const dirs: string[] = [];
 const stores: SqliteStore[] = [];

@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, gateReport as fixtureGate, approval } from '../domain/fixtures.test-support.js';
 import { attemptKey } from '../domain/gate.js';
-import { GitCommitInspector, IntegrationService, parseIntegrationInput, type CommitInspector } from './integration.js';
+import { GitCommitInspector, IntegrationService, parseIntegrationInput } from './integration.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { ReviewService } from './review.js';
+import type { CommitInspector } from '../ports/commit-inspector.js';
 
 const dirs: string[] = [];
 afterEach(() => {

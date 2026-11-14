@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { GoalRepository } from '../store/journal.js';
 import type { GoalState } from '../domain/transitions.js';
-import type { RuntimeAdapter } from '../runtime/orca.js';
-import type { Role, RuntimeProfile } from '../runtime/brief.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
+import type { RuntimeAdapter } from '../ports/runtime.js';
+import type { Role, RuntimeProfile } from '../domain/runtime-refs.js';
 
 /** Quiet minutes before the screen is read for an out-of-quota line; an agent that hit its limit goes idle at once. */
 export const QUOTA_CHECK_IDLE_MINUTES = 2;

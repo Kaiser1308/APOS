@@ -10,9 +10,10 @@ import { applyEvent, type GoalEvent, type GoalEventType } from '../domain/transi
 import { LeadService, LEAD_IDLE_MINUTES, LEAD_INTENT_MINUTES } from './lead.js';
 import { ControllerService } from './controller.js';
 import { assertExecutionSettled } from './replan.js';
-import { OrcaRefused, type RuntimeAdapter, type RuntimeObservation, type RuntimeRef } from '../runtime/orca.js';
-import type { PackageRuntime } from './packages.js';
+import { OrcaRefused } from '../runtime/orca.js';
 import { runCli } from '../cli.js';
+import type { PackageRuntime, RuntimeAdapter, RuntimeObservation } from '../ports/runtime.js';
+import type { RuntimeRef } from '../domain/runtime-refs.js';
 
 const dirs: string[] = [];
 afterEach(() => {

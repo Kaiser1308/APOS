@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Evidence, GoalId } from '../domain/contracts.js';
 import type { GoalEventType } from '../domain/transitions.js';
-import type { GoalRepository } from '../store/journal.js';
 import { requiresIndependentReview } from '../domain/reviews.js';
 import { gateShortfalls } from '../domain/gate.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 export type VerificationResult = { passed: true; acceptanceIds: string[]; deliveryCommit: string };
 

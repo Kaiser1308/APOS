@@ -1,17 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-
-export type Usage = {
-  model?: string;
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  sessions: number;
-};
-export interface TelemetryProbe {
-  usage(input: { worktreePath: string; since: string; until: string }): Usage | undefined;
-}
+import type { TelemetryProbe, Usage } from '../ports/telemetry.js';
 
 type Totals = { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number };
 const norm = (path: string) => resolve(path).replace(/\\/g, '/').toLowerCase();

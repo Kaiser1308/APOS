@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyEvent, type GoalEvent, type GoalState } from '../domain/transitions.js';
 import { verifyChain } from './event-log.js';
-import type { GoalRepository } from './journal.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 const GOAL_FILE = /^GOAL-[A-Z0-9-]+\.jsonl$/;
 

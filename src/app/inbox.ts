@@ -1,4 +1,4 @@
-import type { GoalRepository } from '../store/journal.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 export type InboxKind = 'needs-decision' | 'awaiting-outcome' | 'notice';
 export type InboxItem = { goalId: string; kind: InboxKind; detail: string; at?: string };

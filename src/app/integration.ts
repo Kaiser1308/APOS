@@ -2,17 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { validatePackageGraph } from '../domain/packages.js';
 import type { Evidence } from '../domain/contracts.js';
-import type { GoalRepository } from '../store/journal.js';
 import { assertGitRoot } from '../store/project-history.js';
 import { VerificationService } from './verification.js';
 import { requiresIndependentReview } from '../domain/reviews.js';
-import type { PackageRuntimeRef } from './packages.js';
-
-export interface CommitInspector {
-  exists(repoPath: string, ref: string): boolean;
-  files(repoPath: string, ref: string, baseCommit?: string): string[];
-  contains(repoPath: string, ancestor: string, descendant: string): boolean;
-}
+import type { GoalRepository } from '../ports/goal-repository.js';
+import type { PackageRuntimeRef } from '../domain/runtime-refs.js';
+import type { CommitInspector } from '../ports/commit-inspector.js';
 
 export class GitCommitInspector implements CommitInspector {
   exists(repoPath: string, ref: string): boolean {

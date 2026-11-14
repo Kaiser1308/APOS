@@ -5,7 +5,6 @@ import type { GoalEventType, GoalState } from '../domain/transitions.js';
 import { attemptLimit, handingOff } from '../domain/transitions.js';
 import { requiresIndependentReview, reviewReasons } from '../domain/reviews.js';
 import type { GateReport } from '../domain/gate.js';
-import type { GoalRepository } from '../store/journal.js';
 import {
   CORE_SKILL,
   aposCommand,
@@ -15,14 +14,18 @@ import {
   reviewResultPath,
   soloReportPath,
 } from '../runtime/brief.js';
-import { isDeadSession, worktreePath, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
-import type { TelemetryProbe } from '../runtime/telemetry.js';
+import { isDeadSession, worktreePath } from '../runtime/orca.js';
 import { GateService } from './gate.js';
 import { SoloService } from './solo.js';
 import { VerificationService } from './verification.js';
-import { PackageService, type PackageRuntime, type PackageRuntimeRef } from './packages.js';
-import { GitCommitInspector, IntegrationService, type CommitInspector } from './integration.js';
+import { PackageService } from './packages.js';
+import { GitCommitInspector, IntegrationService } from './integration.js';
 import { dispatchAgent, watchDispatch } from './watch.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
+import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
+import type { PackageRuntimeRef, RuntimeRef } from '../domain/runtime-refs.js';
+import type { TelemetryProbe } from '../ports/telemetry.js';
+import type { CommitInspector } from '../ports/commit-inspector.js';
 
 const show = (repo: string, commit: string, path: string): string | undefined => {
   try {

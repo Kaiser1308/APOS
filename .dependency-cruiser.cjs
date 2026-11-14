@@ -10,10 +10,6 @@ module.exports = {
       from: { pathNot: [NOT_TEST, '^src/domain/'] },
       to: {
         circular: true,
-        pathNot: [
-          '^src/app/packages[.]ts$', // gỡ ở Task 3 (vòng runtime/orca.ts <-> app/packages.ts)
-          '^src/runtime/orca[.]ts$', // gỡ ở Task 3 (vòng runtime/orca.ts <-> app/packages.ts)
-        ],
       },
     },
     {
@@ -43,10 +39,7 @@ module.exports = {
       severity: 'error',
       from: {
         path: '^src/(runtime|store)/',
-        pathNot: [
-          NOT_TEST,
-          '^src/runtime/orca[.]ts$', // gỡ ở Task 3
-        ],
+        pathNot: [NOT_TEST],
       },
       to: { path: '^src/(app|cli|ui)/|^src/cli' },
     },

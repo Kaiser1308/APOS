@@ -13,7 +13,7 @@ describe('Orca adapter result', () => {
   });
 });
 
-it('registers an unmanaged project before starting its Solo Lead', async () => {
+it('registers an unmanaged project before starting its Lead, in its own worktree at an exact base', async () => {
   const calls: string[][] = [];
   const runtime = new OrcaRuntime((args) => {
     calls.push(args);
@@ -21,9 +21,13 @@ it('registers an unmanaged project before starting its Solo Lead', async () => {
     if (args[1] === 'run-create') return { run: { id: 'run_1' } };
     return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', effects: [] };
   }, () => 'a'.repeat(40), DEFAULT_PROFILES, () => 'd'.repeat(64));
-  const ref = await runtime.startSolo({ repoPath: 'C:/project', goalId: 'GOAL-001', proposalVersion: 1, idempotencyKey: 'key-1' });
+  const ref = await runtime.startLead({ repoPath: 'C:/project', goalId: 'GOAL-001', goalVersion: 1, idempotencyKey: 'key-1' });
   expect(calls[0]).toEqual(['repo', 'add', '--path', 'C:/project']);
-  expect(ref.dispatchId).toBe('ctx_1');
+  expect(calls.find(args => args[1] === 'run-create')).toContain('APOS GOAL-001 lead v1 key key-1');
+  const start = calls.find(args => args[1] === 'worker-start')!;
+  expect(start).toEqual(expect.arrayContaining(['--worktree', 'new-top-level', '--base-branch', 'a'.repeat(40), '--agent', 'codex', '--model', 'gpt-6.1-terra']));
+  expect(start[start.indexOf('--spec') + 1]).toContain('APOS Lead for Goal v1');
+  expect(ref).toMatchObject({ dispatchId: 'ctx_1', baseCommit: 'a'.repeat(40), requested: { agent: 'codex', model: 'gpt-6.1-terra' } });
 });
 
 it('starts a package Worker in a dedicated Orca worktree', async () => {
@@ -236,7 +240,7 @@ it('reads the Orca 1.4.254 shapes: run-create answers runId, a start receipt nam
     if (args[1] === 'run-create') return { runId: 'run_1', objective: 'x' };
     return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', terminal: 'term_1', workspace: 'wt::C:/w' };
   }, () => 'a'.repeat(40), DEFAULT_PROFILES, () => 'd'.repeat(64));
-  const ref = await runtime.startSolo({ repoPath: 'C:/project', goalId: 'GOAL-001', proposalVersion: 1, idempotencyKey: 'key-1' });
+  const ref = await runtime.startLead({ repoPath: 'C:/project', goalId: 'GOAL-001', goalVersion: 1, idempotencyKey: 'key-1' });
   expect(ref).toMatchObject({ runId: 'run_1', terminal: 'term_1', worktreeId: 'wt::C:/w' });
 });
 
@@ -261,4 +265,14 @@ it('asks the concise worker-show for the idle age because the full record has no
   const settled = await new OrcaRuntime(args => { calls.push(args); return { dispatch: { status: 'completed' } }; }).inspect({ runId: 'run_1', taskId: 't', dispatchId: 'ctx_2', owner: 'lead', repoPath: 'C:/p' });
   expect(settled.idleMinutes).toBeUndefined();
   expect(calls.filter(args => args.includes('--compact')).map(args => args[3])).toEqual(['ctx_1']);
+});
+
+it('recovers a lost Lead dispatch with its terminal, from the Orca 1.4.255 field names', async () => {
+  const runtime = new OrcaRuntime(args => {
+    if (args[1] === 'run-list') return { runs: [{ id: 'run_lead', objective: 'APOS GOAL-001 lead v1 key key-1' }] };
+    if (args[1] === 'task-list') return { tasks: [{ id: 'task_1', spec: `GOAL-001: APOS Lead. APOS repo: <C:/project>. APOS dispatch key: key-1. APOS base commit: ${'a'.repeat(40)}.` }] };
+    if (args[1] === 'dispatch-show') return { dispatch: { id: 'ctx_1', assigneeHandle: 'structworker_1' } };
+    return { worker: { worktreeId: 'wt::C:/w', agentTerminalHandle: 'structworker_1' } };
+  });
+  expect(await runtime.recover('key-1')).toMatchObject({ runId: 'run_lead', dispatchId: 'ctx_1', terminal: 'structworker_1', worktreeId: 'wt::C:/w', baseCommit: 'a'.repeat(40) });
 });

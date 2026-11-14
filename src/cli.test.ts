@@ -16,6 +16,11 @@ import type { WorkPackageSpec } from './domain/packages.js';
 import type { PackageRuntime } from './app/packages.js';
 
 const dirs: string[] = [];
+/** Runs `fn` as the Lead Orca dispatched: its terminal handle is the one APOS recorded. */
+async function asLead<T>(terminal: string, fn: () => Promise<T>): Promise<T> {
+  process.env.ORCA_TERMINAL_HANDLE = terminal;
+  try { return await fn(); } finally { delete process.env.ORCA_TERMINAL_HANDLE; }
+}
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
 
 it('dispatches a Solo plan the Lead commits after Human Goal approval and selection, with no Human plan gate', async () => {
@@ -34,9 +39,9 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
   let starts = 0;
   let soloDone = false;
   const released: string[] = [];
-  const ref: RuntimeRef = { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir };
+  const ref: RuntimeRef = { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_lead', worktreeId: 'repo::C:/lead-wt' };
   const runtime: RuntimeAdapter = {
-    async startSolo() { starts++; ref.baseCommit = git(['rev-parse', 'HEAD']); return ref; },
+    async startLead() { starts++; ref.baseCommit = git(['rev-parse', 'HEAD']); return ref; },
     async resumeSolo() { return ref; },
     async inspect() { return soloDone ? { state: 'settled', outcome: 'completed', ref } : { state: 'live', ref }; },
     async releaseWorker(dispatchId) { released.push(dispatchId); }
@@ -50,10 +55,14 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
   expect(starts).toBe(0);
   expect(output.join('\n')).toContain(spec.id);
   await invoke('goal', 'select', spec.id);
-  await invoke('lead', 'propose', '--file', proposalFile);
-  expect(starts).toBe(0);
-  await invoke('lead', 'commit', spec.id);
-  expect(starts).toBe(1);
+  expect(starts).toBe(1); // selecting the Goal dispatches its Lead
+  await expect(invoke('lead', 'propose', '--file', proposalFile)).rejects.toThrow(/Lead terminal APOS dispatched/);
+  await asLead('term_lead', async () => {
+    await invoke('lead', 'propose', '--file', proposalFile);
+    await invoke('lead', 'commit', spec.id);
+  });
+  expect(starts).toBe(1); // the Solo owner is that Lead: no second session
+  expect(output.at(-1)).toMatch(/you \(Lead ctx_1\) are the Solo owner/);
   await invoke('execution', 'status', spec.id);
   expect(output.at(-1)).toContain('executing');
   await invoke('execution', 'reconcile', spec.id);
@@ -65,6 +74,9 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
   writeFileSync(evidenceFile, JSON.stringify({ acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'commit:abc' }));
   await invoke('evidence', 'add', spec.id, '--file', evidenceFile);
   soloDone = true;
+  // The owner (the Lead) works on its own branch, cut from its base at selection; APOS milestone commits stay on main.
+  const target = git(['branch', '--show-current']);
+  git(['switch', '-q', '-c', 'lead-wt', ref.baseCommit!]);
   // The owner claims pass but has not delivered the code: the controller's own run is red.
   writeFileSync(join(dir, 'feature.js'), 'process.exit(1);');
   const broken = commitAll(git, 'owner: broken');
@@ -77,12 +89,13 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
   expect(JSON.parse(output.at(-1)!)).toMatchObject({ result: 'green', deliveryCommit: fixed });
   await expect(invoke('execution', 'verify', spec.id, '--commit', broken)).rejects.toThrow(/not [0-9a-f]{40}/);
   await invoke('execution', 'verify', spec.id, '--commit', fixed);
-  await invoke('outcome', 'close', spec.id, '--merge-to', git(['branch', '--show-current']));
+  git(['switch', '-q', target]);
+  await invoke('outcome', 'close', spec.id, '--merge-to', target);
   expect(output.find(line => line.startsWith('Merged'))).toMatch(/post-merge gate green/);
   expect(released).toEqual([]); // no settlement was recorded on this manual path; see the autopilot test
   await invoke('execution', 'status', spec.id);
   expect(output.at(-1)).toContain('closed');
-}, 30_000);
+}, 60_000); // real gates and merges in Git; seen at 30.2 s under a parallel full-suite run on Windows
 
 it('runs an approved two-package Goal through dependency release, integration and Human closure', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-cli-multi-')); dirs.push(dir);
@@ -93,7 +106,7 @@ it('runs an approved two-package Goal through dependency release, integration an
   const b: WorkPackageSpec = { ...a, id: 'WP-02', owner: 'worker-b', outcome: 'History', scope: ['history'], dependencies: ['WP-01'], acceptance: [{ id: 'WP-AC-2', text: 'history works' }] };
   const starts: string[] = [];
   const runtime: RuntimeAdapter & PackageRuntime = {
-    async startSolo() { throw new Error('Solo must not start'); },
+    async startLead({ repoPath }) { return { runId: 'run_lead', taskId: 'lead', dispatchId: 'lead-1', owner: 'lead', repoPath, terminal: 'term_lead', worktreeId: 'repo::C:/lead-wt', baseCommit: git(['rev-parse', 'HEAD']) }; },
     async resumeSolo() { throw new Error('Solo must not resume'); },
     async inspect(ref) { return { state: 'settled', ref }; },
     async inspectPackage() { return 'completed'; },
@@ -108,11 +121,13 @@ it('runs an approved two-package Goal through dependency release, integration an
   await invoke('init');
   await invoke('goal', 'create', '--file', input('goal.json', spec), '--source', join(dir, 'brief.md'));
   await invoke('goal', 'approve', spec.id, '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3'); await invoke('goal', 'select', spec.id);
-  await invoke('lead', 'propose', '--file', input('proposal.json', { ...proposal, mode: 'multi-wp' }));
-  await invoke('package', 'add', '--file', input('wp-a.json', a));
-  await invoke('package', 'add', '--file', input('wp-b.json', b));
-  expect(starts).toEqual([]);
-  await invoke('lead', 'commit', spec.id);
+  await asLead('term_lead', async () => {
+    await invoke('lead', 'propose', '--file', input('proposal.json', { ...proposal, mode: 'multi-wp' }));
+    await invoke('package', 'add', '--file', input('wp-a.json', a));
+    await invoke('package', 'add', '--file', input('wp-b.json', b));
+    expect(starts).toEqual([]);
+    await invoke('lead', 'commit', spec.id);
+  });
   expect(starts).toEqual(['WP-01']);
   expect(output.find(line => line.startsWith('NOTICE'))).toMatch(/Multi-WP \(2 packages/);
   writeFileSync(join(dir, 'scanner.ts'), 'export const scan = true;'); git(['add', 'scanner.ts']);
@@ -145,7 +160,7 @@ it('refuses approval when the source snapshot was edited after drafting, or a re
   execFileSync('git', ['init', '-q', dir]);
   const git = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   const output: string[] = [];
-  const runtime: RuntimeAdapter = { async startSolo() { throw new Error('no dispatch'); }, async resumeSolo() { throw new Error('no resume'); }, async inspect(ref) { return { state: 'live', ref }; } };
+  const runtime: RuntimeAdapter = { async startLead() { throw new Error('no dispatch'); }, async resumeSolo() { throw new Error('no resume'); }, async inspect(ref) { return { state: 'live', ref }; } };
   const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, write: line => output.push(line) });
   writeFileSync(join(dir, 'brief.md'), sourceText);
   writeFileSync(join(dir, 'goal.json'), JSON.stringify(spec));
@@ -165,16 +180,23 @@ it('refuses approval when the source snapshot was edited after drafting, or a re
 it('refuses Human-only commands from an APOS agent terminal, so an owner cannot merge or approve for itself', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-cli-human-')); dirs.push(dir);
   execFileSync('git', ['init', '-q', dir]);
-  const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_owner' };
-  const runtime: RuntimeAdapter = { async startSolo() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; } };
+  const git = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_owner', worktreeId: 'repo::C:/lead-wt' };
+  const runtime: RuntimeAdapter = { async startLead() { ref.baseCommit = git(['rev-parse', 'HEAD']); return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; } };
   const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, write: () => undefined });
   writeFileSync(join(dir, 'goal.json'), JSON.stringify(spec)); writeFileSync(join(dir, 'brief.md'), sourceText); writeFileSync(join(dir, 'plan.json'), JSON.stringify(proposal));
   await invoke('init');
   await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
   await invoke('goal', 'approve', spec.id, '--size', 'S', '--max-spend', '5', '--max-minutes', '60', '--max-attempts', '2');
   await invoke('goal', 'select', spec.id);
-  await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
-  await invoke('lead', 'commit', spec.id);
+  // The Lead is an agent from its dispatch on: before it commits any plan it already cannot act as the Human.
+  await asLead('term_owner', async () => {
+    await expect(invoke('goal', 'appetite', spec.id, '--size', 'L', '--max-spend', '99', '--max-minutes', '999', '--max-attempts', '9', '--reason', 'more')).rejects.toThrow(/Human decision/);
+    await expect(invoke('lead', 'start', spec.id)).rejects.toThrow(/Human decision/);
+    await expect(invoke('lead', 'wake', spec.id, '--note', 'go')).rejects.toThrow(/Human decision/);
+    await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
+    await invoke('lead', 'commit', spec.id);
+  });
   process.env.ORCA_TERMINAL_HANDLE = 'term_owner';
   try {
     await expect(invoke('outcome', 'close', spec.id, '--merge-to', 'main')).rejects.toThrow(/Human decision/);

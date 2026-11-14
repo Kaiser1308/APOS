@@ -54,13 +54,14 @@ function attemptsOf(state: GoalState): number {
 }
 
 /**
- * Same clock as the supervisor's overrun check (`wallMinutesUsed`): from the first owner start. A running or
+ * Same clock as the supervisor's overrun check (`wallMinutesUsed`): from the Lead's dispatch, else the first owner start. A running or
  * blocked Goal is still on the clock, so it counts to now; a finished one stops at its last event.
  */
 function elapsedMinutes(events: GoalEvent[], state: GoalState, now: Date): number {
-  const start = events.find(item => item.type === 'execution-started' || item.type === 'package-started');
+  // The Lead's dispatch starts the clock when there is one (planning counts against the appetite).
+  const start = events.find(item => item.type === 'lead-dispatch-intended') ?? events.find(item => item.type === 'execution-started' || item.type === 'package-started');
   if (!start) return 0;
-  const running = state.status === 'executing' || state.status === 'blocked' || state.status === 'ready';
+  const running = ['executing', 'blocked', 'ready', 'selected', 'planned'].includes(state.status);
   const end = running ? now.getTime() : Date.parse(events.at(-1)!.at);
   return Math.max(0, Math.round((end - Date.parse(start.at)) / 60_000));
 }

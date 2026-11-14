@@ -7,7 +7,7 @@ export type GoalEventType =
   | 'goal-drafted' | 'goal-approved' | 'goal-selected' | 'goal-revised'
   | 'proposal-drafted' | 'proposal-approved' | 'proposal-revised'
   | 'dispatch-intended' | 'execution-started' | 'resume-intended' | 'runtime-resumed' | 'checkpointed' | 'blocked' | 'unblocked' | 'decision-logged' | 'evidence-submitted'
-  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-intended' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken' | 'package-gate-recorded' | 'intent-abandoned'
+  | 'worker-settled' | 'gate-recorded' | 'check-confirmed' | 'appetite-set' | 'merge-authorized' | 'finding-recorded' | 'human-notified' | 'review-intended' | 'review-dispatched' | 'telemetry-recorded' | 'lead-woken' | 'lead-dispatch-intended' | 'lead-started' | 'lead-settled' | 'package-gate-recorded' | 'intent-abandoned'
   | 'verified' | 'outcome-accepted' | 'outcome-revised' | 'outcome-stopped' | 'review-submitted' | 'merge-completed' | 'integration-completed' | 'package-added' | 'package-revised' | 'package-dispatch-intended' | 'package-started' | 'package-resume-intended' | 'package-resumed' | 'package-retry-exhausted' | 'package-evidence-submitted' | 'package-verified' | 'package-blocked' | 'package-unblocked';
 export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?: unknown; at: string };
 export type GoalStatus = 'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
@@ -50,7 +50,15 @@ export type GoalState = {
   /** Lead terminal for Multi-WP wake-ups, and events already delivered to it. */
   leadTerminal?: { terminal: string; worktree: string; runId?: string };
   wokenFor?: string[];
+  /** A Lead dispatch whose Orca outcome is not yet known; recovered by its key. */
+  leadIntent?: string;
+  /**
+   * The Lead the controller dispatched for this Goal version. `current` is its latest dispatch (start or wake);
+   * in Solo that dispatch is the owner. `settled` is set when a turn ended before any plan was accepted.
+   */
+  lead?: LeadState;
 };
+export type LeadState = { ref: { runId: string; taskId: string; dispatchId: string; repoPath: string; terminal: string; worktreeId: string; baseCommit: string; requested?: unknown }; current: string; settled?: 'completed' | 'failed' };
 export type Telemetry = { dispatchId: string; role: 'lead' | 'worker' | 'reviewer'; requestedModel?: string; launchedModel?: string | null; usage?: { model?: string; inputTokens: number; cachedInputTokens: number; outputTokens: number; sessions: number } | 'unknown'; wallMs?: number };
 export type MergeAuthorization = { goalId: string; goalVersion: number; integrationCommit: string; targetBranch: string; scope: 'goal'; once: true; by: string };
 export type FindingKind = 'intent_gap' | 'bad_plan' | 'patch' | 'defer';
@@ -237,6 +245,8 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'execution-started':
       requireThat(state.status === 'ready' && state.selected && state.proposal && state.proposalApprovedVersion === state.proposal.version, 'Approved current proposal required');
+      // Solo: the owner is the Lead that planned, never a second session.
+      requireThat(!state.lead || (event.data as { dispatchId?: string } | undefined)?.dispatchId === state.lead.current, 'Solo owner must be the current Lead dispatch');
       return { ...state, status: 'executing', runtimeRef: event.data, dispatchIntent: undefined, soloAttempts: 1 };
     case 'dispatch-intended':
       requireThat(state.status === 'ready' && !state.dispatchIntent && state.selected && state.proposalApprovedVersion === state.proposal?.version, 'Approved current proposal required');
@@ -255,6 +265,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const data = event.data as { key?: string; reason?: string };
       requireThat(data?.key && data.reason?.trim(), 'Abandoning an intent needs its key and a reason');
       if (state.resumeIntent === data.key) return { ...state, resumeIntent: undefined };
+      if (state.leadIntent === data.key) return { ...state, leadIntent: undefined };
       if (state.dispatchIntent === data.key && state.status === 'ready') return { ...state, dispatchIntent: undefined };
       // Seen live: a refused package resume left the package 'resuming' forever. It goes back to 'stale' to be retried.
       const resuming = Object.entries(state.packages ?? {}).find(([, item]) => item.status === 'resuming' && item.dispatchIntent === data.key);
@@ -372,7 +383,26 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const data = event.data as { dispatchId?: string; events?: string[]; terminal?: string; worktree?: string; runId?: string };
       requireThat(Array.isArray(data?.events), 'Woken events required');
       const leadTerminal = data.terminal && data.worktree ? { terminal: data.terminal, worktree: data.worktree, runId: data.runId } : state.leadTerminal;
-      return { ...state, leadTerminal, wokenFor: [...(state.wokenFor ?? []), ...data.events!] };
+      const lead = state.lead && data.dispatchId ? { ...state.lead, current: data.dispatchId, settled: undefined } : state.lead;
+      return { ...state, leadTerminal, lead, wokenFor: [...(state.wokenFor ?? []), ...data.events!] };
+    }
+    case 'lead-dispatch-intended':
+      requireThat(state.selected && state.approvedGoalVersion === state.spec.version && ['selected', 'planned', 'ready'].includes(state.status), 'Approved, selected Goal not yet executing required');
+      requireThat(!state.leadIntent && (!state.lead || state.lead.settled), 'A Lead is already dispatched or pending for this Goal');
+      requireThat(typeof event.data === 'string' && event.data.length > 0, 'Lead dispatch key required');
+      return { ...state, leadIntent: event.data };
+    case 'lead-started': {
+      const ref = event.data as LeadState['ref'];
+      requireThat(state.leadIntent, 'Lead dispatch intent required');
+      requireThat(ref?.dispatchId && ref.runId && ref.terminal && ref.worktreeId && /^[0-9a-fA-F]{40,64}$/.test(ref.baseCommit ?? ''), 'Lead start needs Dispatch, Run, terminal, worktree and full base commit');
+      return { ...state, leadIntent: undefined, lead: { ref, current: ref.dispatchId }, leadTerminal: { terminal: ref.terminal, worktree: `id:${ref.worktreeId}`, runId: ref.runId }, wokenFor: [] };
+    }
+    case 'lead-settled': {
+      const data = event.data as { dispatchId?: string; outcome?: string };
+      requireThat(state.lead && data?.dispatchId === state.lead.current && !state.lead.settled, 'Settlement must be for the current Lead dispatch');
+      requireThat(data.outcome === 'completed' || data.outcome === 'failed', 'Lead settlement outcome required');
+      requireThat(['selected', 'planned', 'ready'].includes(state.status), 'Lead settles on its own only before execution starts');
+      return { ...state, lead: { ...state.lead, settled: data.outcome } };
     }
     case 'human-notified':
       requireThat(event.data && typeof event.data === 'object', 'Notification details required');
@@ -382,7 +412,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, status: 'closed' };
     case 'outcome-revised':
       requireThat(state.status === 'verified', 'Technical verification required');
-      return { ...state, status: 'draft', selected: false, approvedGoalVersion: undefined, proposal: undefined, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined, gate: undefined, manualConfirmations: [], mergeAuthorization: undefined, postMergeGate: undefined, findings: [] };
+      return { ...state, status: 'draft', selected: false, approvedGoalVersion: undefined, proposal: undefined, proposalApprovedVersion: undefined, evidence: [], packages: {}, integration: undefined, reviews: [], merge: undefined, soloAttempts: undefined, runtimeRef: undefined, dispatchIntent: undefined, resumeIntent: undefined, checkpoint: undefined, blocker: undefined, gate: undefined, manualConfirmations: [], mergeAuthorization: undefined, postMergeGate: undefined, findings: [], lead: undefined, leadIntent: undefined, leadTerminal: undefined, wokenFor: [] };
     case 'outcome-stopped':
       return { ...state, status: 'stopped' };
     default:

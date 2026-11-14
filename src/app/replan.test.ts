@@ -13,7 +13,7 @@ it('blocks product replanning while Solo ownership is still live, then resets st
   state = applyEvent(state, event('proposal-approved'));
   state = applyEvent(state, event('execution-started', { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', owner: 'lead', repoPath: 'C:/project' }));
   const runtime: RuntimeAdapter = {
-    async startSolo() { throw new Error('not used'); }, async resumeSolo() { throw new Error('not used'); },
+    async startLead() { throw new Error('not used'); }, async resumeSolo() { throw new Error('not used'); },
     async inspect(ref) { return { state: 'live', ref }; }
   };
   await expect(assertExecutionSettled(state, runtime)).rejects.toThrow(/must settle/);

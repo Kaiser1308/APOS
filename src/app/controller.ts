@@ -1,5 +1,6 @@
 import { PackageService, type PackageRuntime, type PackageRuntimeRef } from './packages.js';
 import { SoloService } from './solo.js';
+import { LeadService } from './lead.js';
 import type { OrcaMessage, RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
 import type { GoalRepository } from '../store/journal.js';
 import { randomUUID } from 'node:crypto';
@@ -110,8 +111,17 @@ export class ControllerService {
     const results: ControllerTick[] = [];
     for (const snapshot of this.store.listGoals()) {
       const goalId = snapshot.spec.id;
-      if (!snapshot.proposal || !['ready', 'executing', 'blocked'].includes(snapshot.status)) continue;
       const result: ControllerTick = { goalId, dispatched: [], recovered: [], unresolved: [], resumed: [], settled: [], inboxPending: [], errors: [], supervised: [] };
+      // The Lead is planning (no plan accepted yet), or its dispatch is still unknown. A running Lead whose Solo plan is
+      // accepted is adopted below as the owner, so its end of turn counts as a delivery, not as a planning stop.
+      const planning = ['selected', 'planned'].includes(snapshot.status) || (snapshot.status === 'ready' && snapshot.proposal?.mode !== 'multi-wp' && Boolean(snapshot.leadIntent));
+      if (planning && (snapshot.lead || snapshot.leadIntent)) {
+        try { result.supervised.push(...await new LeadService(this.store, this.runtime).reconcile(goalId)); }
+        catch (error) { result.errors.push(`lead: ${error instanceof Error ? error.message : String(error)}`); }
+        const current = this.store.getGoal(goalId)!;
+        if (current.status !== 'ready' || !current.lead || current.lead.settled) { results.push(result); continue; }
+      }
+      if (!snapshot.proposal || !['ready', 'executing', 'blocked'].includes(snapshot.status)) continue;
       if (snapshot.status === 'blocked') {
         try { await this.consumeInbox(goalId, result); }
         catch (error) { result.errors.push(`inbox: ${error instanceof Error ? error.message : String(error)}`); }
@@ -144,7 +154,20 @@ export class ControllerService {
       } else {
         const service = new SoloService(this.store, this.runtime);
         try {
-          if (snapshot.status === 'ready') result.dispatched.push((await service.start(goalId, repoPath)).dispatchId);
+          if (snapshot.status === 'ready') {
+            const current = this.store.getGoal(goalId)!;
+            if (!current.lead || current.lead.settled) {
+              // Accepted under the old flow (or its Lead ended its turn): there is no Lead to own it, and no cold owner is started.
+              const note = `the Solo plan of ${goalId} has no running APOS-dispatched Lead to deliver it. Run \`apos lead start ${goalId}\`; that Lead proposes and commits again.`;
+              if (!this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'needs-decision' && (item.data as { note?: string }).note === note)) {
+                this.store.append({ id: randomUUID(), goalId, type: 'human-notified', data: { kind: 'needs-decision', goalId, note }, at: new Date().toISOString() });
+              }
+              result.unresolved.push('Solo plan without a Lead');
+              results.push(result);
+              continue;
+            }
+            result.dispatched.push((await service.adopt(goalId)).dispatchId);
+          }
           else {
             const observed = await service.reconcile(goalId);
             if (observed === 'unverifiable') {

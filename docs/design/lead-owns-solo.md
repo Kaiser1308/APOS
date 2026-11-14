@@ -172,7 +172,7 @@ Event có sẵn, đổi điều kiện:
 | F11 | Chạy `goal select` hai lần, hoặc tick chạy song song với select | I1 | Transition `lead-dispatch-intended` từ chối khi đã có intent hoặc Lead | — |
 | F12 | Vượt wall time ngay trong pha lập plan | I6 | Tick ở pha lập plan báo `overrun` một lần; `proposal-approved` kiểm `estimatedCost` so với phần appetite còn lại | Người: `goal appetite` hoặc `outcome stop` |
 | F13 | Multi-WP: wake đầu tiên tới khi Lead còn đang chạy sau `lead commit` | — | `lead-woken` đầu tiên mang dispatchId của Lead nên logic "Lead busy" (`src/app/supervisor.ts:486-492`) giữ lại sự kiện | Controller |
-| F14 | Mất phản hồi khi chạy `lead wake` | — | Ghi intent trước (key), tick recover như F1 | Người |
+| F14 | Mất phản hồi khi chạy `lead wake` | — | **Triển khai lệch (2026-11-14):** chưa ghi intent. Lệnh báo lỗi; người kiểm terminal Lead trong Orca rồi chạy lại. Chạy lại khi lượt đầu thật ra đã tới thì Lead nhận cùng một quyết định hai lần (vô hại, vì Lead tự bỏ qua). Ghi intent theo mẫu F1 là việc tiếp theo nếu ca này xảy ra live | Người |
 | F15 | Commit mốc "plan accepted" của APOS nằm trên repo chính, sau base của Lead | I3 | Không phải lỗi: `foreignCommits` bỏ qua commit của tác giả `apos@local.invalid` (`src/app/supervisor.ts:283-287`); delivery của Lead chỉ sửa `evidence/` nên merge không đụng `execution.md`. Có test khẳng định điều này | — |
 
 **Quan sát.** Không thêm metric mới. Các tín hiệu đi qua `apos inbox` và UI ("Needs you"):

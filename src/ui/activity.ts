@@ -157,7 +157,10 @@ export function dispatchesOf(events: GoalEvent[]): Dispatch[] {
       const id = typeof source.worktreeId === 'string' ? source.worktreeId : typeof source.worktree === 'string' ? source.worktree : undefined;
       out.push({ dispatchId: source.dispatchId, role, owner, at: event.at, worktree: id?.includes('::') ? worktreePath(id) : id && /[\\/]/.test(id) ? id : undefined });
     };
-    if (event.type === 'execution-started' || event.type === 'runtime-resumed') add('worker', 'goal', data);
+    // The Lead's own dispatch; when it then becomes the Solo owner, execution-started repeats its id and is not listed twice.
+    if (event.type === 'lead-started') add('lead', 'goal', data);
+    else if (event.type === 'execution-started' && out.some(entry => entry.dispatchId === data.dispatchId)) continue;
+    else if (event.type === 'execution-started' || event.type === 'runtime-resumed') add('worker', 'goal', data);
     else if (event.type === 'package-started' || event.type === 'package-resumed') add('worker', String(data.packageId ?? 'goal'), ref);
     else if (event.type === 'review-dispatched') add('reviewer', typeof data.packageId === 'string' ? data.packageId : 'goal', data);
     else if (event.type === 'lead-woken') add('lead', 'goal', data);

@@ -5,6 +5,7 @@ import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { GoalRepository } from '../store/journal.js';
 import { OrcaRefused, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
 import { VerificationService, type VerificationResult } from './verification.js';
+import { clockStart, currentLeadRef } from './lead.js';
 
 export class SoloService {
   constructor(private readonly store: GoalRepository, private readonly runtime: RuntimeAdapter) {}
@@ -16,30 +17,22 @@ export class SoloService {
   /** What the approved appetite leaves after `attempt` starts; the owner sees it in its brief. */
   private budget(state: GoalState, attempt: number): Budget | undefined {
     if (!state.appetite) return undefined;
-    const started = this.store.events(state.spec.id).find(item => item.type === 'execution-started');
-    const used = started ? (Date.now() - Date.parse(started.at)) / 60_000 : 0;
+    const started = clockStart(this.store.events(state.spec.id));
+    const used = started ? (Date.now() - Date.parse(started)) / 60_000 : 0;
     return { minutesLeft: state.appetite.maxWallMinutes - used, attemptsLeft: Math.max(0, attemptLimit(state) - attempt) };
   }
 
-  async start(goalId: string, repoPath: string): Promise<RuntimeRef> {
+  /**
+   * Solo has no dispatch of its own: the owner is the Lead that planned, in the worktree and terminal it already
+   * has. Recording that is idempotent; a Goal without an APOS-dispatched Lead is refused, never given a cold owner.
+   */
+  async adopt(goalId: string): Promise<RuntimeRef> {
     const state = this.store.getGoal(goalId);
     if (!state || !state.proposal || !state.proposal.mode.startsWith('solo')) throw new Error('Approved Solo proposal required');
     if (state.status === 'executing' && state.runtimeRef) return state.runtimeRef as RuntimeRef;
     if (state.status !== 'ready') throw new Error('Goal is not ready to dispatch');
-    const key = state.dispatchIntent ?? randomUUID();
-    if (state.dispatchIntent) {
-      const recovered = await this.runtime.recover?.(key);
-      if (!recovered) throw new Error('Dispatch outcome unknown; reconcile Orca before retrying');
-      this.record(goalId, 'execution-started', recovered);
-      return recovered;
-    }
-    this.record(goalId, 'dispatch-intended', key);
-    let ref: RuntimeRef;
-    try { ref = await this.runtime.startSolo({ repoPath, goalId, proposalVersion: state.proposal.version, idempotencyKey: key, budget: this.budget(state, 1) }); }
-    catch (error) {
-      if (error instanceof OrcaRefused) this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
-      throw error;
-    }
+    if (!state.lead || state.lead.settled) throw new Error(`No running APOS-dispatched Lead owns ${goalId}: the Human runs \`apos lead start ${goalId}\` and that Lead proposes and commits again`);
+    const ref = currentLeadRef(state.lead);
     this.record(goalId, 'execution-started', ref);
     return ref;
   }

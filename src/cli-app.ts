@@ -14,6 +14,7 @@ import { parseAppetite, parseExecutionProposal, parseGoalSpec, type Evidence, ty
 import type { GoalEventType } from './domain/transitions.js';
 import { initProject } from './app/init-project.js';
 import { SoloService } from './app/solo.js';
+import { LeadService, assertLeadTerminal, currentLeadRef } from './app/lead.js';
 import { PackageService, type PackageRuntime } from './app/packages.js';
 import { IntegrationService, type CommitInspector } from './app/integration.js';
 import { ControllerService } from './app/controller.js';
@@ -30,9 +31,8 @@ import { CodexSessionProbe, type TelemetryProbe } from './runtime/telemetry.js';
 import { loadProfiles } from './runtime/brief.js';
 import { controllerHome } from './store/event-log.js';
 import { sourceDigest } from './domain/gate.js';
-import { execFileSync } from 'node:child_process';
 import { assertMultiWpPlannable, parseWorkPackage } from './domain/packages.js';
-import { OrcaRuntime, terminalWorktree, worktreePath, type RuntimeAdapter } from './runtime/orca.js';
+import { OrcaRuntime, worktreePath, type RuntimeAdapter } from './runtime/orca.js';
 import { ProjectJournal } from './store/journal.js';
 
 export type CliOptions = { runtime?: RuntimeAdapter & Partial<PackageRuntime>; inspector?: CommitInspector; gate?: GateOptions; telemetry?: TelemetryProbe; home?: string; write?: (line: string) => void };
@@ -80,7 +80,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
       add(state.runtimeRef); add(state.reviewDispatch);
       for (const item of Object.values(state.packages ?? {})) add(item.runtimeRef);
       if (state.leadTerminal) terminals.add(state.leadTerminal.terminal);
-      for (const item of journal.events(state.spec.id)) if (['execution-started', 'runtime-resumed', 'package-started', 'package-resumed'].includes(item.type)) add((item.data as { ref?: unknown })?.ref ?? item.data);
+      if (state.lead) add(state.lead.ref);
+      // The Lead is an agent from the moment APOS dispatches it, long before it commits a plan.
+      for (const item of journal.events(state.spec.id)) if (['lead-started', 'execution-started', 'runtime-resumed', 'package-started', 'package-resumed'].includes(item.type)) add((item.data as { ref?: unknown })?.ref ?? item.data);
     }
     const here = resolve(process.cwd()).toLowerCase();
     const handle = process.env.ORCA_TERMINAL_HANDLE;
@@ -128,15 +130,18 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     journal.append(event(id, 'appetite-set', { appetite: parseAppetite(appetiteOf(flags)), reason: flags.reason }));
     write(`Appetite for ${id} updated`);
   }));
-  goal.command('select').argument('<id>').action((id: string) => withJournal(journal => {
+  // Gate B. Selecting a Goal dispatches its Lead, which plans and, in Solo, delivers in the same session.
+  goal.command('select').argument('<id>').action((id: string) => withJournalAsync(async journal => {
     assertHuman(journal, 'goal select');
     new GoalRegistryService(journal).select(id); write(`Selected ${id}`);
+    try { write(`Dispatched Lead ${id}: ${(await new LeadService(journal, runtime).start(id, repo())).dispatchId}`); }
+    catch (error) { write(`Lead not dispatched for ${id}: ${error instanceof Error ? error.message : String(error)}. Retry with \`apos lead start ${id}\`.`); }
   }));
   goal.command('revise').requiredOption('--file <json>').requiredOption('--source <path>').option('--origin <text>', 'who or what produced the source', 'human').action(({ file, source, origin }: { file: string; source: string; origin: string }) => withJournalAsync(async journal => {
     const { spec: revised, text } = goalWithSource(file, source, origin);
     const current = journal.getGoal(revised.id);
     if (!current || revised.version <= current.spec.version) throw new Error('Goal revision must advance the current version');
-    await assertExecutionSettled(current, runtime);
+    await assertExecutionSettled(current, runtime, { includeLead: true });
     journal.appendWithSource(event(revised.id, 'goal-revised', revised), text);
     write(`Revised ${revised.id} v${revised.version}; Human approval required`);
   }));
@@ -146,11 +151,24 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     const candidate = new GoalRegistryService(journal).recommend();
     write(candidate ? `${candidate.spec.id}: ${candidate.spec.outcome}` : 'No eligible Goal');
   }));
+  lead.command('start').argument('<id>').description('Human: dispatch the Lead of a selected Goal (goal select does this; use it to retry)').action((id: string) => withJournalAsync(async journal => {
+    assertHuman(journal, 'lead start');
+    write(`Dispatched Lead ${id}: ${(await new LeadService(journal, runtime).start(id, repo())).dispatchId}`);
+  }));
+  lead.command('wake').argument('<id>').requiredOption('--note <text>', 'your decision, delivered to the Lead').description('Human: wake a Lead that ended its turn before its plan was accepted, on its own terminal').action((id: string, { note }: { note: string }) => withJournalAsync(async journal => {
+    assertHuman(journal, 'lead wake');
+    if (!note.trim()) throw new Error('Wake note required');
+    write(`Woke Lead ${id}: ${await new LeadService(journal, runtime).wake(id, repo(), note)}`);
+  }));
   lead.command('propose').requiredOption('--file <json>').action(({ file }: { file: string }) => withJournalAsync(async journal => {
     const parsed = parseExecutionProposal(readJsonFile(file));
-    // The gate compares against the commit the Lead planned from unless the proposal names one.
-    const planned = parsed.baseCommit ? parsed : { ...parsed, baseCommit: execFileSync('git', ['-C', repo(), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() };
-    const state = journal.getGoal(planned.goalId);
+    const current = journal.getGoal(parsed.goalId);
+    if (!current) throw new Error(`Goal does not exist: ${parsed.goalId}`);
+    const leadState = assertLeadTerminal(current, process.env.ORCA_TERMINAL_HANDLE, 'lead propose');
+    // The gate compares against the commit the Lead's worktree was cut from: the code it actually read.
+    if (parsed.baseCommit && parsed.baseCommit.toLowerCase() !== leadState.ref.baseCommit.toLowerCase()) throw new Error(`Proposal baseCommit ${parsed.baseCommit} differs from the Lead's worktree base ${leadState.ref.baseCommit}`);
+    const planned = { ...parsed, baseCommit: leadState.ref.baseCommit };
+    const state = current;
     const proposal = planned.sourceSha256 || !state ? planned : { ...planned, sourceSha256: state.spec.source.sha256 };
     if (!state || proposal.goalVersion !== state.spec.version) throw new Error('Proposal targets stale Goal version');
     assertMultiWpPlannable(proposal);
@@ -165,28 +183,32 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   // No Human gate on HOW: the Lead commits its plan, the controller machine-checks it and dispatches.
   // A Multi-WP plan only notifies the Human.
   lead.command('commit').argument('<id>').description('Lead commits its plan; the controller checks it and dispatches')
-    .option('--terminal <handle>', 'the Lead agent terminal to wake for Multi-WP events (never a Human terminal)')
+    .option('--terminal <handle>', 'deprecated: APOS knows the Lead terminal it dispatched; if given it must match')
     .option('--worktree <selector>', 'worktree selector of the Lead terminal')
     .action(async (id: string, flags: { terminal?: string; worktree?: string }) => withJournalAsync(async journal => {
       const state = journal.getGoal(id);
       if (!state) throw new Error(`Goal does not exist: ${id}`);
+      const leadState = assertLeadTerminal(state, process.env.ORCA_TERMINAL_HANDLE, 'lead commit');
       if (!state.proposal) throw new Error(`Current proposal required: ${id} has no proposal yet (run apos lead propose --file <execution.json> first)`);
       assertMultiWpPlannable(state.proposal);
+      if (flags.terminal && flags.terminal !== leadState.ref.terminal) throw new Error(`--terminal ${flags.terminal} is not the Lead terminal APOS dispatched (${leadState.ref.terminal}); leave it out`);
       journal.append(event(id, 'proposal-approved', { by: 'controller', proposalVersion: state.proposal.version }));
       if (state.proposal.mode === 'multi-wp') {
-        if (flags.terminal) journal.append(event(id, 'lead-woken', { events: [], terminal: flags.terminal, worktree: flags.worktree ?? terminalWorktree(flags.terminal) }));
+        // Wake-ups go to the Lead's own terminal; this dispatch is its current turn, so none arrives until it ends.
+        const ref = currentLeadRef(leadState);
+        journal.append(event(id, 'lead-woken', { events: [], dispatchId: ref.dispatchId, terminal: leadState.ref.terminal, worktree: `id:${leadState.ref.worktreeId}`, runId: ref.runId }));
         const notice = { kind: 'multi-wp', goalId: id, packages: Object.keys(state.packages ?? {}), splitRationale: state.proposal.splitRationale, estimatedCost: state.proposal.estimatedCost };
         journal.append(event(id, 'human-notified', notice));
         write(`NOTICE ${id}: Lead chose Multi-WP (${notice.packages.length} packages, est. ${notice.estimatedCost?.spendUsd} USD / ${notice.estimatedCost?.wallMinutes} min): ${notice.splitRationale}`);
         const refs = await new PackageService(journal, packageRuntime()).dispatchReady(id, repo());
         write(`Dispatched ${id}: ${refs.map(ref => ref.dispatchId).join(', ')}`);
       } else {
-        const ref = await new SoloService(journal, runtime).start(id, repo());
-        write(`Dispatched ${id}: ${ref.dispatchId}`);
+        const ref = await new SoloService(journal, runtime).adopt(id);
+        write(`Accepted ${id}: you (Lead ${ref.dispatchId}) are the Solo owner. Deliver in this worktree and commit your report.`);
       }
   }));
-  execution.command('start').argument('<id>').action((id: string) => withJournalAsync(async journal => {
-    write((await new SoloService(journal, runtime).start(id, repo())).dispatchId);
+  execution.command('start').argument('<id>').description('record the Lead as the owner of an accepted Solo plan (lead commit does this)').action((id: string) => withJournalAsync(async journal => {
+    write((await new SoloService(journal, runtime).adopt(id)).dispatchId);
   }));
   execution.command('checkpoint').argument('<id>').requiredOption('--file <json>').action((id: string, { file }: { file: string }) => withJournal(journal => {
     const checkpoint = readJsonFile(file) as PhaseCheckpoint;

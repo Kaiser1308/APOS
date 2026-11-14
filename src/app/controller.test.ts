@@ -22,7 +22,7 @@ it('releases dependency-ready Workers after a restart without duplicate dispatch
   add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'multi-wp' });
   const starts: string[] = [];
   const runtime: RuntimeAdapter & PackageRuntime = {
-    async startSolo() { throw new Error('Solo not expected'); }, async resumeSolo() { throw new Error('Solo not expected'); },
+    async startLead() { throw new Error('Solo not expected'); }, async resumeSolo() { throw new Error('Solo not expected'); },
     async inspect(ref) { return { state: 'settled', ref }; },
     async startPackage({ package: item, repoPath }) { starts.push(item.id); return { runId: 'run-1', taskId: item.id, dispatchId: item.id, owner: 'worker', repoPath }; },
     async inspectPackage() { return 'completed'; }
@@ -47,9 +47,12 @@ it('records a settled Solo Dispatch once and never accepts it without a delivery
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
   const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `SOLO-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
-  add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+  // The Solo owner is the Lead APOS dispatched at selection: the controller records it, it never starts another session.
+  add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected');
+  add('lead-dispatch-intended', 'lead-key'); add('lead-started', { runId: 'run-1', taskId: 'task-1', dispatchId: 'ctx-1', owner: 'lead', repoPath: dir, terminal: 'term-lead', worktreeId: 'repo::wt', baseCommit: 'b'.repeat(40) });
+  add('proposal-drafted', proposal); add('proposal-approved');
   const runtime: RuntimeAdapter & PackageRuntime = {
-    async startSolo({ repoPath }) { return { runId: 'run-1', taskId: 'task-1', dispatchId: 'ctx-1', owner: 'lead', repoPath }; },
+    async startLead() { throw new Error('No new dispatch expected'); },
     async resumeSolo() { throw new Error('No resume expected'); },
     async inspect(ref) { return { state: 'settled', outcome: 'completed', ref }; },
     async startPackage() { throw new Error('No package expected'); }
@@ -73,7 +76,7 @@ it('processes a settled worker_done, retains its owner, then acknowledges the Or
   add('dispatch-intended', 'key-1'); add('execution-started', ref);
   const actions: string[] = [];
   const runtime: RuntimeAdapter & PackageRuntime = {
-    async startSolo() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
+    async startLead() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
     async inspect() { return { state: 'settled', outcome: 'completed', ref }; },
     async startPackage() { throw new Error('No package expected'); },
     async checkRun() { actions.push('check'); return { deliveryId: 'delivery-1', messages: [{ id: 'msg-1', type: 'worker_done', payload: { dispatchId: 'ctx-1' } }] }; },
@@ -97,7 +100,7 @@ it('acks a worker_done for a dispatch that is not current, so a lost reviewer ca
   add('dispatch-intended', 'key-1'); add('execution-started', ref);
   const actions: string[] = [];
   const runtime: RuntimeAdapter & PackageRuntime = {
-    async startSolo() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
+    async startLead() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
     async inspect() { return { state: 'live', ref }; },
     async startPackage() { throw new Error('No package expected'); },
     async checkRun() { actions.push('check'); return { deliveryId: 'delivery-1', messages: [{ id: 'msg-9', type: 'worker_done', payload: { dispatchId: 'ctx-lost-reviewer' } }] }; },
@@ -128,7 +131,7 @@ describe('idle watchdog (seen live: a Goal sat 26 min with no agent and no repor
     add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
     const ref = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead' as const, repoPath: dir };
     add('dispatch-intended', 'k'); add('execution-started', ref); add('worker-settled', { dispatchId: 'ctx_1', outcome: 'completed' });
-    const service = new ControllerService(store, { async startSolo() { return ref; }, async resumeSolo() { return ref; }, async inspect(r) { return { state: 'settled', outcome: 'completed', ref: r }; } } as never);
+    const service = new ControllerService(store, { async startLead() { return ref; }, async resumeSolo() { return ref; }, async inspect(r) { return { state: 'settled', outcome: 'completed', ref: r }; } } as never);
     const result = { goalId: spec.id, dispatched: [], recovered: [], unresolved: [], resumed: [], settled: [], inboxPending: [], errors: [], supervised: [] as string[] };
     (service as unknown as { watchdog(id: string, r: typeof result): void }).watchdog(spec.id, result);
     (service as unknown as { watchdog(id: string, r: typeof result): void }).watchdog(spec.id, result);
@@ -150,7 +153,7 @@ it('retains the settled dispatch of a Lead wake-up, so the next wake is not refu
   add('lead-woken', { dispatchId: 'ctx-lead-wake', events: ['all packages verified: ready to integrate'], runId: 'run-1' });
   const actions: string[] = [];
   const runtime: RuntimeAdapter & PackageRuntime = {
-    async startSolo() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
+    async startLead() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
     async inspect() { return { state: 'live', ref }; },
     async startPackage() { throw new Error('No package expected'); },
     async checkRun() { return { deliveryId: 'delivery-1', messages: [{ id: 'msg-lead', type: 'worker_done', payload: { dispatchId: 'ctx-lead-wake' } }] }; },

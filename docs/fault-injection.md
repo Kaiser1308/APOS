@@ -53,6 +53,18 @@ Threshold: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge.**
 | `worker_done` for a dispatch that is not current (seen live: a lost reviewer's message held the inbox for an hour) | logged once and acked; settlement comes from inspecting current dispatches | `controller.test.ts` › acks a worker_done for a dispatch that is not current |
 | Resume launches report no model receipt (seen live) | telemetry falls back to the model in the Codex session | `supervisor.ts` recordTelemetry |
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
+| A second session for a Solo Goal (the plan's Lead replaced by a cold owner) | refused: the Solo owner must be the current Lead dispatch; `lead commit` records it, never starts one | `lead.test.ts` › refuses a Solo owner other than the current Lead dispatch; › is adopted by the controller without a new dispatch |
+| `goal select` or `lead start` repeated, or a tick racing it | one Lead dispatch per Goal version | `lead.test.ts` › dispatches one Lead per Goal version |
+| Lead dispatch outcome unknown | intent kept, recovered by key, never dispatched twice; `needs-decision` after 10 min | `lead.test.ts` › keeps a lost dispatch for recovery by key |
+| Lead dispatch refused by Orca | intent dropped; `lead start` retries | `lead.test.ts` › drops an intent Orca refused |
+| Lead ends its turn before its plan is accepted | `lead-settled`, terminal retained, Human told once; `lead wake` resumes the same terminal | `lead.test.ts` › records it, keeps its terminal |
+| Lead idle while planning, or planning past the wall time | notified once each | `lead.test.ts` › reports a Lead idle past the quiet spell |
+| The Lead runs a Human-only command before it commits any plan | refused | `cli.test.ts` › refuses Human-only commands from an APOS agent terminal |
+| `lead propose` / `lead commit` from another terminal, or a plan naming another base | refused | `lead.test.ts` › accepts lead propose and commit only from the dispatched Lead terminal |
+| `main` moves while the Lead plans | the plan gates against the Lead's base | same test |
+| Goal revised while its Lead runs | refused until the Lead ends its turn; the revision forgets that Lead | `lead.test.ts` › waits for the Lead to end its turn |
+| Accepted Solo plan with no running Lead (upgrade) | `needs-decision` once, asking for `lead start`; nothing dispatched | `lead.test.ts` › tells the Human, once, about an accepted Solo plan no running Lead owns |
+| Event type unknown to this build (rollback after a newer APOS wrote it) | ignored on replay; the Goal survives | `lead.test.ts` › replays a log holding an event type this version does not know |
 
 ## Not covered by automated tests
 

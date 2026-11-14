@@ -43,8 +43,8 @@ describe('target branch head moved after verification', () => {
     execFileSync('git', ['init', '-q', dir]);
     const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
     const spec: GoalSpec = { ...baseSpec, checks: [{ id: 'CHK-1', kind: 'command', command: 'node harness.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} }] };
-    const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir };
-    const runtime: RuntimeAdapter = { async startSolo() { ref.baseCommit = git('rev-parse', 'HEAD'); return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'settled', outcome: 'completed', ref }; } };
+    const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_lead', worktreeId: 'repo::C:/lead-wt' };
+    const runtime: RuntimeAdapter = { async startLead() { ref.baseCommit = git('rev-parse', 'HEAD'); return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'settled', outcome: 'completed', ref }; } };
     const output: string[] = [];
     const invoke = (...args: string[]) => runCli(['--repo', dir, ...args], { runtime, gate: { artifactRoot: artifacts }, write: line => output.push(line) });
     writeFileSync(join(dir, '.git', 'info', 'exclude'), '*.json\nbrief.md\n');
@@ -56,9 +56,12 @@ describe('target branch head moved after verification', () => {
     await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
     await invoke('goal', 'approve', spec.id, '--size', 'S', '--max-spend', '5', '--max-minutes', '60', '--max-attempts', '2');
     await invoke('goal', 'select', spec.id);
-    await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
-    await invoke('lead', 'commit', spec.id);
-    git('switch', '-q', '-c', 'owner');
+    process.env.ORCA_TERMINAL_HANDLE = 'term_lead';
+    try {
+      await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
+      await invoke('lead', 'commit', spec.id);
+    } finally { delete process.env.ORCA_TERMINAL_HANDLE; }
+    git('switch', '-q', '-c', 'owner', ref.baseCommit!); // the Lead's branch, cut from its base at selection
     writeFileSync(join(dir, 'feature.js'), 'module.exports = 1;');
     git('add', 'feature.js'); git('-c', 'user.name=O', '-c', 'user.email=o@x.invalid', 'commit', '-qm', 'owner work');
     const delivery = git('rev-parse', 'HEAD');

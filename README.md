@@ -59,8 +59,8 @@ Design notes: [`docs/FINAL-DESIGN.md`](docs/FINAL-DESIGN.md) (v2.1, in Vietnames
 | Who | Decides | Commands |
 | --- | --- | --- |
 | **PM + Human** | WHAT: which Goals, outcome, acceptance, appetite (budget) | `goal create --source`, **gate A** `goal approve` |
-| **Human** | Which approved Goal runs next | **gate B** `lead recommend`, `goal select` |
-| **Lead** (agent) | HOW: Solo or Multi-WP, packages, interfaces. No Human approval | `lead propose`, `lead commit` |
+| **Human** | Which approved Goal runs next. Selecting it dispatches its Lead | **gate B** `lead recommend`, `goal select` |
+| **Lead** (agent) | HOW: Solo or Multi-WP, packages, interfaces. No Human approval. In Solo it then delivers, in the same session | `lead propose`, `lead commit` |
 | **Controller** (no LLM) | Machine checks, dispatch, gates, findings, retries, wake-ups, budget breakers | `controller tick` / `controller watch` |
 | **Owner / Worker** (agent) | Implements in its own Orca worktree | dispatched by the controller |
 | **Reviewer** (agent) | Independent review in a separate session, when required | dispatched by the controller |
@@ -73,14 +73,14 @@ flowchart TD
     subgraph Human1["Human and PM"]
         A[Source brief] --> B[goal create<br/>source snapshot + sha256]
         B --> C[goal approve<br/>gate A: scope + appetite]
-        C --> D[goal select<br/>gate B]
+        C --> D[goal select<br/>gate B: dispatches the Lead]
     end
     subgraph Lead["Lead"]
         D --> E[lead propose<br/>Solo or Multi-WP]
         E --> F[lead commit<br/>controller checks the plan]
     end
     subgraph Ctl["Controller"]
-        F --> G[Dispatch owner<br/>own Orca worktree, exact base commit]
+        F --> G[Solo: the Lead is the owner<br/>own Orca worktree, exact base commit]
         G --> H[Owner delivers a commit]
         H --> I{Gate<br/>fresh detached checkout}
         I -- red --> K[Record finding<br/>resume same owner]
@@ -99,9 +99,9 @@ flowchart TD
 
 ### Human-only commands
 
-These refuse to run from any terminal or worktree APOS dispatched an agent into, so an agent cannot approve its own work:
+These refuse to run from any terminal or worktree APOS dispatched an agent into, including the Lead's from the moment it is dispatched, so an agent cannot approve its own work:
 
-- `goal approve`, `goal appetite`, `goal select`
+- `goal approve`, `goal appetite`, `goal select`, `lead start`, `lead wake`
 - `outcome close`, `outcome revise`, `outcome stop`
 - `gate confirm`, `blocker resolve`, `execution abandon-intent`
 - `review submit` (the controller dispatches and reads reviewers itself, so no agent may post a verdict)
@@ -142,13 +142,14 @@ apos goal create --file goal.json --source brief.md
 # 2. Gate A: the Human approves the Goal and sets the controller's appetite
 apos goal approve GOAL-001 --size M --max-spend 20 --max-minutes 240 --max-attempts 3
 
-# 3. Gate B: choose what runs next
+# 3. Gate B: choose what runs next; this dispatches the Lead into its own Orca worktree
 apos lead recommend
 apos goal select GOAL-001
 
-# 4. The Lead proposes a plan; the controller checks it and dispatches the owner
-apos lead propose --file execution.json
-apos lead commit GOAL-001
+# 4. The Lead (not you) proposes a plan from its own terminal; the controller checks it.
+#    Solo: the Lead is the owner and delivers in the same session. Multi-WP: packages are dispatched.
+apos --repo C:\path\to\project lead propose --file execution.json
+apos --repo C:\path\to\project lead commit GOAL-001
 
 # 5. Supervise (inside an Orca terminal), or run one pass at a time
 apos controller watch            # or: apos controller tick
@@ -221,7 +222,11 @@ The **appetite** (`size`, `maxSpendUsd`, `maxWallMinutes`, `maxAttempts`, `overr
 
 **Before dispatch** (`lead commit`), the controller checks the plan's source hash and Goal version, that there are no open questions, and that the estimate fits the appetite. For Multi-WP it also checks at least two packages, an acyclic graph, versioned interfaces (`name@vN`), acceptance coverage and a split rationale.
 
-**Dispatch.** The owner runs in its own Orca worktree created from an exact base commit, using its role profile (default: Codex `gpt-6.1-terra` for Lead and Worker, `gpt-6-sol` for Reviewer; override in `runtime.json`; use the model id Codex accepts, e.g. `gpt-6-luna`, not the display name). The brief points at `.apos/skills/_core/execute.md` and the role skill by path and sha256, and names the activation line the delivery report must contain.
+**The Lead is dispatched at gate B.** `goal select` starts the Lead in its own Orca worktree, cut from the managed repo's HEAD at that moment (its base commit). The appetite's wall clock starts here: planning counts. `lead propose` and `lead commit` are accepted only from that Lead's terminal, and the plan gates against the Lead's base, even if `main` moves meanwhile. If Orca refused the dispatch, `apos lead start <id>` retries it; an unknown outcome is recovered by key and reaches `apos inbox` after 10 minutes.
+
+**Solo has no second dispatch.** When `lead commit` accepts a Solo plan, the controller records the Lead's own dispatch as the owner, and the Lead keeps going in the same turn with everything it read while planning. If the Lead ends its turn before any plan is accepted (for example the estimate exceeds the appetite), `apos inbox` says so; decide, then `apos lead wake <id> --note "..."` resumes it in the same terminal.
+
+**Dispatch.** Every agent runs in its own Orca worktree created from an exact base commit, using its role profile (default: Codex `gpt-6.1-terra` for Lead and Worker, `gpt-6-sol` for Reviewer; override in `runtime.json`; use the model id Codex accepts, e.g. `gpt-6-luna`, not the display name). The brief points at `.apos/skills/_core/execute.md` and the role skill by path and sha256, and names the activation line the delivery report must contain.
 
 **After the owner settles**, `controller tick`:
 
@@ -240,7 +245,7 @@ The **appetite** (`size`, `maxSpendUsd`, `maxWallMinutes`, `maxAttempts`, `overr
 
 ### Multi-WP
 
-The Lead adds packages (`package add --file wp.json`). Each names its owner, dependencies, versioned interfaces and local acceptance, optionally with `checkIds` from the Goal's checks. Then the Lead runs `lead commit GOAL-001 --terminal $ORCA_TERMINAL_HANDLE`.
+The Lead adds packages (`package add --file wp.json`). Each names its owner, dependencies, versioned interfaces and local acceptance, optionally with `checkIds` from the Goal's checks. Then the Lead runs `lead commit GOAL-001` from its own terminal. APOS already knows that terminal from the Lead's dispatch and wakes it there (`--terminal` is no longer needed; if given, it must match). The Lead reports `worker_done` and ends its turn once the packages are dispatched.
 
 The controller then:
 
@@ -312,11 +317,13 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `goal list` | List Goals and their status. |
 | `goal approve <id> --size <S\|M\|L> --max-spend <usd> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>]` | **Gate A (Human).** |
 | `goal appetite <id> --reason <text> [appetite flags]` | **Human.** Change the controller budget, not the scope. |
-| `goal select <id>` | **Gate B (Human).** |
+| `goal select <id>` | **Gate B (Human).** Also dispatches the Goal's Lead. |
 | `goal revise --file <json> --source <path>` | New Goal version; needs re-approval. |
 | `lead recommend` | Recommend the next eligible Goal. |
+| `lead start <id>` | **Human.** Dispatch the Lead of a selected Goal (retry after a refused dispatch, or for a Goal selected before this version). |
+| `lead wake <id> --note <text>` | **Human.** Resume a Lead that ended its turn before its plan was accepted, in its own terminal, with your decision. |
 | `lead propose --file <json>` | Submit an execution proposal. |
-| `lead commit <id> [--terminal <handle>]` | Controller checks the plan and dispatches. |
+| `lead commit <id>` | Lead only, from its own terminal. Controller checks the plan; Solo: the Lead becomes the owner; Multi-WP: dispatches packages. |
 | `package add --file <json>`, `package revise <goalId> --file <json> --reason <text>` | Multi-WP packages. |
 | `integration prepare <goalId>`, `integration complete <goalId> --file <json>`, `integration merge <goalId> --source <commit> --target <branch>` | Multi-WP integration: prepare, record the integration commit, merge. |
 | `controller tick` | One controller pass: reconcile, gate, dispatch, wake. |
@@ -365,6 +372,7 @@ Known limits:
 - **Spend is not enforced.** `maxSpendUsd` and `overrunPolicy` are recorded, but there is no price table and an overrun only notifies. The controller cannot stop a running owner; it only declines to resume it.
 - **Multi-WP has run live only on a toy Goal**, not yet where packages truly depend on each other or where the review asks for changes.
 - **The quality pilot did not beat the baseline.** On the SQLFMT task APOS ended with 28/32 target tests against the single-agent baseline's 32/32, and the controller blocked the Goal rather than verify it. The current aim is a smooth controller, not accuracy.
-- **Solo loses the Lead's planning context.** The Solo owner is a fresh session dispatched after `lead commit`, not the session that wrote the plan.
+- **Upgrading from a version before the Lead dispatch.** A Goal selected, planned or accepted under the old flow has no APOS Lead: `lead commit` refuses it and `apos inbox` asks you to run `apos lead start <id>`; the new Lead proposes and commits again. Goals already executing are unaffected. Do not roll back below this version once a log holds `lead-*` events: older builds cannot replay event types they do not know (this build ignores unknown ones).
+- **The Lead runs `apos` with `--repo`.** It works in its own worktree, so its commands must name the managed repo; its brief says so.
 - **Agent activity in the UI is verified against Codex dispatches.** The Claude Code reader works on real Claude Code transcripts but has not yet seen a Worker dispatched by APOS.
 - **Single host, trusted user** (see the trust model).

@@ -1,3 +1,4 @@
+import { clockStart } from './lead.js';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { GoalEventType, GoalState } from '../domain/transitions.js';
@@ -50,8 +51,8 @@ export class SoloSupervisor {
   }
 
   private wallMinutesUsed(goalId: string): number {
-    const started = this.store.events(goalId).find(item => item.type === 'execution-started');
-    return started ? (this.now() - Date.parse(started.at)) / 60_000 : 0;
+    const started = clockStart(this.store.events(goalId));
+    return started ? (this.now() - Date.parse(started)) / 60_000 : 0;
   }
 
   /**
@@ -235,9 +236,10 @@ export class SoloSupervisor {
     if (state.telemetry?.some(item => item.dispatchId === ref.dispatchId)) return;
     const receipt = await this.runtime.launchReceipt?.(ref.dispatchId).catch(() => undefined);
     const events = this.store.events(state.spec.id);
-    const startedAt = events.findIndex(item => ['execution-started', 'runtime-resumed', 'review-dispatched'].includes(item.type) && (item.data as { dispatchId?: string })?.dispatchId === ref.dispatchId);
+    // A Solo owner is the Lead: its window opens when the Lead was dispatched, so planning counts (design: lead-owns-solo Q2).
+    const startedAt = events.findIndex(item => ['lead-started', 'execution-started', 'runtime-resumed', 'review-dispatched'].includes(item.type) && (item.data as { dispatchId?: string })?.dispatchId === ref.dispatchId);
     // The window opens at the dispatch intent: a dispatch recovered later was already running before it was recorded (seen live).
-    const intent = startedAt > 0 && ['dispatch-intended', 'resume-intended'].includes(events[startedAt - 1].type) ? events[startedAt - 1] : undefined;
+    const intent = startedAt > 0 && ['dispatch-intended', 'resume-intended', 'lead-dispatch-intended'].includes(events[startedAt - 1].type) ? events[startedAt - 1] : undefined;
     const started = intent ?? (startedAt >= 0 ? events[startedAt] : undefined);
     const path = worktreePath(ref.worktreeId);
     const until = new Date(this.now()).toISOString();
@@ -490,6 +492,9 @@ export class MultiSupervisor {
     if (lastDispatch) {
       const observation = await this.runtime.inspect({ runId: lead.runId ?? '', taskId: '', dispatchId: lastDispatch, owner: 'lead', repoPath });
       if (!observation.outcome) return [...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: lastDispatch, terminal: lead.terminal, since: lastWake!.at }), `Lead busy; holding ${fresh.length} event(s)`];
+      // Orca keeps the terminal bound to a settled dispatch until it is retained, and refuses the next wake (seen live:
+      // agent_unconfigured). The Lead's dispatches live on its own Run, which the inbox does not read, so retain here.
+      await this.runtime.retainWorker?.(lastDispatch);
     }
     const runId = lead.runId ?? (Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId).find(Boolean));
     if (!runId) return [];

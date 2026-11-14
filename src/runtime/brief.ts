@@ -66,14 +66,23 @@ function skillLines(input: BriefBase, role: Role): string[] {
  * Briefs point at committed files by path and hash instead of pasting product text into a shell
  * argument, so quotes, `$` and newlines in a Goal cannot break or alter the dispatch.
  */
-export function soloBrief(input: BriefBase & { attempt: number; budget?: Budget }): string {
+/**
+ * The Lead's brief, dispatched when the Human selects the Goal. The same session plans and, in Solo, delivers:
+ * the plan it reasoned about is never handed to a cold owner. execution.md is not cited: the Lead writes the plan,
+ * and the controller records it only after this worktree was cut.
+ */
+export function leadBrief(input: BriefBase & { goalVersion: number; budget?: Budget }): string {
+  const apos = `apos --repo "${input.repoPath}"`;
   return [
-    `${input.goalId}: APOS Solo owner, attempt ${input.attempt}.`,
+    `${input.goalId}: APOS Lead for Goal v${input.goalVersion}, attempt 1.`,
     WORKSPACE,
     ...skillLines(input, 'lead'),
-    `Contract: .apos/goals/${input.goalId}/goal.md, source.md and execution.md at base commit ${input.baseCommit}. You own the whole Goal in this worktree.`,
-    `Commit your delivery report at ${soloReportPath(input.goalId, input.attempt)}. The controller will run every Goal check itself on your final commit.`,
+    `Contract: .apos/goals/${input.goalId}/goal.md and source.md at base commit ${input.baseCommit}. Decide Solo or Multi-WP under the lead skill.`,
+    `Run APOS from this terminal only: ${apos} lead propose --file <execution.json> (leave baseCommit out or set it to ${input.baseCommit}), then ${apos} lead commit ${input.goalId}.`,
+    `Solo: once lead commit is accepted you are the owner. Keep going in this same turn: deliver in this worktree and commit your delivery report at ${soloReportPath(input.goalId, 1)}; the controller runs every Goal check itself on your final commit.`,
+    'Multi-WP: once lead commit has dispatched the packages, report worker_done and end your turn; APOS wakes you here when there is work.',
     ...(budgetLine(input.budget) ? [budgetLine(input.budget)!] : []),
+    'If the controller refuses the plan with needs-decision, report worker_done with failed, naming the refusal, and end your turn: the Human decides and APOS wakes you here.',
     'Follow the injected Orca preamble; report worker_done exactly once with succeeded or failed, then idle. Do not merge.',
     `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`
   ].join(' ');
@@ -116,12 +125,15 @@ export function reviewBrief(input: BriefBase & { commit: string; reasons: string
   ].join(' ');
 }
 
-export function leadWakeBrief(input: { repoPath: string; goalId: string; events: string[]; idempotencyKey: string }): string {
+export function leadWakeBrief(input: { repoPath: string; goalId: string; events: string[]; idempotencyKey: string; phase?: 'plan' | 'multi' }): string {
+  const planning = input.phase === 'plan';
   return [
-    `${input.goalId}: APOS Lead wake-up for Multi-WP.`,
+    planning ? `${input.goalId}: APOS Lead wake-up: your plan is not accepted yet.` : `${input.goalId}: APOS Lead wake-up for Multi-WP.`,
     'Events since your last turn:',
     ...input.events.map((item, index) => `(${index + 1}) ${oneLine(item)}`),
-    `Handle them under ${roleSkill('lead')}: answer within the approved Goal, revise packages or integrate, then report worker_done once and end your turn.`,
+    planning
+      ? `Continue under ${roleSkill('lead')} with what you already know: revise and resubmit with apos --repo "${input.repoPath}" lead propose / lead commit ${input.goalId}. Solo: once accepted, deliver in this same turn as your first brief said. Report worker_done exactly once.`
+      : `Handle them under ${roleSkill('lead')}: answer within the approved Goal, revise packages or integrate, then report worker_done once and end your turn.`,
     `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}.`
   ].join(' ');
 }

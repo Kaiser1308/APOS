@@ -19,7 +19,7 @@ const fixture = () => {
   add('goal-drafted', spec);
   return { store, add, dir };
 };
-const ref: RuntimeRef = { runId: 'run_1', taskId: 'task_1', dispatchId: 'dispatch_1', owner: 'lead', repoPath: 'C:/project' };
+const ref: RuntimeRef = { runId: 'run_1', taskId: 'task_1', dispatchId: 'dispatch_1', owner: 'lead', repoPath: 'C:/project', terminal: 'term_lead', worktreeId: 'repo::C:/wt', baseCommit: 'b'.repeat(40) };
 class FakeRuntime implements RuntimeAdapter {
   starts = 0;
   resumes = 0;
@@ -27,40 +27,47 @@ class FakeRuntime implements RuntimeAdapter {
   outcome?: 'completed' | 'failed';
   failResume = false;
   recovered?: RuntimeRef;
-  async startSolo(): Promise<RuntimeRef> { this.starts++; return ref; }
+  async startLead(): Promise<RuntimeRef> { this.starts++; return ref; }
   async resumeSolo(): Promise<RuntimeRef> { this.resumes++; if (this.failResume) throw new Error('Orca response lost'); return ref; }
   async recover() { return this.recovered; }
   async inspect() { return { state: this.state, outcome: this.outcome, ref }; }
 }
 
 describe('Solo dispatch', () => {
-  it('refuses dispatch before Goal selection and Execution approval', async () => {
-    const { store, add, dir } = fixture();
+  it('refuses to record an owner before Goal selection and plan acceptance', async () => {
+    const { store, add } = fixture();
     add('goal-approved', approval);
-    const runtime = new FakeRuntime();
-    await expect(new SoloService(store, runtime).start(spec.id, dir)).rejects.toThrow();
-    expect(runtime.starts).toBe(0);
+    await expect(new SoloService(store, new FakeRuntime()).adopt(spec.id)).rejects.toThrow();
     store.close();
   });
-  it('starts once and returns the persisted attempt on repeated calls and reopen', async () => {
+  it('makes the planning Lead the owner, once, with no new dispatch, across repeated calls and reopen', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('lead-dispatch-intended', 'lead-key'); add('lead-started', ref); add('proposal-drafted', proposal); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
-    expect(await service.start(spec.id, dir)).toEqual(ref);
-    expect(await service.start(spec.id, dir)).toEqual(ref);
+    expect(await service.adopt(spec.id)).toMatchObject({ dispatchId: ref.dispatchId, terminal: 'term_lead', worktreeId: 'repo::C:/wt', baseCommit: ref.baseCommit });
+    expect(await service.adopt(spec.id)).toMatchObject({ dispatchId: ref.dispatchId });
     store.close();
     const reopened = SqliteStore.open(join(dir, 'state.sqlite'));
-    expect(await new SoloService(reopened, runtime).start(spec.id, dir)).toEqual(ref);
-    expect(runtime.starts).toBe(1);
+    expect(await new SoloService(reopened, runtime).adopt(spec.id)).toMatchObject({ dispatchId: ref.dispatchId });
+    expect(reopened.events(spec.id).filter(item => item.type === 'execution-started')).toHaveLength(1);
+    expect(runtime.starts).toBe(0);
     reopened.close();
+  });
+  it('never gives an accepted Solo plan a cold owner when no APOS Lead runs it (plan accepted under the old flow)', async () => {
+    const { store, add } = fixture();
+    add('goal-approved', approval); add('goal-selected');
+    add('proposal-drafted', proposal); add('proposal-approved');
+    await expect(new SoloService(store, new FakeRuntime()).adopt(spec.id)).rejects.toThrow(/apos lead start/);
+    expect(store.getGoal(spec.id)?.status).toBe('ready');
+    store.close();
   });
   it('resumes phased work with the prior owner and checkpoint', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('lead-dispatch-intended', 'lead-key'); add('lead-started', ref); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
-    await service.start(spec.id, dir);
+    await service.adopt(spec.id);
     add('checkpointed', { phase: 'phase-1', progress: 'done', evidenceRefs: ['commit:abc'] });
     runtime.state = 'settled'; runtime.outcome = 'completed';
     await service.resume(spec.id);
@@ -70,10 +77,10 @@ describe('Solo dispatch', () => {
   });
   it('does not reuse a live terminal for phased resume', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('lead-dispatch-intended', 'lead-key'); add('lead-started', ref); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
-    await service.start(spec.id, dir);
+    await service.adopt(spec.id);
     add('checkpointed', { phase: 'phase-1', progress: 'done', evidenceRefs: [] });
     await expect(service.resume(spec.id)).rejects.toThrow(/settle/);
     expect(runtime.resumes).toBe(0);
@@ -81,10 +88,10 @@ describe('Solo dispatch', () => {
   });
   it('does not verify Solo evidence until Orca reports successful completion', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('lead-dispatch-intended', 'lead-key'); add('lead-started', ref); add('proposal-drafted', proposal); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
-    await service.start(spec.id, dir);
+    await service.adopt(spec.id);
     add('evidence-submitted', { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:test' });
     await expect(service.verify(spec.id)).rejects.toThrow(/complete successfully/);
     runtime.state = 'settled'; runtime.outcome = 'failed';
@@ -97,10 +104,10 @@ describe('Solo dispatch', () => {
   });
   it('recovers a lost phased resume response without starting another attempt', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('lead-dispatch-intended', 'lead-key'); add('lead-started', ref); add('proposal-drafted', { ...proposal, mode: 'solo-phased' }); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
-    await service.start(spec.id, dir);
+    await service.adopt(spec.id);
     add('checkpointed', { phase: 'phase-1', progress: 'done', evidenceRefs: [] });
     runtime.state = 'settled'; runtime.outcome = 'completed'; runtime.failResume = true;
     await expect(service.resume(spec.id)).rejects.toThrow(/response lost/);
@@ -112,10 +119,10 @@ describe('Solo dispatch', () => {
   });
   it('reuses a failed Solo Direct owner and invalidates prior evidence for the repair attempt', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    add('goal-approved', approval); add('goal-selected'); add('lead-dispatch-intended', 'lead-key'); add('lead-started', ref); add('proposal-drafted', proposal); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
-    await service.start(spec.id, dir);
+    await service.adopt(spec.id);
     add('evidence-submitted', { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'old-log' });
     add('checkpointed', { phase: 'repair', progress: 'Fix failed QR edge case', evidenceRefs: [] });
     runtime.state = 'settled'; runtime.outcome = 'failed';
@@ -126,10 +133,10 @@ describe('Solo dispatch', () => {
   });
   it('parks Solo after its approved attempt budget is exhausted', async () => {
     const { store, add, dir } = fixture();
-    add('goal-approved', { appetite: { ...approval.appetite, maxAttempts: 1 } }); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    add('goal-approved', { appetite: { ...approval.appetite, maxAttempts: 1 } }); add('goal-selected'); add('lead-dispatch-intended', 'lead-key'); add('lead-started', ref); add('proposal-drafted', proposal); add('proposal-approved');
     const runtime = new FakeRuntime();
     const service = new SoloService(store, runtime);
-    await service.start(spec.id, dir);
+    await service.adopt(spec.id);
     add('checkpointed', { phase: 'repair', progress: 'Retry needed', evidenceRefs: [] });
     runtime.state = 'settled'; runtime.outcome = 'failed';
     await expect(service.resume(spec.id)).rejects.toThrow(/budget exhausted/);

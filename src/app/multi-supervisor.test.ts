@@ -7,7 +7,7 @@ import { runCli } from '../cli.js';
 import { spec as baseSpec, proposal, sourceText } from '../domain/fixtures.test-support.js';
 import type { GoalSpec } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
-import type { RuntimeAdapter } from '../runtime/orca.js';
+import { OrcaRefused, type RuntimeAdapter } from '../runtime/orca.js';
 import type { PackageRuntime, PackageRuntimeRef } from './packages.js';
 import { CORE_SKILL, activationLine, committedFileDigest, packageReportPath, reviewResultPath } from '../runtime/brief.js';
 import { ProjectJournal } from '../store/journal.js';
@@ -37,6 +37,10 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   const reviewerStarts: string[] = [];
   let verdict = 'pass';
   let refusedOnce = false;
+  // Orca refuses a wake while the Lead terminal is still bound to its last, unretained dispatch (seen live).
+  const retained = new Set<string>();
+  let leadDispatch = 'lead-0';
+  let leadBase = '';
   const work = (item: WorkPackageSpec, path: string, base: string) => {
     attempts[item.id] = (attempts[item.id] ?? 0) + 1;
     const n = attempts[item.id];
@@ -51,7 +55,9 @@ it('gates each package on its own head, returns a red one to its owner, and wake
     return `${item.id}-${n}`;
   };
   const runtime: RuntimeAdapter & PackageRuntime = {
-    async startSolo() { throw new Error('no Solo'); }, async resumeSolo() { throw new Error('no Solo'); },
+    async startLead({ repoPath }) { leadBase = git(repoPath, 'rev-parse', 'HEAD'); return { runId: 'run-lead', taskId: 'lead', dispatchId: 'lead-0', owner: 'lead', repoPath, terminal: 'term-lead', worktreeId: `repo::${repoPath}`, baseCommit: leadBase }; },
+    async retainWorker(dispatchId: string) { retained.add(dispatchId); },
+    async resumeSolo() { throw new Error('no Solo'); },
     async inspect(ref) { return { state: 'settled', outcome: 'completed', ref }; },
     async startPackage({ package: item, repoPath }) {
       const base = git(repoPath, 'rev-parse', 'HEAD');
@@ -68,8 +74,9 @@ it('gates each package on its own head, returns a red one to its owner, and wake
     async inspectPackage(ref: PackageRuntimeRef) { return settled.has(ref.dispatchId) ? 'completed' : 'live'; },
     async deliveryHead(ref) { return git(ref.worktreeId!.split('::')[1], 'rev-parse', 'HEAD'); },
     async wakeLead(input) {
+      if (!retained.has(leadDispatch)) throw new OrcaRefused(`terminal still bound to ${leadDispatch}`, 'agent_unconfigured');
       if (input.events.some(item => /Goal review passed/.test(item)) && !refusedOnce) { refusedOnce = true; throw new Error('[agent_unconfigured] Orca refused the wake'); }
-      wakes.push(input.events); return { dispatchId: `lead-${wakes.length}` }; },
+      wakes.push(input.events); leadDispatch = `lead-${wakes.length}`; return { dispatchId: leadDispatch }; },
     async startReviewer(input) {
       reviewerStarts.push(input.idempotencyKey);
       const path = join(mkdtempSync(join(tmpdir(), 'apos-multi-rev-')), 'wt'); dirs.push(join(path, '..'));
@@ -89,11 +96,16 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   await invoke('goal', 'create', '--file', input('goal.json', spec), '--source', input('brief.md', sourceText));
   await invoke('goal', 'approve', spec.id, '--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3');
   await invoke('goal', 'select', spec.id);
-  await invoke('lead', 'propose', '--file', input('plan.json', { ...proposal, mode: 'multi-wp' }));
-  await invoke('package', 'add', '--file', input('a.json', a));
-  await invoke('package', 'add', '--file', input('b.json', b));
-  await invoke('lead', 'commit', spec.id, '--terminal', 'term-lead', '--worktree', `path:${dir}`);
+  process.env.ORCA_TERMINAL_HANDLE = 'term-lead'; // the Lead APOS dispatched at selection plans and commits
+  try {
+    await invoke('lead', 'propose', '--file', input('plan.json', { ...proposal, mode: 'multi-wp' }));
+    await invoke('package', 'add', '--file', input('a.json', a));
+    await invoke('package', 'add', '--file', input('b.json', b));
+    await invoke('lead', 'commit', spec.id);
+  } finally { delete process.env.ORCA_TERMINAL_HANDLE; }
+  // Wake-ups target the Lead's own terminal, known from its dispatch, with no --terminal flag.
   const state = () => { const opened = ProjectJournal.open(dir); try { return opened.journal.getGoal(spec.id)!; } finally { opened.close(); } };
+  expect(state().leadTerminal).toMatchObject({ terminal: 'term-lead', runId: 'run-lead' });
 
   await invoke('controller', 'tick');
   expect(state().packages!['WP-01'].status).toBe('stale');
@@ -111,7 +123,8 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   // Seen live: after the Lead integrated and the gate went green, nobody dispatched the Goal reviewer.
   const heads = Object.values(state().packages!).map(item => item.evidence.at(-1)!.commitRef);
   const integrationTree = join(mkdtempSync(join(tmpdir(), 'apos-multi-int-')), 'wt'); dirs.push(join(integrationTree, '..'));
-  git(dir, 'worktree', 'add', '-q', '--detach', integrationTree, git(dir, 'rev-parse', 'HEAD'));
+  // The Lead integrates in its own worktree, cut from its base at selection (before APOS's plan milestone commit).
+  git(dir, 'worktree', 'add', '-q', '--detach', integrationTree, leadBase);
   git(integrationTree, '-c', 'user.name=L', '-c', 'user.email=l@local.invalid', 'merge', '-q', '--no-edit', ...heads);
   const integrationCommit = git(integrationTree, 'rev-parse', 'HEAD');
   await invoke('gate', 'run', spec.id, '--commit', integrationCommit);

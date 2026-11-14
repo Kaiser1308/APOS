@@ -22,6 +22,12 @@ const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 }); });
 const spec: GoalSpec = { ...baseSpec, checks: [{ id: 'CHK-1', kind: 'command', command: 'node harness.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} }] };
 const APPETITE = ['--size', 'M', '--max-spend', '20', '--max-minutes', '240', '--max-attempts', '3'];
+/** Runs `fn` as the Lead Orca dispatched: its terminal handle is the one APOS recorded. */
+async function asLead<T>(terminal: string, fn: () => Promise<T>): Promise<T> {
+  const before = process.env.ORCA_TERMINAL_HANDLE;
+  process.env.ORCA_TERMINAL_HANDLE = terminal;
+  try { return await fn(); } finally { if (before === undefined) delete process.env.ORCA_TERMINAL_HANDLE; else process.env.ORCA_TERMINAL_HANDLE = before; }
+}
 
 /**
  * A fake Orca whose "owner" works directly in the repo checkout (its worktree). Each dispatch runs the
@@ -63,12 +69,13 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
     if (options.failed?.(attempt)) failedDispatches.add(`ctx_${attempt}`);
   };
   const runtime: RuntimeAdapter = {
-    async startSolo(input) {
+    // The Lead: its own worktree at the base it plans from. It delivers (runOwner) after lead commit accepts its Solo plan.
+    async startLead(input) {
       budgets.push(input.budget);
       base = git('rev-parse', 'HEAD'); dispatches.push('start');
       owner = join(mkdtempSync(join(tmpdir(), 'apos-auto-wt-')), 'wt'); dirs.push(join(owner, '..'));
       git('worktree', 'add', '-q', '-b', 'owner', owner, base);
-      const r = ref(1); runOwner(); return r;
+      return ref(1);
     },
     async resumeSolo(_ref, _checkpoint, _key, budget) {
       if (refusals < (options.refuseResumes ?? 0)) { refusals += 1; throw new OrcaRefused('agent_unconfigured', 'agent_unconfigured'); }
@@ -104,8 +111,11 @@ async function setup(work: (attempt: number, commit: (files: Record<string, stri
   await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
   await invoke('goal', 'approve', spec.id, ...APPETITE);
   await invoke('goal', 'select', spec.id);
-  await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
-  await invoke('lead', 'commit', spec.id);
+  await asLead('term_1', async () => {
+    await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
+    await invoke('lead', 'commit', spec.id);
+  });
+  runOwner();
   const tick = async () => { await invoke('controller', 'tick'); return output.at(-1)!; };
   const state = () => { const opened = ProjectJournal.open(dir); try { return opened.journal.getGoal(spec.id)!; } finally { opened.close(); } };
   return { dir, git, invoke, tick, state, dispatches, released, output, reviewKeyOf: () => reviewKey, budgets, replies, acked };
@@ -304,7 +314,7 @@ describe('stalled Codex input', () => {
     add('dispatch-intended', 'k'); add('execution-started', ref);
     const nudges: string[] = [];
     let screen = ['› [Pasted Content 7848 chars]', '  GPT-6.1 Terra medium'];
-    const runtime: RuntimeAdapter = { async startSolo() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; }, async composerPending() { return composerHasUnsentBrief(screen); }, async nudge(terminal) { nudges.push(terminal); } };
+    const runtime: RuntimeAdapter = { async startLead() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; }, async composerPending() { return composerHasUnsentBrief(screen); }, async nudge(terminal) { nudges.push(terminal); } };
     let now = t0 + 30_000;
     const supervisor = new SoloSupervisor(store, runtime, { now: () => now });
     expect(await supervisor.step(spec.id, dir)).toEqual([]);
@@ -337,7 +347,7 @@ describe('Orca refusing a resume', () => {
     add('dispatch-intended', 'k'); add('execution-started', ref); add('checkpointed', { phase: 'repair', progress: 'fix', evidenceRefs: [] });
     let mode: 'refuse' | 'unknown' | 'ok' = 'refuse';
     const runtime: RuntimeAdapter = {
-      async startSolo() { return ref; },
+      async startLead() { return ref; },
       async resumeSolo() { if (mode === 'refuse') throw new OrcaRefused('agent_unconfigured', 'agent_unconfigured'); if (mode === 'unknown') throw new Error('state=outcome_unknown'); return { ...ref, dispatchId: 'ctx_2' }; },
       async inspect(r) { return { state: 'settled', outcome: 'completed', ref: r }; },
       async recover() { return { ...ref, dispatchId: 'ctx_2' }; }

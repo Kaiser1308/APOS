@@ -1,0 +1,9 @@
+{
+  "id": "msg_chaterr_4df2be5fe755f14c54ff7963",
+  "type": "escalation",
+  "from": "structworker_e74dc4a3-15cc-41ed-9592-8838aee3ab14",
+  "subject": "Agent hit an error: Codex hit its usage limit.",
+  "priority": "high",
+  "body": "Worker structworker_e74dc4a3-15cc-41ed-9592-8838aee3ab14 hit an error while running task \"GOAL-LIVE, WP-LIVE: APOS Worker, attempt 1, taking over from a previous agent...\" (task_ae8788e0c613).\nError: Codex hit its usage limit.\nDetails from the agent: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 10:02 PM.\nThe task is still assigned to this chat, which keeps its history.",
+  "payload": { "taskId": "task_ae8788e0c613", "dispatchId": "ctx_18d718688be5", "sessionId": "30365c94-6ac0-4de5-a065-2368961a97b2" }
+}

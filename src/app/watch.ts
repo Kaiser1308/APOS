@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { GoalRepository } from '../store/journal.js';
+import type { GoalState } from '../domain/transitions.js';
 import type { RuntimeAdapter } from '../runtime/orca.js';
 import type { Role, RuntimeProfile } from '../runtime/brief.js';
 
@@ -27,6 +28,38 @@ export const exhaustedNote = (role: Role, agent: string | undefined, message: st
   `the ${role} agent${agent ? ` (${agent})` : ''} is out of quota: "${message}". Move its work to another agent on the same worktree: \`${handoffHint}\` (this also makes that agent the ${role} profile).`;
 
 /**
+ * Orca reports an agent that ran out of quota itself, as an escalation on the Run (seen live 2026-11-14: subject
+ * "Agent hit an error: Codex hit its usage limit.", body with "Details from the agent: You’ve hit your usage limit…").
+ * Returns the agent's own line, else the subject; undefined for any other message.
+ */
+export function quotaEscalation(message: { type?: string; subject?: string; body?: string }): string | undefined {
+  if (message.type !== 'escalation' || !/hit (its|your) [\w-]*\s?(usage )?limit/i.test(message.subject ?? '')) return undefined;
+  const details = /Details from the agent:\s*(.+)/.exec(message.body ?? '')?.[1]?.trim();
+  return details || (message.subject ?? '').replace(/^Agent hit an error:\s*/, '').trim();
+}
+
+/** The owner a dispatch belongs to in this Goal, and the handoff that moves it; undefined when it is none of them. */
+export function ownerOf(state: GoalState, dispatchId: string): { role: Role; requested?: { agent?: string; model?: string }; packageId?: string; handoffHint: string } | undefined {
+  const goalId = state.spec.id;
+  const runtimeRef = state.runtimeRef as { dispatchId?: string; requested?: { agent?: string; model?: string } } | undefined;
+  if (runtimeRef?.dispatchId === dispatchId || state.lead?.current === dispatchId) return { role: 'lead', requested: (runtimeRef?.dispatchId === dispatchId ? runtimeRef.requested : state.lead?.ref.requested) as { agent?: string; model?: string } | undefined, handoffHint: `apos handoff ${goalId} --agent <other>` };
+  for (const item of Object.values(state.packages ?? {})) {
+    const ref = item.runtimeRef as { dispatchId?: string; requested?: { agent?: string; model?: string } } | undefined;
+    if (ref?.dispatchId === dispatchId) return { role: 'worker', requested: ref.requested, packageId: item.spec.id, handoffHint: `apos handoff ${goalId} --package ${item.spec.id} --agent <other>` };
+  }
+  if (state.reviewDispatch?.dispatchId === dispatchId) return { role: 'reviewer', requested: state.reviewDispatch.requested, handoffHint: `apos handoff ${goalId} --reviewer --agent <other>` };
+  return undefined;
+}
+
+/** Records one agent-exhausted notice per dispatch; false when it was already recorded. */
+export function recordExhausted(store: GoalRepository, now: () => number, input: { goalId: string; dispatchId: string; role: Role; agent?: string; model?: string; packageId?: string; message: string; handoffHint: string }): boolean {
+  const seen = store.events(input.goalId).some(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'agent-exhausted' && (item.data as { dispatchId?: string }).dispatchId === input.dispatchId);
+  if (seen) return false;
+  store.append({ id: randomUUID(), goalId: input.goalId, type: 'human-notified', data: { kind: 'agent-exhausted', goalId: input.goalId, dispatchId: input.dispatchId, role: input.role, ...(input.packageId ? { packageId: input.packageId } : {}), agent: input.agent, model: input.model, message: input.message, note: exhaustedNote(input.role, input.agent, input.message, input.handoffHint) }, at: new Date(now()).toISOString() });
+  return true;
+}
+
+/**
  * One controller pass over a running, unsettled dispatch: an out-of-quota line on its screen is reported once, naming
  * the agent and the handoff; otherwise a dispatch idle for `idleNoticeMinutes` is reported once as owner-idle.
  */
@@ -45,7 +78,7 @@ export async function watchDispatch(store: GoalRepository, runtime: RuntimeAdapt
   if (seen('agent-exhausted')) return [];
   const exhausted = await exhaustedAgent(runtime, { dispatchId: input.dispatchId, terminal: input.terminal, requested: input.requested, idleMinutes });
   if (exhausted) {
-    record({ kind: 'agent-exhausted', agent: exhausted.agent, model: input.requested?.model, message: exhausted.message, note: exhaustedNote(input.role, exhausted.agent, exhausted.message, input.handoffHint) });
+    recordExhausted(store, now, { goalId: input.goalId, dispatchId: input.dispatchId, role: input.role, agent: exhausted.agent, model: input.requested?.model, packageId: input.packageId, message: exhausted.message, handoffHint: input.handoffHint });
     return [`${input.role} ${input.dispatchId} out of quota (${exhausted.agent ?? 'unknown agent'}); Human notified`];
   }
   const threshold = input.idleNoticeMinutes === undefined ? OWNER_IDLE_MINUTES : input.idleNoticeMinutes;

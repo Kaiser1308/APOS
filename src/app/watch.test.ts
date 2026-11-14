@@ -112,3 +112,34 @@ describe('wired into every running dispatch', () => {
     expect(notices('lead-idle')).toHaveLength(0);
   });
 });
+
+describe("Orca's own out-of-quota escalation (seen live 2026-11-14: Codex in an Orca chat)", () => {
+  it('becomes one agent-exhausted notice for that dispatch, with no "keep working" reply', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { ControllerService } = await import('./controller.js');
+    const raw = JSON.parse(readFileSync(fileURLToPath(new URL('../runtime/fixtures/screens/codex/quota-escalation.json', import.meta.url)), 'utf8'));
+    const { dir, store, add, notices } = open();
+    add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    const ref: RuntimeRef = { runId: 'run_1', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_1', requested: { agent: 'codex', model: 'gpt-6.1-terra' } };
+    add('dispatch-intended', 'k'); add('execution-started', ref);
+    const replies: string[] = [];
+    const acked: string[] = [];
+    const runtime: RuntimeAdapter = {
+      async startLead() { return ref; }, async resumeSolo() { return ref; },
+      async inspect(r) { return { state: 'live', ref: r }; },
+      async checkRun() { return { deliveryId: 'd1', messages: [{ ...raw, payload: { ...raw.payload, dispatchId: 'ctx_1' } }] }; },
+      async ackRun(_run, delivery) { acked.push(delivery); },
+      async retainWorker() {},
+      async replyMessage(_run, _id, body) { replies.push(body); }
+    };
+    await new ControllerService(store, runtime).tick(dir);
+    await new ControllerService(store, runtime).tick(dir);
+    expect(notices('agent-exhausted')).toHaveLength(1);
+    expect(notices('agent-exhausted')[0]).toMatchObject({ dispatchId: 'ctx_1', role: 'lead', agent: 'codex', message: expect.stringMatching(/^You’ve hit your usage limit\. Upgrade to Pro/) });
+    expect(String(notices('agent-exhausted')[0].note)).toContain(`apos handoff ${spec.id} --agent`);
+    expect(notices('escalation')).toHaveLength(0);
+    expect(replies).toEqual([]);
+    expect(acked).toEqual(['d1', 'd1']);
+  });
+});

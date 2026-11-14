@@ -5,6 +5,7 @@ import type { OrcaMessage, RuntimeAdapter, RuntimeRef } from '../runtime/orca.js
 import type { GoalRepository } from '../store/journal.js';
 import { randomUUID } from 'node:crypto';
 import { handingOff } from '../domain/transitions.js';
+import { dispatchAgent, ownerOf, quotaEscalation, recordExhausted } from './watch.js';
 import { MultiSupervisor, SoloSupervisor, type SupervisorOptions } from './supervisor.js';
 
 export const IDLE_MINUTES = 15;
@@ -33,6 +34,17 @@ export class ControllerService {
     for (const message of delivery.messages) {
       if (message.type === 'status' || message.type === 'heartbeat') continue;
       if (message.type !== 'worker_done') {
+        // Orca's own report that an owner's agent ran out of quota: tell the Human who and how to hand it off. A
+        // "keep working" reply would reach an agent that cannot answer.
+        const quota = quotaEscalation(message);
+        const payloadDispatch = message.payload && typeof message.payload === 'object' ? (message.payload as { dispatchId?: unknown }).dispatchId : undefined;
+        const quotaDispatch = message.dispatchId ?? message.dispatch_id ?? (typeof payloadDispatch === 'string' ? payloadDispatch : undefined);
+        const owner = quota && quotaDispatch ? ownerOf(this.store.getGoal(goalId)!, quotaDispatch) : undefined;
+        if (quota && quotaDispatch && owner) {
+          const agent = await dispatchAgent(this.runtime, quotaDispatch, owner.requested);
+          if (recordExhausted(this.store, Date.now, { goalId, dispatchId: quotaDispatch, role: owner.role, agent, model: owner.requested?.model, packageId: owner.packageId, message: quota, handoffHint: owner.handoffHint })) result.supervised.push(`${owner.role} ${quotaDispatch} out of quota (${agent ?? 'unknown agent'}); Human notified`);
+          continue;
+        }
         if (state.proposal?.mode.startsWith('solo') && OWNER_MESSAGES.has(message.type)) { await this.relay(goalId, runId, message, result); continue; }
         result.inboxPending.push(`${message.type}:${message.id}`); continue;
       }

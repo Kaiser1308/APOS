@@ -13,7 +13,10 @@
     "skills:check": "node scripts/promote-skills.mjs --check",
     "skills:promote": "node scripts/promote-skills.mjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "deps:check": "depcruise src --config .dependency-cruiser.cjs",
+    "check": "npm run format:check && npm run lint && npm run deps:check && npm run typecheck && npm test"
   },
   "dependencies": {
     "commander": "14.0.2",
@@ -21,8 +24,11 @@
   },
   "devDependencies": {
     "@types/node": "24.9.1",
+    "dependency-cruiser": "18.7.2",
+    "eslint": "10.14.0",
     "prettier": "3.9.10",
     "typescript": "5.9.3",
+    "typescript-eslint": "8.72.2",
     "vitest": "4.1.12"
   }
 }

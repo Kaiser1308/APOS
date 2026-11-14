@@ -29,7 +29,7 @@ export class ControllerService {
     const state = this.store.getGoal(goalId);
     if (!state || !['selected', 'planned', 'ready', 'executing', 'blocked'].includes(state.status)) return;
     // Until a plan is accepted the Lead is planning: its messages are for the Human, never auto-answered, and its worker_done is read from the dispatch itself.
-    const planning = !state.proposal || !['executing', 'blocked'].includes(state.status);
+    const planning = !state.proposal || ['selected', 'planned'].includes(state.status) || (state.status === 'ready' && state.proposal.mode !== 'multi-wp');
     const refs = [state.runtimeRef, ...Object.values(state.packages ?? {}).map(item => item.runtimeRef)].filter(Boolean) as (RuntimeRef | PackageRuntimeRef)[];
     const runId = refs[0]?.runId ?? state.lead?.ref.runId;
     if (!runId) return;
@@ -255,10 +255,12 @@ export class ControllerService {
 
   /** An error seen on one pass is logged; the same error on a later pass reaches the Human once, instead of repeating silently on every tick. */
   private noteErrors(result: ControllerTick): void {
-    for (const error of new Set(result.errors)) {
+    // Ids, counters and durations differ on every pass; the same failure must still count as the same.
+    const signature = (text: string) => text.replace(/[0-9a-f]{8,}|\d+/gi, '#');
+    for (const error of new Map(result.errors.map(item => [signature(item), item])).values()) {
       const events = this.store.events(result.goalId);
-      if (events.some(item => item.type === 'human-notified' && (item.data as { kind?: string; error?: string }).kind === 'tick-error' && (item.data as { error?: string }).error === error)) continue;
-      if (!events.some(item => item.type === 'decision-logged' && (item.data as { tickError?: string })?.tickError === error)) {
+      if (events.some(item => item.type === 'human-notified' && (item.data as { kind?: string; error?: string }).kind === 'tick-error' && signature((item.data as { error?: string }).error ?? '') === signature(error))) continue;
+      if (!events.some(item => item.type === 'decision-logged' && signature((item.data as { tickError?: string })?.tickError ?? '') === signature(error))) {
         this.store.append({ id: randomUUID(), goalId: result.goalId, type: 'decision-logged', data: { note: `tick error: ${error}`, tickError: error }, at: new Date().toISOString() });
         continue;
       }

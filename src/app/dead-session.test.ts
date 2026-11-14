@@ -37,6 +37,8 @@ describe('a wake on a session that has ended (GitHub #12, #13)', () => {
     expect(isDeadSession(dead())).toBe(true);
     expect(isDeadSession(new Error('Orca x failed: [session_caller_not_live] gone'))).toBe(true);
     expect(isDeadSession(new OrcaRefused('x', 'agent_unconfigured'))).toBe(false);
+    expect(isDeadSession(new Error('network timeout'))).toBe(false);
+    expect(isDeadSession(new Error('Integration gate is red'))).toBe(false);
   });
 
   it('starts a fresh Lead through the handoff instead of failing every tick', async () => {
@@ -66,6 +68,18 @@ describe('a wake on a session that has ended (GitHub #12, #13)', () => {
     await controller.tick(dir); await controller.tick(dir);
     expect(notices()).toHaveLength(1);
     expect(notices()[0].data).toMatchObject({ error: expect.stringMatching(/session_caller_not_live/) });
+    store.close();
+  });
+
+  it('treats errors that differ only in ids or numbers as the same error', async () => {
+    const { dir, store } = fixture();
+    let n = 0;
+    const failing = { ...runtime(async () => { throw dead(); }), async checkRun() { throw new Error(`Orca check failed: request req_${++n}abcdef12 took ${n * 7} ms`); }, async ackRun() { return; }, async retainWorker() { return; } } as RuntimeAdapter & PackageRuntime;
+    const controller = new ControllerService(store, failing);
+    for (let i = 0; i < 4; i++) await controller.tick(dir);
+    const events = store.events(spec.id);
+    expect(events.filter(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'tick-error')).toHaveLength(1);
+    expect(events.filter(item => item.type === 'decision-logged' && (item.data as { tickError?: string })?.tickError)).toHaveLength(1);
     store.close();
   });
 

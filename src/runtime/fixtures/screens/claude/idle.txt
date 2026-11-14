@@ -1,0 +1,6 @@
+  # Blocked, and the coordinator must act before you can continue:
+  orca orchestration send --from orca_session_id:4535710c-4c03-471e-960c-a3ed473e7097 --type escalation --subject "Blocked: <reason>" --body "<details>" --task-id task_5bc44c9f9947 --dispatch-id ctx_3987e8ca675a
+
+  # Finish: send exactly once. --bod
+… (truncated)
+[assistant] OK

@@ -1,0 +1,3 @@
+[assistant] OK
+[user] Continue the task.
+[assistant] You've hit your weekly limit · resets 1am (Asia/Ho_Chi_Minh)

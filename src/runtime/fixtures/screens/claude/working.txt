@@ -1,0 +1,8 @@
+… (truncated)
+[assistant] OK
+[user] ──── From: TERM_07430E61-497F-4C88-9E59-4F1AAC89BD72 (term_07430e61-497f-4c88-9e59-4f1aac89bd72) (status) ────
+Subject: count
+Run a shell command that prints 1 to 30 with a one second sleep between numbers, then reply DONE. Do not report worker_done.
+[Reply: orca orchestration reply --id msg_f6351ad4e09d --body "..."]
+────────────────────────────────────────────────────────────
+[assistant] [tool Bash] {"command":"for i in $(seq 1 30); do echo $i; sleep 1; done","description":"Print 1 to 30 with one-second pauses","timeout":60000}

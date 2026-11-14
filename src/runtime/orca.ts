@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntimeRef } from '../app/packages.js';
+import { SCREENS } from './screens.js';
 import { DEFAULT_PROFILES, committedFileDigest, leadWakeBrief, oneLine, packageBrief, packageReportPath, parseRepoMarker, repoMarker, repairBrief, reviewBrief, leadBrief, type Budget, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
 
 export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string; requested?: RuntimeProfile };
@@ -439,11 +440,7 @@ export class OrcaRuntime implements RuntimeAdapter {
   }
 }
 
-/** Pure check behind `composerPending`, on the visible tail of a Codex TUI. */
+/** The Codex check behind `composerPending`, on the visible tail of a Codex TUI (see `screens.ts`). */
 export function composerHasUnsentBrief(lines: string[]): boolean {
-  if (lines.some(line => /esc to interrupt|^\s*[•◦]\s*Working\b/.test(line))) return false;
-  const prompt = lines.map((line, index) => ({ line, index })).filter(item => /^\s*›/.test(item.line)).at(-1);
-  if (!prompt) return false;
-  const composer = lines.slice(prompt.index, prompt.index + 4).join(' ');
-  return composer.includes('[Pasted Content') || prompt.line.replace(/^\s*›\s*/, '').length > 120;
+  return SCREENS.codex.unsentBrief(lines);
 }

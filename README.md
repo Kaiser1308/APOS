@@ -260,6 +260,18 @@ The controller then:
 - gates each settled package on its own head against its base: green verifies the package, red sends it back to the same owner with the finding;
 - wakes the Lead's terminal once per batch of new events (package results, owner questions, ready to integrate, a red integration gate), and only after the Lead's previous turn has settled.
 
+A minimal `integration.json` for `apos integration complete <goalId> --file integration.json` (every field is required; `conflictResolution` is needed only when packages touched the same files):
+
+```json
+{
+  "commitRef": "<integration commit sha>",
+  "acceptance": [{ "acceptanceId": "AC-1", "result": "pass", "command": "npm test", "artifactRef": "log:acceptance" }],
+  "regression": { "result": "pass", "command": "npm test", "artifactRef": "log:regression" }
+}
+```
+
+Order: the Lead integrates and commits; the controller gates that commit and dispatches the Goal reviewer; on a pass the controller wakes the Lead, who runs `integration complete` (a call before the review passes is refused and names what is missing).
+
 `integration complete` gates the integration commit itself. Every Multi-WP Goal needs an independent Goal review before it can verify; once the integration gate is green on a commit that contains every package, the controller dispatches that reviewer itself (one per gated commit) and wakes the Lead with the verdict. A Multi-WP plan must not declare `risks`: they would demand package reviews APOS does not dispatch.
 
 ## Web UI

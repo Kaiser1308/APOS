@@ -18,7 +18,7 @@ import { HandoffService } from './app/handoff.js';
 import type { HandoffTarget } from './domain/transitions.js';
 import { LeadService, assertLeadTerminal, currentLeadRef } from './app/lead.js';
 import { PackageService, type PackageRuntime } from './app/packages.js';
-import { IntegrationService, type CommitInspector } from './app/integration.js';
+import { IntegrationService, parseIntegrationInput, type CommitInspector } from './app/integration.js';
 import { ControllerService } from './app/controller.js';
 import { MergeService } from './app/merge.js';
 import { ReviewService } from './app/review.js';
@@ -323,7 +323,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     write(JSON.stringify(new IntegrationService(journal, options.inspector).prepare(goalId, repo())));
   }));
   integration.command('complete').argument('<goalId>').requiredOption('--file <json>').action((goalId: string, { file }: { file: string }) => withJournal(journal => {
-    const input = readJsonFile(file) as { commitRef: string };
+    const input = parseIntegrationInput(readJsonFile(file));
     const current = journal.getGoal(goalId)?.gate;
     // The controller gates the integration commit itself; a red result wakes the Lead on the next tick.
     if (current?.deliveryCommit !== input.commitRef || current.result !== 'green') {
@@ -331,7 +331,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
       write(`Integration gate ${report.result} on ${input.commitRef}`);
       if (report.result !== 'green') throw new Error(`Integration gate is ${report.result}`);
     }
-    new IntegrationService(journal, options.inspector).complete(goalId, repo(), readJsonFile(file));
+    new IntegrationService(journal, options.inspector).complete(goalId, repo(), input);
     write(`Integrated and verified ${goalId}`);
   }));
   integration.command('merge').argument('<goalId>').requiredOption('--source <commit>').requiredOption('--target <branch>').action((goalId: string, { source, target }: { source: string; target: string }) => withJournal(journal => {

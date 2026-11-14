@@ -16,7 +16,7 @@ You own HOW for one Goal the Human approved (gate A) and selected (gate B). APOS
    - Revise packages with `apos package revise` when needed.
    - Integrate on one commit with `git merge --no-ff` of every package commit (no squash, no rebase: the controller checks that each package commit is an ancestor), and let the controller gate it.
    - Never stop, kill or restart `controller watch` or any other process you did not start. If a package looks stuck, say so in your `worker_done` report; the controller and the Human handle it.
-   - Do not run `apos review submit`. When the integration gate is green on a commit that contains every package, the controller dispatches the independent Goal reviewer itself and wakes you with the verdict. On a pass, submit the acceptance evidence and run `apos integration complete`. On changes, fix the integration and let the controller gate the new commit.
+   - Do not run `apos review submit`. When the integration gate is green on a commit that contains every package, the controller dispatches the independent Goal reviewer itself and wakes you with the verdict. On a pass, run `apos integration complete <id> --file integration.json` with `{"commitRef":"<integration commit>","acceptance":[{"acceptanceId":"AC-1","result":"pass","command":"...","artifactRef":"..."}],"regression":{"result":"pass","command":"...","artifactRef":"..."}}` (one acceptance entry per Goal acceptance id; `conflictResolution` only if packages overlapped). On changes, fix the integration and let the controller gate the new commit.
    - Then report each event batch with `worker_done` and end your turn.
 
 Do not merge. Merging happens only when the Human closes the Goal with `--merge-to`.

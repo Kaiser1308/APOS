@@ -273,17 +273,14 @@ export class ControllerService {
   private watchdog(goalId: string, result: ControllerTick): void {
     const state = this.store.getGoal(goalId);
     if (!state || state.status !== 'executing' || !state.proposal) return;
-    const ref = state.runtimeRef as RuntimeRef | undefined;
+    const ref = state.runtimeRef;
     // Multi-WP: no package still running and no reviewer pending (seen live: the Lead ended its turn waiting for a review nobody dispatched).
     const multiIdle =
       state.proposal.mode === 'multi-wp' &&
       !state.reviewDispatch &&
       !state.reviewIntent &&
       Object.values(state.packages ?? {}).every(
-        item =>
-          item.status !== 'executing' ||
-          !item.runtimeRef ||
-          state.settlements?.[(item.runtimeRef as { dispatchId: string }).dispatchId],
+        item => item.status !== 'executing' || !item.runtimeRef || state.settlements?.[item.runtimeRef!.dispatchId],
       );
     const idle =
       state.proposal.mode === 'multi-wp'
@@ -371,16 +368,15 @@ export class ControllerService {
           const state = this.store.getGoal(goalId)!;
           for (const [packageId, item] of Object.entries(state.packages ?? {})) {
             // A Worker being handed off was stopped on purpose and reads failed (seen live); it is not a settlement.
-            const handedOff =
-              state.handoffIntent?.from === (item.runtimeRef as PackageRuntimeRef | undefined)?.dispatchId;
+            const handedOff = state.handoffIntent?.from === item.runtimeRef?.dispatchId;
             if (
               !handedOff &&
               item.status === 'executing' &&
               item.runtimeRef &&
               this.runtime.inspectPackage &&
-              !state.settlements?.[(item.runtimeRef as PackageRuntimeRef).dispatchId]
+              !state.settlements?.[item.runtimeRef!.dispatchId]
             ) {
-              const ref = item.runtimeRef as PackageRuntimeRef;
+              const ref = item.runtimeRef;
               const outcome = await this.runtime.inspectPackage(ref);
               if (outcome === 'completed' || outcome === 'failed') {
                 this.store.append({
@@ -398,7 +394,7 @@ export class ControllerService {
               !item.spec.dependencies.every(dep => state.packages?.[dep]?.status === 'verified')
             )
               continue;
-            const prior = item.runtimeRef as PackageRuntimeRef | undefined;
+            const prior = item.runtimeRef;
             if (
               !prior ||
               !this.runtime.inspectPackage ||
@@ -475,12 +471,8 @@ export class ControllerService {
               }
             }
             const current = this.store.getGoal(goalId)!;
-            if (
-              current.runtimeRef &&
-              !handingOff(current) &&
-              !current.settlements?.[(current.runtimeRef as RuntimeRef).dispatchId]
-            ) {
-              const observation = await this.runtime.inspect(current.runtimeRef as RuntimeRef);
+            if (current.runtimeRef && !handingOff(current) && !current.settlements?.[current.runtimeRef!.dispatchId]) {
+              const observation = await this.runtime.inspect(current.runtimeRef);
               if (observation.outcome) {
                 this.store.append({
                   id: randomUUID(),

@@ -90,10 +90,8 @@ export class HandoffService {
             : undefined;
     if (busy) throw new Error(`A ${busy} of ${goalId} is pending; wait until the controller settles it, then hand off`);
     const blocked = state.status === 'blocked';
-    if (blocked && !causedByFailure((state.blocker as { note?: unknown } | undefined)?.note))
-      throw new Error(
-        `${goalId} is blocked for another reason: ${(state.blocker as { note?: string } | undefined)?.note ?? 'unknown'}`,
-      );
+    if (blocked && !causedByFailure(state.blocker?.note))
+      throw new Error(`${goalId} is blocked for another reason: ${state.blocker?.note ?? 'unknown'}`);
     const plan = await this.plan(state, target, repoPath, blocked);
 
     const key = randomUUID();
@@ -253,7 +251,7 @@ export class HandoffService {
     if (target.kind === 'package') {
       const item = state.packages?.[target.packageId];
       if (!item) throw new Error(`${goalId} has no package ${target.packageId}`);
-      const ref = item.runtimeRef as PackageRuntimeRef | undefined;
+      const ref = item.runtimeRef;
       if (['dispatching', 'resuming'].includes(item.status))
         throw new Error(
           `A dispatch of ${target.packageId} is pending; wait until the controller settles it, then hand off`,
@@ -326,11 +324,11 @@ export class HandoffService {
         ? 'lead-multi'
         : 'lead-plan';
     const current = solo
-      ? (state.runtimeRef as { dispatchId: string; runId: string; requested?: { agent?: string; model?: string } })
+      ? state.runtimeRef!
       : {
           dispatchId: lead.current,
           runId: lead.ref.runId,
-          requested: lead.ref.requested as { agent?: string; model?: string } | undefined,
+          requested: lead.ref.requested,
         };
     const attempt = kind === 'solo-owner' ? (state.soloAttempts ?? 1) : 1;
     const input: HandoffInput = {

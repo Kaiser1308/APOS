@@ -47,7 +47,7 @@ export class PackageService {
     const item = state?.packages?.[packageId];
     if (item?.status !== 'executing' || !item.runtimeRef)
       throw new Error('Executing package and Orca dispatch required');
-    if ((await this.runtime.inspectPackage?.(item.runtimeRef as PackageRuntimeRef)) !== 'completed')
+    if ((await this.runtime.inspectPackage?.(item.runtimeRef)) !== 'completed')
       throw new Error('Orca Worker must complete before package verification');
     if (state?.proposal?.risks.length) {
       const latest = [...state.reviews]
@@ -82,7 +82,7 @@ export class PackageService {
       this.record(goalId, 'package-retry-exhausted', { packageId });
       throw new Error('Package retry budget exhausted; Lead decision required');
     }
-    const prior = item.runtimeRef as PackageRuntimeRef;
+    const prior = item.runtimeRef;
     if (!['completed', 'failed'].includes((await this.runtime.inspectPackage?.(prior)) ?? 'unverifiable'))
       throw new Error('Prior Worker dispatch must be settled');
     if (!this.runtime.resumePackage) throw new Error('Runtime cannot resume package owner');
@@ -165,10 +165,7 @@ export class PackageService {
     const results: { packageId: string; state: 'recovered' | 'unknown' }[] = [];
     for (const [packageId, item] of Object.entries(state.packages ?? {})) {
       if (!['dispatching', 'resuming'].includes(item.status) || !item.dispatchIntent) continue;
-      const ref = await this.runtime.recoverPackage?.(
-        item.dispatchIntent,
-        (item.runtimeRef as PackageRuntimeRef | undefined)?.runId,
-      );
+      const ref = await this.runtime.recoverPackage?.(item.dispatchIntent, item.runtimeRef?.runId);
       if (ref) {
         this.record(goalId, item.status === 'resuming' ? 'package-resumed' : 'package-started', { packageId, ref });
         results.push({ packageId, state: 'recovered' });

@@ -23,7 +23,7 @@ import { GitCommitInspector, IntegrationService } from './integration.js';
 import { dispatchAgent, watchDispatch } from './watch.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
-import type { PackageRuntimeRef, RuntimeRef } from '../domain/runtime-refs.js';
+import type { RuntimeRef } from '../domain/runtime-refs.js';
 import type { TelemetryProbe } from '../ports/telemetry.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 
@@ -94,7 +94,7 @@ export class SoloSupervisor {
       handingOff(state)
     )
       return actions;
-    const ref = state.runtimeRef as RuntimeRef;
+    const ref = state.runtimeRef;
     const overTime = state.appetite && this.wallMinutesUsed(goalId) > state.appetite.maxWallMinutes;
     const outcome = state.settlements?.[ref.dispatchId];
     if (!outcome) {
@@ -389,7 +389,7 @@ export class SoloSupervisor {
     const goalId = state.spec.id;
     const pending = state.reviewDispatch!;
     const observation = await this.runtime.inspect({
-      ...(state.runtimeRef as RuntimeRef),
+      ...state.runtimeRef!,
       dispatchId: pending.dispatchId,
       runId: pending.runId,
     });
@@ -625,7 +625,7 @@ export class MultiSupervisor {
       return actions;
     const events: string[] = questions.map(item => `question ${item}`);
     for (const item of Object.values(state.packages ?? {})) {
-      const ref = item.runtimeRef as PackageRuntimeRef | undefined;
+      const ref = item.runtimeRef;
       if (item.status !== 'executing' || !ref) continue;
       const outcome = state.settlements?.[ref.dispatchId];
       const attemptKey = `${item.spec.id}@${item.spec.version}:${item.attempts}`;
@@ -794,7 +794,7 @@ export class MultiSupervisor {
     return (
       state.leadTerminal?.runId ??
       Object.values(state.packages ?? {})
-        .map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId)
+        .map(item => item.runtimeRef?.runId)
         .find(Boolean)
     );
   }
@@ -971,7 +971,7 @@ export class MultiSupervisor {
         repoPath,
       });
       if (!observation.outcome) {
-        const requested = state.lead?.ref.requested as { agent?: string; model?: string } | undefined;
+        const requested = state.lead?.ref.requested;
         return [
           ...(await watchDispatch(this.store, this.runtime, this.now, {
             goalId,
@@ -1000,7 +1000,7 @@ export class MultiSupervisor {
     const runId =
       lead.runId ??
       Object.values(state.packages ?? {})
-        .map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId)
+        .map(item => item.runtimeRef?.runId)
         .find(Boolean);
     if (!runId) return [];
     // One key per Lead turn: a wake whose response was lost is recovered by it instead of starting a second fresh Lead.
@@ -1014,7 +1014,7 @@ export class MultiSupervisor {
         runId,
         events: fresh,
         idempotencyKey: `wake-${lastDispatch ?? state.lead?.current ?? randomUUID()}`,
-        requested: state.lead?.ref.requested as { agent?: string; model?: string } | undefined,
+        requested: state.lead?.ref.requested,
         baseCommit: state.lead?.ref.baseCommit,
         goalVersion: state.spec.version,
       });

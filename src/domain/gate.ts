@@ -49,12 +49,9 @@ export function sourceDigest(text: string): string {
 
 /** Identifies the owner attempt(s) whose delivery a gate judges: Solo dispatch + attempt, or every package's. */
 export function attemptKey(state: GoalState): string {
-  const solo = state.runtimeRef as { dispatchId?: string } | undefined;
+  const solo = state.runtimeRef;
   const packages = Object.values(state.packages ?? {})
-    .map(
-      item =>
-        `${item.spec.id}@${item.spec.version}:${item.attempts}:${(item.runtimeRef as { dispatchId?: string } | undefined)?.dispatchId ?? '-'}`,
-    )
+    .map(item => `${item.spec.id}@${item.spec.version}:${item.attempts}:${item.runtimeRef?.dispatchId ?? '-'}`)
     .sort();
   return [`solo:${solo?.dispatchId ?? '-'}:${state.soloAttempts ?? 0}`, ...packages].join('|');
 }

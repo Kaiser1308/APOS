@@ -6,7 +6,6 @@ import { assertGitRoot } from '../store/project-history.js';
 import { VerificationService } from './verification.js';
 import { requiresIndependentReview } from '../domain/reviews.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
-import type { PackageRuntimeRef } from '../domain/runtime-refs.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 
 export class GitCommitInspector implements CommitInspector {
@@ -91,11 +90,7 @@ export class IntegrationService {
         commits.add(evidence.commitRef);
         if (!this.inspector.exists(repoPath, evidence.commitRef))
           throw new Error(`Package commit missing: ${evidence.commitRef}`);
-        for (const file of this.inspector.files(
-          repoPath,
-          evidence.commitRef,
-          (item.runtimeRef as PackageRuntimeRef | undefined)?.baseCommit,
-        )) {
+        for (const file of this.inspector.files(repoPath, evidence.commitRef, item.runtimeRef?.baseCommit)) {
           if (!owners.has(file)) owners.set(file, new Set());
           owners.get(file)!.add(item.spec.id);
         }

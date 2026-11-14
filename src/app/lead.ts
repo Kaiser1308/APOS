@@ -18,7 +18,7 @@ export function currentLeadRef(lead: LeadState): RuntimeRef {
     ...lead.ref,
     dispatchId: lead.current,
     owner: 'lead',
-    requested: lead.ref.requested as RuntimeRef['requested'],
+    requested: lead.ref.requested,
   };
 }
 
@@ -179,7 +179,7 @@ export class LeadService {
       events: [event],
       idempotencyKey: randomUUID(),
       phase: 'plan',
-      requested: state.lead.ref.requested as { agent?: string; model?: string } | undefined,
+      requested: state.lead.ref.requested,
       baseCommit: state.lead.ref.baseCommit,
       goalVersion: state.spec.version,
     });

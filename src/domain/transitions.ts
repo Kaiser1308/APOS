@@ -6,6 +6,7 @@ import {
   type Appetite,
   type ExecutionProposal,
   type GoalSpec,
+  type PhaseCheckpoint,
 } from './contracts.js';
 import { attemptKey, type GateReport, type ManualConfirmation } from './gate.js';
 import {
@@ -15,7 +16,11 @@ import {
   type PackageEvidence,
   type WorkPackageSpec,
 } from './packages.js';
+import type { PackageRuntimeRef, RuntimeProfile, RuntimeRef } from './runtime-refs.js';
 import { ownerIdentities, parseReview, type ReviewRecord } from './reviews.js';
+
+/** Replay does not validate: old logs must replay as they are. Narrows event data and nothing else. */
+const asRef = <T>(value: unknown): T => value as T;
 
 export type GoalEventType =
   | 'goal-drafted'
@@ -74,12 +79,13 @@ export type GoalEvent = { id: string; goalId: string; type: GoalEventType; data?
 export type GoalStatus =
   'draft' | 'approved' | 'selected' | 'planned' | 'ready' | 'executing' | 'blocked' | 'verified' | 'closed' | 'stopped';
 export type PackageBlocker = { kind: 'technical' | 'product' | 'external'; note: string };
+export type Blocker = PackageBlocker;
 export type PackageState = {
   spec: WorkPackageSpec;
   status: 'specified' | 'dispatching' | 'resuming' | 'executing' | 'blocked' | 'verified' | 'stale';
   evidence: PackageEvidence[];
   attempts: number;
-  runtimeRef?: unknown;
+  runtimeRef?: PackageRuntimeRef;
   dispatchIntent?: string;
   blocker?: PackageBlocker;
   gate?: GateReport;
@@ -94,12 +100,12 @@ export type GoalState = {
   proposal?: ExecutionProposal;
   proposalApprovedVersion?: number;
   evidence: unknown[];
-  checkpoint?: unknown;
+  checkpoint?: PhaseCheckpoint;
   dispatchIntent?: string;
   resumeIntent?: string;
   soloAttempts?: number;
-  runtimeRef?: unknown;
-  blocker?: unknown;
+  runtimeRef?: RuntimeRef;
+  blocker?: Blocker;
   packages?: Record<string, PackageState>;
   integration?: {
     commitRef: string;
@@ -157,7 +163,7 @@ export type LeadState = {
     terminal: string;
     worktreeId: string;
     baseCommit: string;
-    requested?: unknown;
+    requested?: RuntimeProfile;
   };
   current: string;
   settled?: 'completed' | 'failed';
@@ -441,7 +447,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           [data.packageId!]: {
             ...packageState,
             status: 'executing',
-            runtimeRef: data.ref,
+            runtimeRef: asRef<PackageRuntimeRef>(data.ref),
             dispatchIntent: undefined,
             attempts: packageState.attempts + 1,
           },
@@ -476,7 +482,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           [data.packageId!]: {
             ...item,
             status: 'executing',
-            runtimeRef: data.ref,
+            runtimeRef: asRef<PackageRuntimeRef>(data.ref),
             dispatchIntent: undefined,
             attempts: item.attempts + 1,
           },
@@ -614,7 +620,13 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         !state.lead || (event.data as { dispatchId?: string } | undefined)?.dispatchId === state.lead.current,
         'Solo owner must be the current Lead dispatch',
       );
-      return { ...state, status: 'executing', runtimeRef: event.data, dispatchIntent: undefined, soloAttempts: 1 };
+      return {
+        ...state,
+        status: 'executing',
+        runtimeRef: asRef<RuntimeRef>(event.data),
+        dispatchIntent: undefined,
+        soloAttempts: 1,
+      };
     case 'dispatch-intended':
       requireThat(
         state.status === 'ready' &&
@@ -633,7 +645,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat((state.soloAttempts ?? 1) < attemptLimit(state), 'Solo retry budget exhausted');
       return {
         ...state,
-        runtimeRef: event.data,
+        runtimeRef: asRef<RuntimeRef>(event.data),
         resumeIntent: undefined,
         evidence: [],
         reviews: [],
@@ -677,11 +689,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'checkpointed':
       requireThat(state.status === 'executing', 'Execution required');
-      return { ...state, checkpoint: event.data };
+      return { ...state, checkpoint: asRef<PhaseCheckpoint>(event.data) };
     case 'blocked':
       requireThat(state.status === 'executing', 'Execution required');
       requireThat(event.data && typeof event.data === 'object', 'Blocker details required');
-      return { ...state, status: 'blocked', blocker: event.data };
+      return { ...state, status: 'blocked', blocker: asRef<Blocker>(event.data) };
     case 'unblocked':
       requireThat(state.status === 'blocked', 'Blocked Goal required');
       return { ...state, status: 'executing', blocker: undefined };
@@ -903,7 +915,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       // A wake on a changed lead profile starts a fresh agent: remember its terminal and profile, or the next wake hands off again.
       const ref =
         state.lead && data.requested
-          ? { ...state.lead.ref, terminal: data.terminal ?? state.lead.ref.terminal, requested: data.requested }
+          ? {
+              ...state.lead.ref,
+              terminal: data.terminal ?? state.lead.ref.terminal,
+              requested: asRef<RuntimeProfile>(data.requested),
+            }
           : state.lead?.ref;
       const lead =
         state.lead && data.dispatchId
@@ -1020,19 +1036,19 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           taskId: String(data.ref.taskId ?? prior.taskId),
           dispatchId: data.ref.dispatchId,
           terminal: String(data.ref.terminal ?? prior.terminal),
-          requested: data.ref.requested ?? prior.requested,
+          requested: asRef<RuntimeProfile | undefined>(data.ref.requested) ?? prior.requested,
         };
         next = {
           ...next,
           lead: { ref, current: ref.dispatchId },
           leadTerminal: { terminal: ref.terminal, worktree: `id:${ref.worktreeId}`, runId: ref.runId },
         };
-        if ((state.runtimeRef as { dispatchId?: string } | undefined)?.dispatchId === data.from)
-          next.runtimeRef = { ...(state.runtimeRef as object), ...ref, owner: 'lead' };
+        if (state.runtimeRef?.dispatchId === data.from)
+          next.runtimeRef = { ...state.runtimeRef, ...ref, owner: 'lead' };
       } else if (target.kind === 'package') {
         const item = state.packages?.[target.packageId];
         requireThat(
-          item && (item.runtimeRef as { dispatchId?: string } | undefined)?.dispatchId === data.from,
+          item && item.runtimeRef?.dispatchId === data.from,
           'Package handoff must replace its current Worker',
         );
         next = {
@@ -1042,7 +1058,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
             [target.packageId]: {
               ...item,
               status: 'executing',
-              runtimeRef: data.ref,
+              runtimeRef: asRef<PackageRuntimeRef>(data.ref),
               dispatchIntent: undefined,
               ...(data.unblock ? { blocker: undefined } : {}),
             },
@@ -1053,7 +1069,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           state.reviewDispatch?.dispatchId === data.from,
           'Reviewer handoff must replace the current reviewer',
         );
-        next = { ...next, reviewDispatch: data.ref as unknown as GoalState['reviewDispatch'] };
+        next = { ...next, reviewDispatch: asRef<GoalState['reviewDispatch']>(data.ref) };
       }
       if (data.unblock && state.status === 'blocked') next = { ...next, status: 'executing', blocker: undefined };
       return next;

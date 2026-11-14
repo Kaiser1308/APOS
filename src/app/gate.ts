@@ -22,7 +22,6 @@ import { assertGitRoot } from '../store/project-history.js';
 import { GitCommitInspector } from './integration.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
-import type { PackageRuntimeRef } from '../domain/runtime-refs.js';
 
 export type ExecResult = { exitCode: number | null; timedOut: boolean; output: string };
 export interface CommandExecutor {
@@ -182,7 +181,7 @@ export class GateService {
     const item = state?.packages?.[packageId];
     if (!state || item?.status !== 'executing') throw new Error('Executing package required for package gate');
     const wanted = new Set(item.spec.acceptance.flatMap(criterion => criterion.checkIds ?? []));
-    const base = (item.runtimeRef as PackageRuntimeRef | undefined)?.baseCommit;
+    const base = item.runtimeRef?.baseCommit;
     if (!base) throw new Error('Package base commit unknown');
     if (!this.inspector.contains(repoPath, base, head))
       throw new Error('Package head does not descend from its base commit');
@@ -250,14 +249,10 @@ export class GateService {
     if (current !== state.spec.source.sha256)
       throw new Error('Source snapshot changed or missing since approval; revise the Goal before gating');
     const packageBase = Object.values(state.packages ?? {})
-      .map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.baseCommit)
+      .map(item => item.runtimeRef?.baseCommit)
       .find(Boolean);
     // The commit the owner's worktree was created from is the truest base; the proposal's is a fallback.
-    const baseCommit =
-      input.baseCommit ??
-      (state.runtimeRef as { baseCommit?: string } | undefined)?.baseCommit ??
-      packageBase ??
-      state.proposal?.baseCommit;
+    const baseCommit = input.baseCommit ?? state.runtimeRef?.baseCommit ?? packageBase ?? state.proposal?.baseCommit;
     if (!baseCommit) throw new Error('Base commit unknown; record it in the proposal or pass --base');
     for (const [label, ref] of [
       ['base', baseCommit],
@@ -311,7 +306,7 @@ export class GateService {
 
   confirmManual(goalId: string, input: { checkId: string; deliveryCommit: string; by: string; note: string }): void {
     const state = this.store.getGoal(goalId);
-    const owner = (state?.runtimeRef as { owner?: string } | undefined)?.owner;
+    const owner = state?.runtimeRef?.owner;
     if (owner && input.by.trim().toLowerCase() === owner.toLowerCase())
       throw new Error('Manual check must be confirmed by someone other than the owner');
     this.store.append({ id: randomUUID(), goalId, type: 'check-confirmed', data: input, at: this.now() });

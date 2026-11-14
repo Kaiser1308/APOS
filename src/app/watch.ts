@@ -77,7 +77,7 @@ export function ownerOf(
       handoffHint: `apos handoff ${goalId} --agent <other>`,
     };
   for (const item of Object.values(state.packages ?? {})) {
-    const ref = item.runtimeRef as { dispatchId?: string; requested?: { agent?: string; model?: string } } | undefined;
+    const ref = item.runtimeRef;
     if (ref?.dispatchId === dispatchId)
       return {
         role: 'worker',

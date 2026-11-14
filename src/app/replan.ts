@@ -1,7 +1,6 @@
 import type { GoalState } from '../domain/transitions.js';
 import { currentLeadRef } from './lead.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
-import type { PackageRuntimeRef, RuntimeRef } from '../domain/runtime-refs.js';
 
 /**
  * `includeLead`: a Goal revision must also wait for the Lead's turn to end. The Lead's own plan revision does not
@@ -19,23 +18,20 @@ export async function assertExecutionSettled(
     if (
       state.lead &&
       !state.lead.settled &&
-      (!state.runtimeRef || (state.runtimeRef as RuntimeRef).dispatchId !== state.lead.current)
+      (!state.runtimeRef || state.runtimeRef!.dispatchId !== state.lead.current)
     ) {
       const observation = await runtime.inspect(currentLeadRef(state.lead));
       if (!observation.outcome) throw new Error('The Lead must end its turn (worker_done) before the Goal changes');
     }
   }
   if (state.runtimeRef) {
-    const observation = await runtime.inspect(state.runtimeRef as RuntimeRef);
+    const observation = await runtime.inspect(state.runtimeRef);
     if (!observation.outcome) throw new Error('Solo Worker must settle before changing the Goal or proposal');
   }
   for (const item of Object.values(state.packages ?? {})) {
     if (item.dispatchIntent) throw new Error(`Reconcile uncertain package dispatch: ${item.spec.id}`);
     if (!item.runtimeRef) continue;
-    if (
-      !runtime.inspectPackage ||
-      !['completed', 'failed'].includes(await runtime.inspectPackage(item.runtimeRef as PackageRuntimeRef))
-    )
+    if (!runtime.inspectPackage || !['completed', 'failed'].includes(await runtime.inspectPackage(item.runtimeRef)))
       throw new Error(`Package Worker must settle before replan: ${item.spec.id}`);
   }
 }

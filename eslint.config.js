@@ -64,11 +64,6 @@ const TEMPORARY_EXCEPTIONS = [
     removeAt: 'Task 9',
   },
   {
-    files: ['src/domain/transitions.ts'],
-    rules: { 'no-restricted-syntax': 'off' },
-    removeAt: 'Task 5',
-  },
-  {
     files: [
       'src/app/controller.ts',
       'src/app/gate.ts',

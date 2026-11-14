@@ -102,6 +102,7 @@ flowchart TD
 These refuse to run from any terminal or worktree APOS dispatched an agent into, including the Lead's from the moment it is dispatched, so an agent cannot approve its own work:
 
 - `goal approve`, `goal appetite`, `goal select`, `lead start`, `lead wake`
+- `profile set`, `profile reset`, `handoff`
 - `outcome close`, `outcome revise`, `outcome stop`
 - `gate confirm`, `blocker resolve`, `execution abandon-intent`
 - `review submit` (the controller dispatches and reads reviewers itself, so no agent may post a verdict)
@@ -226,7 +227,13 @@ The **appetite** (`size`, `maxSpendUsd`, `maxWallMinutes`, `maxAttempts`, `overr
 
 **Solo has no second dispatch.** When `lead commit` accepts a Solo plan, the controller records the Lead's own dispatch as the owner, and the Lead keeps going in the same turn with everything it read while planning. If the Lead ends its turn before any plan is accepted (for example the estimate exceeds the appetite), `apos inbox` says so; decide, then `apos lead wake <id> --note "..."` resumes it in the same terminal.
 
-**Dispatch.** Every agent runs in its own Orca worktree created from an exact base commit, using its role profile (default: Codex `gpt-6.1-terra` for Lead and Worker, `gpt-6-sol` for Reviewer; override in `runtime.json`; use the model id Codex accepts, e.g. `gpt-6-luna`, not the display name). The brief points at `.apos/skills/_core/execute.md` and the role skill by path and sha256, and names the activation line the delivery report must contain.
+**Dispatch.** Every agent runs in its own Orca worktree created from an exact base commit, using its role profile (default: Codex `gpt-6.1-terra` for Lead and Worker, `gpt-6-sol` for Reviewer). The brief points at `.apos/skills/_core/execute.md` and the role skill by path and sha256, and names the activation line the delivery report must contain.
+
+**Agents per role.** Each role (Lead, Worker, Reviewer) can run `codex`, `claude` or `antigravity` (Orca's agent ids; another id Orca knows also launches). `apos profile set <lead|worker|reviewer|all> --agent <id> [--model <id> [--effort <level>]]` changes it, `apos profile show` lists it, `apos profile reset [role]` goes back to the default. Changing the agent drops the old model. The next dispatch of that role uses the new profile, and so do resumes and wakes: when the running agent differs from the role's profile, APOS starts the new agent in a fresh terminal on the same worktree with the full role brief instead of resuming the old terminal. PM is your own session, not dispatched: `apos init` installs the role skills in `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex, Antigravity).
+
+**Out of quota.** When a running dispatch has been quiet for 2 minutes, the controller reads its screen with that agent's rules. If the agent's own out-of-quota line is there (Claude: `You've hit your weekly limit · resets …`; Codex: `You’ve hit your usage limit …`), `apos inbox` gets one `agent-exhausted` notice naming the role, the agent and the line. Otherwise a dispatch quiet for 15 minutes gets one `owner-idle` notice. This is code reading the terminal; it spends no tokens. Antigravity's quota line has not been seen yet, so it is reported only as `owner-idle`.
+
+**Handoff.** `apos handoff <goalId> [--package <id> | --reviewer] [--agent <id> [--model] [--effort]]` moves that owner (default: the Lead, planning, Solo owner or Multi-WP) to a fresh agent on the same worktree: it stops the old dispatch (`orca orchestration worker-stop`), refuses to go on if Orca cannot confirm it stopped, and starts the role's profile with the full role brief plus how to pick up the previous agent's work. Commits and uncommitted changes stay in the worktree. It spends no attempt, and while it runs the controller does not count the stopped dispatch as failed. `--agent` also makes that agent the role's profile. A Goal or package blocked only because that very dispatch settled `failed` is unblocked; any other block is refused.
 
 **After the owner settles**, `controller tick`:
 
@@ -278,7 +285,7 @@ Design: [`docs/design/apos-ui.md`](docs/design/apos-ui.md), [`docs/design/apos-u
 
 ## Telemetry
 
-`telemetry-recorded` events hold, per dispatch and role: the requested and launched model, token usage (input, cached, output) read from the owner's Codex session files, and wall time. When nothing matches, the usage is recorded as `unknown`, never estimated. `apos metrics show <goalId>` summarizes a Goal.
+`telemetry-recorded` events hold, per dispatch and role: the requested and launched model, token usage (input, cached, output) read from the owner's Codex session files, and wall time. Claude and Antigravity owners are not measured yet. When nothing matches, the usage is recorded as `unknown`, never estimated. `apos metrics show <goalId>` summarizes a Goal.
 
 ## Configuration and state
 
@@ -290,7 +297,7 @@ Controller state lives **outside the repo**, in `~/.apos/projects/<repo>-<hash>/
 | `state.sqlite` | An index, rebuildable from the log. |
 | `sources/<GOAL>/v<n>.md` | Verbatim source snapshots. |
 | `artifacts/` | Gate logs. |
-| `runtime.json` | Optional role profiles, created by you after the first `goal create` (the folder is `~/.apos/projects/<repo-name>-<hash>/`): `{ "lead": { "agent": "codex", "model": "gpt-6-luna" }, "worker": { ... }, "reviewer": { ... } }`. `effort` is optional. |
+| `runtime.json` | Optional role profiles in the controller home (`~/.apos/projects/<repo-name>-<hash>/`), written by `apos profile set` and `apos handoff --agent`: `{ "lead": { "agent": "claude" }, "worker": { "agent": "codex", "model": "gpt-6-luna" }, "reviewer": { ... } }`. `model` and `effort` are optional; use the model id the agent accepts. |
 
 The repo gets readable Goal documents (`.apos/goals/<id>/`) committed only at milestones: Goal approved, plan accepted, verified, merged, outcome. Events committed into the repo by anyone else are ignored. `apos migrate` imports APOS v1 histories that still fit the contract.
 
@@ -322,6 +329,8 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `lead recommend` | Recommend the next eligible Goal. |
 | `lead start <id>` | **Human.** Dispatch the Lead of a selected Goal (retry after a refused dispatch, or for a Goal selected before this version). |
 | `lead wake <id> --note <text>` | **Human.** Resume a Lead that ended its turn before its plan was accepted, in its own terminal, with your decision. |
+| `profile show`, `profile set <role|all> --agent <id> [--model <id>] [--effort <level>]`, `profile reset [role|all]` | Which agent each role runs; `set` and `reset` are **Human**. |
+| `handoff <goalId> [--package <id> | --reviewer] [--agent <id> [--model] [--effort]]` | **Human.** Move a stuck owner (for example out of quota) to a fresh agent on the same worktree; no attempt spent. |
 | `lead propose --file <json>` | Submit an execution proposal. |
 | `lead commit <id>` | Lead only, from its own terminal. Controller checks the plan; Solo: the Lead becomes the owner; Multi-WP: dispatches packages. |
 | `package add --file <json>`, `package revise <goalId> --file <json> --reason <text>` | Multi-WP packages. |
@@ -369,10 +378,11 @@ APOS has run live on real Orca with Codex (`gpt-6.1-terra`): a clean Solo Goal, 
 
 Known limits:
 
-- **Spend is not enforced.** `maxSpendUsd` and `overrunPolicy` are recorded, but there is no price table and an overrun only notifies. The controller cannot stop a running owner; it only declines to resume it.
+- **Spend is not enforced.** `maxSpendUsd` and `overrunPolicy` are recorded, but there is no price table and an overrun only notifies. The controller never stops a running owner on its own; it only declines to resume it. Only the Human's `apos handoff` stops one.
 - **Multi-WP has run live only on a toy Goal**, not yet where packages truly depend on each other or where the review asks for changes.
 - **The quality pilot did not beat the baseline.** On the SQLFMT task APOS ended with 28/32 target tests against the single-agent baseline's 32/32, and the controller blocked the Goal rather than verify it. The current aim is a smooth controller, not accuracy.
 - **Upgrading from a version before the Lead dispatch.** A Goal selected, planned or accepted under the old flow has no APOS Lead: `lead commit` refuses it and `apos inbox` asks you to run `apos lead start <id>`; the new Lead proposes and commits again. Goals already executing are unaffected. Do not roll back below this version once a log holds `lead-*` events: older builds cannot replay event types they do not know (this build ignores unknown ones).
 - **The Lead runs `apos` with `--repo`.** It works in its own worktree, so its commands must name the managed repo; its brief says so.
+- **Claude and Antigravity owners have not yet run a full Goal live.** Their screen rules come from real captures (`src/runtime/fixtures/screens/`); Orca opens Claude as a chat, so there is no composer to rescue. Antigravity's out-of-quota line is unknown.
 - **Agent activity in the UI is verified against Codex dispatches.** The Claude Code reader works on real Claude Code transcripts but has not yet seen a Worker dispatched by APOS.
 - **Single host, trusted user** (see the trust model).

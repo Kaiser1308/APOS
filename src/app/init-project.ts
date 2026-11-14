@@ -41,9 +41,10 @@ export async function initProject(repoPath: string, skillsRoot?: string): Promis
   const ignore = join(dir, '.gitignore');
   if (!existsSync(ignore)) writeFileSync(ignore, 'state.sqlite*\n', 'utf8');
   const files = [config, ignore];
-  for (const role of ROLES) {
+  // Claude Code reads .claude/skills; Codex and Antigravity read the workspace .agents/skills. A copy already there is the user's.
+  for (const root of ['.claude', '.agents']) for (const role of ROLES) {
     const source = skills.roles[role];
-    const targetDir = join(repo, '.claude', 'skills', `apos-${role}`);
+    const targetDir = join(repo, root, 'skills', `apos-${role}`);
     mkdirSync(targetDir, { recursive: true });
     const target = join(targetDir, 'SKILL.md');
     if (!existsSync(target)) { copyFileSync(source, target); files.push(target); }

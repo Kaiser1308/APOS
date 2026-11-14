@@ -40,3 +40,19 @@ it('refuses skills that are missing or written for another APOS contract', async
   expect(() => resolveSkills(root)).toThrow(/apos-contract 1|APOS skill missing/);
   rm(root, { recursive: true, force: true });
 });
+
+it('installs the role skills where Codex and Antigravity read them too, without overwriting a local copy', async () => {
+  const { readFileSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'apos-init-agents-')); dirs.push(dir);
+  execFileSync('git', ['init', '-q', dir]);
+  mkdirSync(join(dir, '.agents', 'skills', 'apos-lead'), { recursive: true });
+  writeFileSync(join(dir, '.agents', 'skills', 'apos-lead', 'SKILL.md'), 'my own lead skill');
+  await initProject(dir);
+  for (const role of ['pm', 'worker', 'reviewer']) {
+    expect(readFileSync(join(dir, '.agents', 'skills', `apos-${role}`, 'SKILL.md'), 'utf8')).toBe(readFileSync(join(dir, '.claude', 'skills', `apos-${role}`, 'SKILL.md'), 'utf8'));
+  }
+  expect(readFileSync(join(dir, '.agents', 'skills', 'apos-lead', 'SKILL.md'), 'utf8')).toBe('my own lead skill');
+  const committed = execFileSync('git', ['-C', dir, 'ls-tree', '-r', '--name-only', 'HEAD'], { encoding: 'utf8' });
+  expect(committed).toContain('.agents/skills/apos-pm/SKILL.md');
+  expect(committed).not.toContain('.agents/skills/apos-lead/SKILL.md');
+});

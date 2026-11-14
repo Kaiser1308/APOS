@@ -4,4 +4,8 @@ Verified against Orca 1.4.240 on 2026-11-07. `orchestration run-create --objecti
 
 The smoke dispatch `ctx_cfc504ed2891` reached Claude Code in a disposable Git project. Claude Code reported a weekly usage limit and is scheduled to continue at 1am Asia/Ho_Chi_Minh. The dispatch remains live. Do not retry or release it without authoritative settlement.
 
+Agent ids are Orca's: `codex`, `claude`, `antigravity`. Verified 2026-11-14 with Orca and Antigravity CLI 1.5.8: `worker-start --agent claude` opens a structured chat (handle `structworker_*`, `terminal read` returns a `[user]`/`[assistant]` transcript); `--agent antigravity` opens a TUI terminal. Screen rules per agent live in `screens.ts`, written from the captures in `fixtures/screens/`.
+
+`orchestration worker-stop --dispatch <id> --json` returns `{ state: "stopped", processAction: "closed_agent_terminal" }`, and `worker-show` then reads the dispatch `failed`. APOS stops a dispatch only for a Human `apos handoff`, and treats the stop as sure only on `closed_agent_terminal` or a settled dispatch. The new agent starts with `worker-start --worktree id:<same worktree> --run <same Run>` and no `--terminal`.
+
 The adapter must not call `worker-start` again when dispatch outcome is unknown. Its caller records `dispatch-intended` first and inspects Orca using the same key. A terminal being live is distinct from Task completion; `dispatch.status` governs settlement.

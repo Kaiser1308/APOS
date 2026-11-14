@@ -143,3 +143,12 @@ describe("Orca's own out-of-quota escalation (seen live 2026-11-14: Codex in an 
     expect(acked).toEqual(['d1', 'd1']);
   });
 });
+
+describe('quotaEscalation matches only Orca\'s own report', () => {
+  it('ignores an agent\'s own escalation that talks about limits', async () => {
+    const { quotaEscalation } = await import('./watch.js');
+    expect(quotaEscalation({ type: 'escalation', subject: 'Blocked: should a client that hit your rate limit get 429?', body: 'The spec is silent.' })).toBeUndefined();
+    expect(quotaEscalation({ type: 'escalation', subject: 'Agent hit an error: Claude hit its context limit.', body: 'Error: Claude hit its context limit.' })).toBeUndefined();
+    expect(quotaEscalation({ type: 'escalation', subject: 'Agent hit an error: Codex hit its usage limit.', body: 'Error: Codex hit its usage limit.\nDetails from the agent: You’ve hit your usage limit. Try again at 10:02 PM.' })).toBe('You’ve hit your usage limit. Try again at 10:02 PM.');
+  });
+});

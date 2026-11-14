@@ -59,7 +59,7 @@ export type GoalState = {
    */
   lead?: LeadState;
   /** A handoff to another agent in flight: the controller leaves `from` alone until it is handed off or abandoned. */
-  handoffIntent?: { key: string; target: HandoffTarget; from: string; at: string };
+  handoffIntent?: { key: string; target: HandoffTarget; from: string; at: string; runId?: string; unblock?: boolean };
 };
 /** Whose dispatch a handoff replaces: the Goal's Lead (planning, Solo owner or Multi-WP), a package Worker, or the reviewer. */
 export type HandoffTarget = { kind: 'lead' } | { kind: 'package'; packageId: string } | { kind: 'reviewer' };
@@ -414,11 +414,12 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, lead: { ...state.lead, settled: data.outcome } };
     }
     case 'handoff-intended': {
-      const data = event.data as { key?: string; target?: HandoffTarget; from?: string };
+      const data = event.data as { key?: string; target?: HandoffTarget; from?: string; runId?: string; unblock?: boolean };
       requireThat(!state.handoffIntent, 'A handoff is already pending for this Goal');
+      requireThat(!state.resumeIntent && !state.leadIntent && !state.reviewIntent && !(state.status === 'ready' && state.dispatchIntent), 'Another dispatch intent is pending for this Goal');
       requireThat(['selected', 'planned', 'ready', 'executing', 'blocked'].includes(state.status), 'Handoff needs a Goal whose owner is running');
       requireThat(data?.key && data.from && data.target && ['lead', 'package', 'reviewer'].includes(data.target.kind), 'Handoff needs key, target and the dispatch it replaces');
-      return { ...state, handoffIntent: { key: data.key, target: data.target, from: data.from, at: event.at } };
+      return { ...state, handoffIntent: { key: data.key, target: data.target, from: data.from, at: event.at, ...(data.runId ? { runId: data.runId } : {}), ...(data.unblock ? { unblock: true } : {}) } };
     }
     case 'owner-handed-off': {
       // A new agent on the same worktree replaces `from`. It is the same owner continuing: no attempt is spent.

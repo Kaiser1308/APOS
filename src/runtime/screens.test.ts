@@ -45,3 +45,12 @@ describe('screen rules per agent', () => {
     expect(quotaMessage(undefined, fixture('claude', 'quota-weekly'))).toMatch(/weekly limit/);
   });
 });
+
+describe('quota lines are the agent\'s own last word, not text it printed', () => {
+  it('ignores an indented line, and a quota line followed by more agent output', () => {
+    expect(quotaMessage('codex', ['• Ran cat banner.txt', '  You’ve hit your usage limit · resets 3pm', '› Ask Codex to do anything'])).toBeUndefined();
+    expect(quotaMessage('claude', ["  You've hit your weekly limit · resets 1am", '[assistant] done'])).toBeUndefined();
+    expect(quotaMessage('claude', ["[assistant] You've hit your weekly limit · resets 1am", '[user] Continue', '[assistant] Picking up where I left off.'])).toBeUndefined();
+    expect(quotaMessage('codex', ['■ You’ve hit your usage limit. Try again later.', '', '• Ran npm test', '› Ask Codex to do anything'])).toBeUndefined();
+  });
+});

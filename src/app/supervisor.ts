@@ -473,8 +473,9 @@ export class MultiSupervisor {
       if (!asked) this.record(goalId, 'human-notified', { kind: 'lead-unreachable', goalId, events: fresh });
       return [`Lead unreachable for: ${fresh.join('; ')}`];
     }
-    const lastWake = [...this.store.events(goalId)].reverse().find(item => item.type === 'lead-woken' && (item.data as { dispatchId?: string }).dispatchId);
-    const lastDispatch = (lastWake?.data as { dispatchId?: string } | undefined)?.dispatchId;
+    // The Lead's latest turn: its last wake, or a fresh agent a handoff started (which must settle and be retained first).
+    const lastWake = [...this.store.events(goalId)].reverse().find(item => (item.type === 'lead-woken' && (item.data as { dispatchId?: string }).dispatchId) || (item.type === 'owner-handed-off' && (item.data as { target?: { kind?: string } }).target?.kind === 'lead'));
+    const lastDispatch = lastWake?.type === 'owner-handed-off' ? (lastWake.data as { ref?: { dispatchId?: string } }).ref?.dispatchId : (lastWake?.data as { dispatchId?: string } | undefined)?.dispatchId;
     if (lastDispatch) {
       const observation = await this.runtime.inspect({ runId: lead.runId ?? '', taskId: '', dispatchId: lastDispatch, owner: 'lead', repoPath });
       if (!observation.outcome) {
@@ -491,7 +492,8 @@ export class MultiSupervisor {
     }
     const runId = lead.runId ?? (Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId).find(Boolean));
     if (!runId) return [];
-    const woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: lead.terminal, worktree: lead.worktree, runId, events: fresh, idempotencyKey: randomUUID(), requested: state.lead?.ref.requested as { agent?: string; model?: string } | undefined, baseCommit: state.lead?.ref.baseCommit, goalVersion: state.spec.version });
+    // One key per Lead turn: a wake whose response was lost is recovered by it instead of starting a second fresh Lead.
+    const woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: lead.terminal, worktree: lead.worktree, runId, events: fresh, idempotencyKey: `wake-${lastDispatch ?? state.lead?.current ?? randomUUID()}`, requested: state.lead?.ref.requested as { agent?: string; model?: string } | undefined, baseCommit: state.lead?.ref.baseCommit, goalVersion: state.spec.version });
     this.record(goalId, 'lead-woken', { dispatchId: woken.dispatchId, events: fresh, runId, ...(woken.terminal ? { terminal: woken.terminal, worktree: lead.worktree, requested: woken.requested } : {}) });
     return [`woke Lead ${woken.dispatchId}: ${fresh.join('; ')}`];
   }

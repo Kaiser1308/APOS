@@ -76,12 +76,12 @@ describe('HandoffService', () => {
     expect(store.getGoal(spec.id)!.handoffIntent).toBeUndefined();
   });
 
-  it('drops the intent and says to retry when the new agent cannot start', async () => {
+  it('keeps the intent and says to retry when the new agent may not have started (the old one is already stopped)', async () => {
     const { dir, store, add } = open();
     soloExecuting(add, dir);
     const { runtime } = fakeRuntime({ failStart: true });
     await expect(new HandoffService(store, runtime, () => claude).handoff(spec.id, { kind: 'lead' }, dir)).rejects.toThrow(/Run apos handoff again/);
-    expect(store.getGoal(spec.id)!.handoffIntent).toBeUndefined();
+    expect(store.getGoal(spec.id)!.handoffIntent).toBeDefined();
     expect(store.getGoal(spec.id)!.status).toBe('executing');
   });
 

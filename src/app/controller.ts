@@ -4,7 +4,9 @@ import { LeadService } from './lead.js';
 import type { OrcaMessage, RuntimeAdapter, RuntimeRef } from '../runtime/orca.js';
 import type { GoalRepository } from '../store/journal.js';
 import { randomUUID } from 'node:crypto';
-import { handingOff } from '../domain/transitions.js';
+import { handingOff, type GoalState } from '../domain/transitions.js';
+/** Minutes a handoff may stay pending before the Human is told. */
+export const HANDOFF_PENDING_MINUTES = 10;
 import { dispatchAgent, ownerOf, quotaEscalation, recordExhausted } from './watch.js';
 import { MultiSupervisor, SoloSupervisor, type SupervisorOptions } from './supervisor.js';
 
@@ -90,6 +92,20 @@ export class ControllerService {
     if (!result.inboxPending.length) await this.runtime.ackRun(runId, delivery.deliveryId);
   }
 
+  /**
+   * While a handoff is pending the controller leaves the stopped dispatch alone, so a handoff whose CLI died would hold
+   * the Goal silently. After HANDOFF_PENDING_MINUTES the Human is told once how to finish or drop it.
+   */
+  private noticePendingHandoff(state: GoalState, result: ControllerTick): void {
+    const pending = state.handoffIntent;
+    const now = (this.options.now ?? Date.now)();
+    if (!pending || now - Date.parse(pending.at) < HANDOFF_PENDING_MINUTES * 60_000) return;
+    const goalId = state.spec.id;
+    if (this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { key?: string }).key === pending.key)) return;
+    this.store.append({ id: randomUUID(), goalId, type: 'human-notified', data: { kind: 'needs-decision', goalId, key: pending.key, note: `the handoff of ${goalId} (from ${pending.from}) has been pending for ${HANDOFF_PENDING_MINUTES}+ min. Run \`apos handoff ${goalId}${pending.target.kind === 'package' ? ` --package ${pending.target.packageId}` : pending.target.kind === 'reviewer' ? ' --reviewer' : ''}\` to finish it (it recovers an agent that started), or check Orca and \`apos execution abandon-intent ${goalId} --key ${pending.key} --reason ...\` to drop it.` }, at: new Date(now).toISOString() });
+    result.supervised.push(`handoff ${pending.key} pending; Human notified`);
+  }
+
   /** Notifies the Human once per message and answers the owner with the standing rule. */
   private async relay(goalId: string, runId: string, message: OrcaMessage, result: ControllerTick): Promise<void> {
     const seen = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { messageId?: string }).messageId === message.id);
@@ -125,6 +141,7 @@ export class ControllerService {
     for (const snapshot of this.store.listGoals()) {
       const goalId = snapshot.spec.id;
       const result: ControllerTick = { goalId, dispatched: [], recovered: [], unresolved: [], resumed: [], settled: [], inboxPending: [], errors: [], supervised: [] };
+      this.noticePendingHandoff(snapshot, result);
       // The Lead is planning (no plan accepted yet), or its dispatch is still unknown. A running Lead whose Solo plan is
       // accepted is adopted below as the owner, so its end of turn counts as a delivery, not as a planning stop.
       const planning = ['selected', 'planned'].includes(snapshot.status) || (snapshot.status === 'ready' && snapshot.proposal?.mode !== 'multi-wp' && Boolean(snapshot.leadIntent));

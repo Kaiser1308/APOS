@@ -13,11 +13,6 @@ export type ScreenRules = {
 };
 
 const lastLine = (lines: string[]) => [...lines].reverse().find(line => line.trim()) ?? '';
-/** First line matching `pattern`, with `strip` removed and trimmed. Anchored patterns keep prose that quotes the message from matching. */
-const firstMatch = (lines: string[], pattern: RegExp, strip: RegExp) => {
-  const line = lines.find(item => pattern.test(item));
-  return line === undefined ? undefined : line.replace(strip, '').trim();
-};
 
 const codex: ScreenRules = {
   working: lines => lines.some(line => /esc to interrupt|^\s*[•◦]\s*Working\b/.test(line)),
@@ -28,15 +23,24 @@ const codex: ScreenRules = {
     const composer = lines.slice(prompt.index, prompt.index + 4).join(' ');
     return composer.includes('[Pasted Content') || prompt.line.replace(/^\s*›\s*/, '').length > 120;
   },
-  // Message text is real (Codex rollout error.message); its `■` placement on screen is unverified.
-  quota: lines => firstMatch(lines, /^\s*■?\s*You[’']ve hit your usage limit\b/, /^\s*■?\s*/)
+  // Message text is real (Codex rollout error.message); its `■` placement on screen is unverified. Only an unindented
+  // line with nothing after it but the prompt and its status lines counts: text the agent printed or an old notice does not.
+  quota(lines) {
+    const index = lines.map((line, at) => ({ line, at })).filter(item => /^■? ?You[’']ve hit your usage limit\b/.test(item.line)).at(-1)?.at;
+    if (index === undefined || lines.slice(index + 1).some(line => line.trim() && !/^\s*›|^\s{2,}\S/.test(line))) return undefined;
+    return lines[index].replace(/^■? ?/, '').trim();
+  }
 };
 
 /** Orca opens Claude as a structured chat: the tail is a transcript and Orca delivers the brief itself. */
 const claude: ScreenRules = {
   working: lines => /^\[assistant\] \[tool [^\]]+\]/.test(lastLine(lines)),
   unsentBrief: () => false,
-  quota: lines => firstMatch(lines, /^\s*(\[assistant\]\s*)?[⎿●•■]?\s*You[’']ve hit your (weekly|5-hour|usage|session) limit\b/, /^\s*(\[assistant\]\s*)?[⎿●•■]?\s*/)
+  // Only the transcript's last line: an old notice the session has moved past, or a quoted one, does not count.
+  quota(lines) {
+    const last = lastLine(lines);
+    return /^(\[assistant\] )?[⎿●•■]? ?You[’']ve hit your (weekly|5-hour|usage|session) limit\b/.test(last) ? last.replace(/^(\[assistant\] )?[⎿●•■]? ?/, '').trim() : undefined;
+  }
 };
 
 /** Antigravity CLI: a `>` input box between two rules, `esc to cancel` and a spinner while it works. */

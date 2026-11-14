@@ -33,7 +33,8 @@ export const exhaustedNote = (role: Role, agent: string | undefined, message: st
  * Returns the agent's own line, else the subject; undefined for any other message.
  */
 export function quotaEscalation(message: { type?: string; subject?: string; body?: string }): string | undefined {
-  if (message.type !== 'escalation' || !/hit (its|your) [\w-]*\s?(usage )?limit/i.test(message.subject ?? '')) return undefined;
+  // Orca's own shape only: agents send their own escalations too, and may well talk about rate limits.
+  if (message.type !== 'escalation' || !/^Agent hit an error: .*\b(usage limit|quota)\b/i.test(message.subject ?? '')) return undefined;
   const details = /Details from the agent:\s*(.+)/.exec(message.body ?? '')?.[1]?.trim();
   return details || (message.subject ?? '').replace(/^Agent hit an error:\s*/, '').trim();
 }

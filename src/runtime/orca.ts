@@ -450,6 +450,9 @@ export class OrcaRuntime implements RuntimeAdapter {
 
   async wakeLead(input: WakeInput): Promise<{ dispatchId: string; terminal?: string; requested?: RuntimeProfile }> {
     if (input.baseCommit && input.worktree.startsWith('id:') && profileChanged(input.requested, this.profile('lead'))) {
+      // A fresh Lead started for this turn whose response was lost: found by its key, never started twice.
+      const found = await this.recover(input.idempotencyKey, input.runId).catch(() => undefined);
+      if (found) return { dispatchId: found.dispatchId, terminal: found.terminal, requested: this.profile('lead') };
       const events = input.events.map((item, index) => `(${index + 1}) ${item}`).join('\n');
       const ref = await this.handoff({ kind: input.phase === 'plan' ? 'lead-plan' : 'lead-multi', role: 'lead', repoPath: input.repoPath, goalId: input.goalId, goalVersion: input.goalVersion, runId: input.runId, worktreeId: input.worktree.slice(3), baseCommit: input.baseCommit, idempotencyKey: input.idempotencyKey, attempt: 1, fromAgent: input.requested?.agent, extra: `Events since the previous agent's last turn:\n${events}` });
       return { dispatchId: ref.dispatchId, terminal: ref.terminal, requested: ref.requested };

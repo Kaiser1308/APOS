@@ -27,14 +27,17 @@ export class ControllerService {
   private async consumeInbox(goalId: string, result: ControllerTick): Promise<void> {
     if (!this.runtime.checkRun || !this.runtime.ackRun || !this.runtime.retainWorker) return;
     const state = this.store.getGoal(goalId);
-    if (!state || !['executing', 'blocked'].includes(state.status)) return;
+    if (!state || !['selected', 'planned', 'ready', 'executing', 'blocked'].includes(state.status)) return;
+    // Until a plan is accepted the Lead is planning: its messages are for the Human, never auto-answered, and its worker_done is read from the dispatch itself.
+    const planning = !state.proposal || !['executing', 'blocked'].includes(state.status);
     const refs = [state.runtimeRef, ...Object.values(state.packages ?? {}).map(item => item.runtimeRef)].filter(Boolean) as (RuntimeRef | PackageRuntimeRef)[];
-    const runId = refs[0]?.runId;
+    const runId = refs[0]?.runId ?? state.lead?.ref.runId;
     if (!runId) return;
     const delivery = await this.runtime.checkRun(runId);
     if (!delivery.deliveryId) return;
     for (const message of delivery.messages) {
       if (message.type === 'status' || message.type === 'heartbeat') continue;
+      if (planning && message.type === 'worker_done') continue;
       if (message.type !== 'worker_done') {
         // Orca's own report that an owner's agent ran out of quota: tell the Human who and how to hand it off. A
         // "keep working" reply would reach an agent that cannot answer.
@@ -47,6 +50,7 @@ export class ControllerService {
           if (recordExhausted(this.store, Date.now, { goalId, dispatchId: quotaDispatch, role: owner.role, agent, model: owner.requested?.model, packageId: owner.packageId, message: quota, handoffHint: owner.handoffHint })) result.supervised.push(`${owner.role} ${quotaDispatch} out of quota (${agent ?? 'unknown agent'}); Human notified`);
           continue;
         }
+        if (planning && OWNER_MESSAGES.has(message.type)) { this.noticeLeadQuestion(goalId, message, result); continue; }
         if (state.proposal?.mode.startsWith('solo') && OWNER_MESSAGES.has(message.type)) { await this.relay(goalId, runId, message, result); continue; }
         result.inboxPending.push(`${message.type}:${message.id}`); continue;
       }
@@ -106,6 +110,14 @@ export class ControllerService {
     result.supervised.push(`handoff ${pending.key} pending; Human notified`);
   }
 
+  /** A question or escalation from the Lead before its plan is accepted: the Human is told once and the Lead is not answered for them. */
+  private noticeLeadQuestion(goalId: string, message: OrcaMessage, result: ControllerTick): void {
+    if (this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { messageId?: string }).messageId === message.id)) return;
+    const what = message.subject ?? message.body ?? message.type;
+    this.store.append({ id: randomUUID(), goalId, type: 'human-notified', data: { kind: 'lead-question', goalId, messageId: message.id, messageType: message.type, subject: message.subject, body: message.body, note: `the Lead is waiting on you: ${what}. Answer it with \`apos lead wake ${goalId} --note "..."\`.` }, at: new Date().toISOString() });
+    result.supervised.push(`Lead ${message.type} ${message.id}; Human notified`);
+  }
+
   /** Notifies the Human once per message and answers the owner with the standing rule. */
   private async relay(goalId: string, runId: string, message: OrcaMessage, result: ControllerTick): Promise<void> {
     const seen = this.store.events(goalId).some(item => item.type === 'human-notified' && (item.data as { messageId?: string }).messageId === message.id);
@@ -149,7 +161,11 @@ export class ControllerService {
         try { result.supervised.push(...await new LeadService(this.store, this.runtime).reconcile(goalId)); }
         catch (error) { result.errors.push(`lead: ${error instanceof Error ? error.message : String(error)}`); }
         const current = this.store.getGoal(goalId)!;
-        if (current.status !== 'ready' || !current.lead || current.lead.settled) { results.push(result); continue; }
+        if (current.status !== 'ready' || !current.lead || current.lead.settled) {
+          try { await this.consumeInbox(goalId, result); }
+          catch (error) { result.errors.push(`inbox: ${error instanceof Error ? error.message : String(error)}`); }
+          results.push(result); continue;
+        }
       }
       if (!snapshot.proposal || !['ready', 'executing', 'blocked'].includes(snapshot.status)) continue;
       if (snapshot.status === 'blocked') {

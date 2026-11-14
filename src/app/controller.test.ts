@@ -165,3 +165,45 @@ it('retains the settled dispatch of a Lead wake-up, so the next wake is not refu
   expect(store.events(spec.id).some(item => item.type === 'decision-logged')).toBe(false);
   store.close();
 });
+
+describe('Lead messages before a plan is accepted (GitHub #3, #5)', () => {
+  const setup = (messages: import('../runtime/orca.js').OrcaMessage[]) => {
+    const dir = mkdtempSync(join(tmpdir(), 'apos-controller-planning-')); dirs.push(dir);
+    const store = SqliteStore.open(join(dir, 'state.sqlite'));
+    let n = 0;
+    const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `PLAN-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+    add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected');
+    add('lead-dispatch-intended', 'lead-key'); add('lead-started', { runId: 'run-1', taskId: 'task-1', dispatchId: 'lead-1', owner: 'lead', repoPath: dir, terminal: 'term-lead', worktreeId: 'repo::wt', baseCommit: 'b'.repeat(40), requested: { agent: 'codex' } });
+    const calls: string[] = [];
+    const runtime: RuntimeAdapter & PackageRuntime = {
+      async startLead() { throw new Error('No new dispatch expected'); }, async resumeSolo() { throw new Error('No resume expected'); },
+      async inspect(ref) { return { state: 'live', ref }; },
+      async startPackage() { throw new Error('No package expected'); },
+      async checkRun() { calls.push('check'); return { deliveryId: 'd-1', messages }; },
+      async replyMessage() { calls.push('reply'); },
+      async retainWorker() { calls.push('retain'); },
+      async ackRun() { calls.push('ack'); }
+    };
+    return { dir, store, runtime, calls };
+  };
+
+  it('relays a Lead question to the inbox while the Goal is selected, once, without answering it', async () => {
+    const { dir, store, runtime, calls } = setup([{ id: 'msg-q', type: 'question', subject: 'Which database?', body: 'sqlite or postgres' }]);
+    const controller = new ControllerService(store, runtime);
+    await controller.tick(dir); await controller.tick(dir);
+    const notices = store.events(spec.id).filter(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'lead-question');
+    expect(notices).toHaveLength(1);
+    expect(notices[0].data).toMatchObject({ messageId: 'msg-q', subject: 'Which database?' });
+    expect(calls).not.toContain('reply');
+    store.close();
+  });
+
+  it('records agent-exhausted for Orca\'s quota escalation while the Goal is selected', async () => {
+    const { dir, store, runtime } = setup([{ id: 'msg-e', type: 'escalation', dispatchId: 'lead-1', subject: 'Agent hit an error: Codex hit its usage limit.', body: 'Details from the agent: You hit your usage limit.' }]);
+    await new ControllerService(store, runtime).tick(dir);
+    const notices = store.events(spec.id).filter(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'agent-exhausted');
+    expect(notices).toHaveLength(1);
+    expect(notices[0].data).toMatchObject({ role: 'lead', dispatchId: 'lead-1' });
+    store.close();
+  });
+});

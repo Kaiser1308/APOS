@@ -249,6 +249,20 @@ export class ControllerService {
       this.watchdog(goalId, result);
       results.push(result);
     }
+    for (const result of results) this.noteErrors(result);
     return results;
+  }
+
+  /** An error seen on one pass is logged; the same error on a later pass reaches the Human once, instead of repeating silently on every tick. */
+  private noteErrors(result: ControllerTick): void {
+    for (const error of new Set(result.errors)) {
+      const events = this.store.events(result.goalId);
+      if (events.some(item => item.type === 'human-notified' && (item.data as { kind?: string; error?: string }).kind === 'tick-error' && (item.data as { error?: string }).error === error)) continue;
+      if (!events.some(item => item.type === 'decision-logged' && (item.data as { tickError?: string })?.tickError === error)) {
+        this.store.append({ id: randomUUID(), goalId: result.goalId, type: 'decision-logged', data: { note: `tick error: ${error}`, tickError: error }, at: new Date().toISOString() });
+        continue;
+      }
+      this.store.append({ id: randomUUID(), goalId: result.goalId, type: 'human-notified', data: { kind: 'tick-error', goalId: result.goalId, error, note: `the controller fails the same way on every pass: ${error}. If it names an ended session, \`apos handoff ${result.goalId}\` starts a fresh agent.` }, at: new Date().toISOString() });
+    }
   }
 }

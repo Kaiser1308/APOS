@@ -342,7 +342,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   const controller = program.command('controller');
   const leasedTick = async () => {
-    const leased = await withControllerLease(options.home ?? controllerHome(repo()), () => withJournalAsync(async journal => new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime, { gate: new GateService(journal, { inspector: options.inspector, ...options.gate }), telemetry: options.telemetry ?? new CodexSessionProbe() }).tick(repo())));
+    const leased = await withControllerLease(options.home ?? controllerHome(repo()), () => withJournalAsync(async journal => new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime, { gate: new GateService(journal, { inspector: options.inspector, ...options.gate }), telemetry: options.telemetry ?? new CodexSessionProbe(), freshLead: (goalId, repoPath) => new HandoffService(journal, runtime, () => loadProfiles(home())).handoff(goalId, { kind: 'lead' }, repoPath) }).tick(repo())));
     return leased;
   };
   controller.command('tick').action(async () => {

@@ -87,6 +87,9 @@ export class OrcaRefused extends Error {
   constructor(message: string, readonly code: string) { super(message); this.name = 'OrcaRefused'; }
 }
 
+/** Orca refused because the session that owned the call has ended (its chat was closed); the call will never work, so the next step is a fresh agent. */
+export const isDeadSession = (error: unknown): boolean => error instanceof OrcaRefused ? error.code === 'session_caller_not_live' : /[session_caller_not_live]/.test(error instanceof Error ? error.message : String(error));
+
 // Orca 1.4.254 answers worker-show and worker-start with a concise view by default; APOS reads the full record.
 const fullFlag = (args: string[]): string[] => args[0] === 'orchestration' && ['worker-show', 'worker-start'].includes(args[1] ?? '') && !args.includes('--full') ? ['--full'] : [];
 

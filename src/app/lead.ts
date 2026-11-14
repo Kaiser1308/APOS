@@ -88,6 +88,8 @@ export class LeadService {
         return state.lead.current;
       }
     }
+    // The controller wakes the Lead itself once a plan is accepted; the Human has nothing to wake (and no APOS-side signal that it is "in its turn").
+    if (!['selected', 'planned', 'ready'].includes(state.status)) throw new Error(`${goalId} is ${state.status}: the controller wakes the Lead itself when there is work. If the Lead stopped responding, run \`apos handoff ${goalId}\` to start a fresh one.`);
     if (!state.lead.settled) throw new Error(`The Lead of ${goalId} is still in its turn; wait for it to report worker_done`);
     if (!['selected', 'planned', 'ready'].includes(state.status)) throw new Error(`${goalId} is ${state.status}: the controller resumes its owner itself`);
     if (!this.runtime.wakeLead) throw new Error('Configured runtime cannot wake the Lead');

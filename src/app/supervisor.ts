@@ -7,7 +7,7 @@ import { requiresIndependentReview, reviewReasons } from '../domain/reviews.js';
 import type { GateReport } from '../domain/gate.js';
 import type { GoalRepository } from '../store/journal.js';
 import { CORE_SKILL, activationLine, committedFileDigest, packageReportPath, reviewResultPath, soloReportPath } from '../runtime/brief.js';
-import { worktreePath, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
+import { isDeadSession, worktreePath, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
 import type { TelemetryProbe } from '../runtime/telemetry.js';
 import { GateService } from './gate.js';
 import { SoloService } from './solo.js';
@@ -21,7 +21,7 @@ const show = (repo: string, commit: string, path: string): string | undefined =>
   catch { return undefined; }
 };
 
-export type SupervisorOptions = { gate?: GateService; telemetry?: TelemetryProbe; now?: () => number; inspector?: CommitInspector };
+export type SupervisorOptions = { gate?: GateService; telemetry?: TelemetryProbe; now?: () => number; inspector?: CommitInspector; /** Moves the Lead to a fresh agent on its worktree (the handoff), for a wake whose session has ended. */ freshLead?: (goalId: string, repoPath: string) => Promise<unknown> };
 
 /**
  * The controller's mechanical loop for a Solo Goal after its owner settles:
@@ -493,7 +493,14 @@ export class MultiSupervisor {
     const runId = lead.runId ?? (Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.runId).find(Boolean));
     if (!runId) return [];
     // One key per Lead turn: a wake whose response was lost is recovered by it instead of starting a second fresh Lead.
-    const woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: lead.terminal, worktree: lead.worktree, runId, events: fresh, idempotencyKey: `wake-${lastDispatch ?? state.lead?.current ?? randomUUID()}`, requested: state.lead?.ref.requested as { agent?: string; model?: string } | undefined, baseCommit: state.lead?.ref.baseCommit, goalVersion: state.spec.version });
+    let woken: Awaited<ReturnType<NonNullable<RuntimeAdapter['wakeLead']>>>;
+    try { woken = await this.runtime.wakeLead({ repoPath, goalId, terminal: lead.terminal, worktree: lead.worktree, runId, events: fresh, idempotencyKey: `wake-${lastDispatch ?? state.lead?.current ?? randomUUID()}`, requested: state.lead?.ref.requested as { agent?: string; model?: string } | undefined, baseCommit: state.lead?.ref.baseCommit, goalVersion: state.spec.version }); }
+    catch (error) {
+      // The session that owned this wake has ended (chat closed): retrying cannot work. A fresh Lead takes over the worktree and finds the pending events itself.
+      if (!isDeadSession(error) || !this.options.freshLead) throw error;
+      await this.options.freshLead(goalId, repoPath);
+      return [`Lead session ended; started a fresh Lead for: ${fresh.join('; ')}`];
+    }
     this.record(goalId, 'lead-woken', { dispatchId: woken.dispatchId, events: fresh, runId, ...(woken.terminal ? { terminal: woken.terminal, worktree: lead.worktree, requested: woken.requested } : {}) });
     return [`woke Lead ${woken.dispatchId}: ${fresh.join('; ')}`];
   }

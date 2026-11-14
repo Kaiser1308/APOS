@@ -276,3 +276,28 @@ it('recovers a lost Lead dispatch with its terminal, from the Orca 1.4.255 field
   });
   expect(await runtime.recover('key-1')).toMatchObject({ runId: 'run_lead', dispatchId: 'ctx_1', terminal: 'structworker_1', worktreeId: 'wt::C:/w', baseCommit: 'a'.repeat(40) });
 });
+
+describe('the agent behind each dispatch', () => {
+  const pkg = { id: 'WP-01', goalId: 'GOAL-001', goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scan' }], integration: 'Lead verifies' };
+  const profiles = { ...DEFAULT_PROFILES, worker: { agent: 'claude' }, reviewer: { agent: 'antigravity', model: 'g1' } };
+  const fake = (tail: string[] = []) => new OrcaRuntime(args => {
+    if (args[0] === 'repo') return { repo: { id: 'repo_1' } };
+    if (args[1] === 'run-list') return { runs: [] };
+    if (args[1] === 'run-create') return { run: { id: 'run_1' } };
+    if (args[0] === 'terminal' && args[1] === 'read') return { terminal: { tail } };
+    return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', effects: [] };
+  }, () => 'a'.repeat(40), profiles, () => 'd'.repeat(64));
+
+  it('remembers the requested profile on Worker and reviewer refs', async () => {
+    expect((await fake().startPackage({ repoPath: 'C:/project', idempotencyKey: 'k', package: pkg })).requested).toEqual({ agent: 'claude' });
+    expect((await fake().startReviewer({ repoPath: 'C:/project', goalId: 'GOAL-001', baseCommit: 'b'.repeat(40), commit: 'c'.repeat(40), reasons: ['risk'], idempotencyKey: 'k', runId: 'run_1' })).requested).toEqual({ agent: 'antigravity', model: 'g1' });
+  });
+
+  it('reads the screen with the rules of the agent it names', async () => {
+    const unsent = ['─'.repeat(40), `> ${'Please read the brief file and continue. '.repeat(5)}`, '─'.repeat(40), 'auto · Gemini'];
+    expect(await fake(unsent).composerPending('term_1', 'antigravity')).toBe(true);
+    expect(await fake(unsent).composerPending('term_1', 'claude')).toBe(false);
+    expect(await fake(["[assistant] You've hit your weekly limit · resets 1am (Asia/Ho_Chi_Minh)"]).agentQuota('term_1', 'claude')).toBe("You've hit your weekly limit · resets 1am (Asia/Ho_Chi_Minh)");
+    expect(await fake(['[assistant] done']).agentQuota('term_1', 'claude')).toBeUndefined();
+  });
+});

@@ -15,6 +15,9 @@ import { SqliteStore } from '../store/sqlite.js';
 import { SoloSupervisor } from './supervisor.js';
 import { SoloService } from './solo.js';
 import { OrcaRefused, composerHasUnsentBrief } from '../runtime/orca.js';
+import { unsentBrief } from '../runtime/screens.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { approval } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -326,6 +329,24 @@ describe('stalled Codex input', () => {
     now = t0 + 280_000; expect(await supervisor.step(spec.id, dir)).toEqual(['stalled ctx_1; Human notified']);
     expect(await supervisor.step(spec.id, dir)).toEqual([]);
     expect(nudges).toHaveLength(3);
+    store.close();
+  });
+
+  it('reads the screen with the rules of the agent the owner was launched with', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'apos-stall-agy-')); dirs.push(dir);
+    const store = SqliteStore.open(join(dir, 'state.sqlite'));
+    const t0 = Date.parse('2026-11-08T00:00:00.000Z');
+    let n = 0;
+    const add = (type: GoalEventType, data?: unknown) => store.append({ id: `S-${++n}`, goalId: spec.id, type, data, at: new Date(t0).toISOString() });
+    add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved');
+    const ref: RuntimeRef = { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir, terminal: 'term_1', requested: { agent: 'antigravity' } };
+    add('dispatch-intended', 'k'); add('execution-started', ref);
+    const screen = readFileSync(join(fileURLToPath(new URL('../runtime/fixtures/screens/antigravity/unsent.txt', import.meta.url))), 'utf8').split(/\r?\n/);
+    const agents: (string | undefined)[] = [];
+    const runtime: RuntimeAdapter = { async startLead() { return ref; }, async resumeSolo() { return ref; }, async inspect() { return { state: 'live', ref }; }, async composerPending(_terminal, agent) { agents.push(agent); return unsentBrief(agent, screen); }, async nudge() {} };
+    const supervisor = new SoloSupervisor(store, runtime, { now: () => t0 + 70_000 });
+    expect(await supervisor.step(spec.id, dir)).toEqual(['nudged ctx_1 (1/3)']);
+    expect(agents).toEqual(['antigravity']);
     store.close();
   });
 

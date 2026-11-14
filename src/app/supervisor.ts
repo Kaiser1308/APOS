@@ -83,7 +83,7 @@ export class SoloSupervisor {
       if (overTime && !noticed) { this.record(goalId, 'human-notified', { kind: 'overrun', goalId, note: 'owner still running past the approved wall time' }); actions.push('notified overrun'); }
       const since = [...this.store.events(goalId)].reverse().find(item => ['execution-started', 'runtime-resumed'].includes(item.type));
       actions.push(...await this.noticeIdleOwner(goalId, ref));
-      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at }));
+      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at, requested: ref.requested }));
       return actions;
     }
     if (state.reviewDispatch) return this.collectReview(state, repoPath, actions);
@@ -164,7 +164,7 @@ export class SoloSupervisor {
     this.record(goalId, 'review-intended', { key, commit: head });
     try {
       const reviewer = await this.runtime.startReviewer!({ repoPath, goalId, baseCommit: ref.baseCommit!, commit: head, reasons, idempotencyKey: key, runId: ref.runId });
-      this.record(goalId, 'review-dispatched', { dispatchId: reviewer.dispatchId, runId: reviewer.runId, key, commit: head, worktreeId: reviewer.worktreeId, terminal: reviewer.terminal });
+      this.record(goalId, 'review-dispatched', { dispatchId: reviewer.dispatchId, runId: reviewer.runId, key, commit: head, worktreeId: reviewer.worktreeId, terminal: reviewer.terminal, requested: reviewer.requested });
       actions.push(`reviewer ${reviewer.dispatchId}: ${reasons.join('; ')}`);
     } catch (error) {
       actions.push(`reviewer start outcome unknown, will recover by key: ${error instanceof Error ? error.message : String(error)}`);
@@ -211,7 +211,7 @@ export class SoloSupervisor {
     if (!observation.outcome) {
       // Seen live: the reviewer's brief sat in the composer like the owner's did.
       const since = [...this.store.events(goalId)].reverse().find(item => item.type === 'review-dispatched');
-      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at }));
+      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at, requested: pending.requested }));
       return actions;
     }
     await this.recordTelemetry(state, { dispatchId: pending.dispatchId, worktreeId: pending.worktreeId } as RuntimeRef, 'reviewer');
@@ -251,16 +251,22 @@ export class SoloSupervisor {
   }
 }
 
+/** The agent a dispatch runs: the profile APOS asked for, else what Orca says it launched; undefined when neither says. */
+export async function dispatchAgent(runtime: RuntimeAdapter, dispatchId: string, requested?: { agent?: string }): Promise<string | undefined> {
+  if (requested?.agent) return requested.agent;
+  try { return (await runtime.launchReceipt?.(dispatchId))?.agent ?? undefined; } catch { return undefined; }
+}
+
 /**
  * Seen live with Codex in Orca: a brief pasted but never submitted, for owners, resumes and reviewers.
  * Orca never resends, so the controller owns this: from one quiet minute on, while the screen shows an
  * unsent brief, press Enter up to three times a minute apart; then the Human is told. An agent that is
  * visibly working is never reported.
  */
-export async function unstickDispatch(store: GoalRepository, runtime: RuntimeAdapter, now: () => number, input: { goalId: string; dispatchId: string; terminal?: string; since?: string }): Promise<string[]> {
+export async function unstickDispatch(store: GoalRepository, runtime: RuntimeAdapter, now: () => number, input: { goalId: string; dispatchId: string; terminal?: string; since?: string; requested?: { agent?: string } }): Promise<string[]> {
   if (!runtime.nudge || !input.terminal || !input.since) return [];
   if (now() - Date.parse(input.since) < 60_000) return [];
-  const pending = runtime.composerPending ? await runtime.composerPending(input.terminal) : await runtime.inputStalled?.(input.dispatchId);
+  const pending = runtime.composerPending ? await runtime.composerPending(input.terminal, await dispatchAgent(runtime, input.dispatchId, input.requested)) : await runtime.inputStalled?.(input.dispatchId);
   if (!pending) return [];
   const marker = `nudge ${input.dispatchId}`;
   const events = store.events(input.goalId);
@@ -331,7 +337,7 @@ export class MultiSupervisor {
       const attemptKey = `${item.spec.id}@${item.spec.version}:${item.attempts}`;
       if (!outcome) {
         const since = [...this.store.events(goalId)].reverse().find(event => ['package-started', 'package-resumed'].includes(event.type) && JSON.stringify(event.data ?? '').includes(ref.dispatchId));
-        actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at }));
+        actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: ref.dispatchId, terminal: ref.terminal, since: since?.at, requested: ref.requested }));
         continue;
       }
       if (item.gate?.attemptKey === attemptKey) continue;
@@ -420,7 +426,7 @@ export class MultiSupervisor {
     this.record(goalId, 'review-intended', { key, commit });
     try {
       const reviewer = await this.runtime.startReviewer!({ repoPath, goalId, baseCommit: state.proposal.baseCommit, commit, reasons: reviewReasons(state), idempotencyKey: key, runId });
-      this.record(goalId, 'review-dispatched', { dispatchId: reviewer.dispatchId, runId: reviewer.runId, key, commit, worktreeId: reviewer.worktreeId, terminal: reviewer.terminal });
+      this.record(goalId, 'review-dispatched', { dispatchId: reviewer.dispatchId, runId: reviewer.runId, key, commit, worktreeId: reviewer.worktreeId, terminal: reviewer.terminal, requested: reviewer.requested });
       actions.push(`Goal reviewer ${reviewer.dispatchId} on ${commit}`);
     } catch (error) {
       actions.push(`Goal reviewer start outcome unknown, will recover by key: ${error instanceof Error ? error.message : String(error)}`);
@@ -456,7 +462,7 @@ export class MultiSupervisor {
     const observation = await this.runtime.inspect({ runId: pending.runId, taskId: '', dispatchId: pending.dispatchId, owner: 'lead', repoPath });
     if (!observation.outcome) {
       const since = [...this.store.events(goalId)].reverse().find(item => item.type === 'review-dispatched');
-      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at }));
+      actions.push(...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: pending.dispatchId, terminal: pending.terminal, since: since?.at, requested: pending.requested }));
       return actions;
     }
     const head = await this.runtime.deliveryHead?.({ worktreeId: pending.worktreeId, dispatchId: pending.dispatchId });
@@ -491,7 +497,7 @@ export class MultiSupervisor {
     const lastDispatch = (lastWake?.data as { dispatchId?: string } | undefined)?.dispatchId;
     if (lastDispatch) {
       const observation = await this.runtime.inspect({ runId: lead.runId ?? '', taskId: '', dispatchId: lastDispatch, owner: 'lead', repoPath });
-      if (!observation.outcome) return [...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: lastDispatch, terminal: lead.terminal, since: lastWake!.at }), `Lead busy; holding ${fresh.length} event(s)`];
+      if (!observation.outcome) return [...await unstickDispatch(this.store, this.runtime, this.now, { goalId, dispatchId: lastDispatch, terminal: lead.terminal, since: lastWake!.at, requested: state.lead?.ref.requested as { agent?: string } | undefined }), `Lead busy; holding ${fresh.length} event(s)`];
       // Orca keeps the terminal bound to a settled dispatch until it is retained, and refuses the next wake (seen live:
       // agent_unconfigured). The Lead's dispatches live on its own Run, which the inbox does not read, so retain here.
       await this.runtime.retainWorker?.(lastDispatch);

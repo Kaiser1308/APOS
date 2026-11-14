@@ -43,7 +43,7 @@ export type GoalState = {
   postMergeGate?: GateReport;
   findings?: Finding[];
   /** Reviewer session the controller started for the current gated commit. */
-  reviewDispatch?: { dispatchId: string; runId: string; key: string; commit: string; worktreeId?: string; terminal?: string };
+  reviewDispatch?: { dispatchId: string; runId: string; key: string; commit: string; worktreeId?: string; terminal?: string; requested?: { agent: string; model?: string; effort?: string } };
   /** A reviewer start whose Orca outcome is not yet known; recovered by its dispatch key. */
   reviewIntent?: { key: string; commit: string; at: string };
   telemetry?: Telemetry[];

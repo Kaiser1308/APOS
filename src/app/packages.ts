@@ -5,8 +5,9 @@ import type { PackageBlocker } from '../domain/transitions.js';
 
 import { OrcaRefused } from '../runtime/orca.js';
 import type { GoalRepository } from '../store/journal.js';
+import type { RuntimeProfile } from '../runtime/brief.js';
 
-export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string };
+export type PackageRuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'worker'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string; requested?: RuntimeProfile };
 export interface PackageRuntime {
   /** `dependencyCommits`: the verified commits of the package's dependencies; its worktree must start from them. */
   startPackage(input: { package: WorkPackageSpec; repoPath: string; idempotencyKey: string; dependencyCommits?: string[] }): Promise<PackageRuntimeRef>;

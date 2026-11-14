@@ -5,13 +5,13 @@ import { join } from 'node:path';
 import type { PhaseCheckpoint } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntimeRef } from '../app/packages.js';
-import { SCREENS } from './screens.js';
+import { SCREENS, quotaMessage, unsentBrief } from './screens.js';
 import { DEFAULT_PROFILES, committedFileDigest, leadWakeBrief, oneLine, packageBrief, packageReportPath, parseRepoMarker, repoMarker, repairBrief, reviewBrief, leadBrief, type Budget, type Role, type RuntimeProfile, type RuntimeProfiles } from './brief.js';
 
 export type RuntimeRef = { runId: string; taskId: string; dispatchId: string; owner: 'lead'; repoPath: string; terminal?: string; worktreeId?: string; baseCommit?: string; requested?: RuntimeProfile };
 /** What Orca says actually launched; compared with the requested profile. */
 export type LaunchReceipt = { agent?: string; model?: string | null; effort?: string | null };
-export type ReviewerRef = { runId: string; taskId: string; dispatchId: string; owner: 'reviewer'; repoPath: string; terminal?: string; worktreeId?: string; key: string; commit: string };
+export type ReviewerRef = { runId: string; taskId: string; dispatchId: string; owner: 'reviewer'; repoPath: string; terminal?: string; worktreeId?: string; key: string; commit: string; requested?: RuntimeProfile };
 /** `idleMinutes`: how long Orca says the agent has been idle (worker-show `activity` + `lastActivity`), when it says. */
 export type RuntimeObservation = { state: 'live' | 'settled' | 'unverifiable'; outcome?: 'completed' | 'failed'; idleMinutes?: number; ref: RuntimeRef };
 export type OrcaMessage = { id: string; type: string; subject?: string; body?: string; payload?: unknown; dispatch_id?: string; dispatchId?: string };
@@ -38,7 +38,9 @@ export interface RuntimeAdapter {
    * Reads the agent terminal: true when a brief sits unsubmitted in the composer and the agent is not
    * working. Orca's own stage was wrong both ways in the SQLFMT pilot, so the screen is the evidence.
    */
-  composerPending?(terminal: string): Promise<boolean>;
+  composerPending?(terminal: string, agent?: string): Promise<boolean>;
+  /** The agent's own out-of-quota line on its screen, read with that agent's rules (`screens.ts`). */
+  agentQuota?(terminal: string, agent?: string): Promise<string | undefined>;
   /** Presses Enter once in the owner's terminal. */
   nudge?(terminal: string): Promise<void>;
   startReviewer?(input: { repoPath: string; goalId: string; baseCommit: string; commit: string; reasons: string[]; idempotencyKey: string; runId: string }): Promise<ReviewerRef>;
@@ -249,10 +251,11 @@ export class OrcaRuntime implements RuntimeAdapter {
     const runId = await this.packageRun(input.repoPath, item.goalId, item.goalVersion);
     this.execute(['orchestration', 'run-use', '--id', runId]);
     const spec = packageBrief({ repoPath: input.repoPath, goalId: item.goalId, baseCommit, idempotencyKey: input.idempotencyKey, packageId: item.id, version: item.version, owner: item.owner, outcome: item.outcome, attempt: 1, digest: path => this.fileDigest(input.repoPath, baseCommit, path) });
-    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', baseCommit, '--name', `apos-${item.goalId.toLowerCase()}-${item.id.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, ...launchArgs(this.profile('worker')), '--run', runId]);
+    const requested = this.profile('worker');
+    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', baseCommit, '--name', `apos-${item.goalId.toLowerCase()}-${item.id.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, ...launchArgs(requested), '--run', runId]);
     const ref = extractStartedRef(started, input.repoPath);
     if (ref.runId !== runId) throw new Error('Orca Worker belongs to an unexpected Run');
-    return { ...ref, owner: 'worker', baseCommit };
+    return { ...ref, owner: 'worker', baseCommit, requested };
   }
 
   async inspectPackage(ref: PackageRuntimeRef): Promise<'completed' | 'failed' | 'live' | 'unverifiable'> {
@@ -361,9 +364,17 @@ export class OrcaRuntime implements RuntimeAdapter {
     return ['dispatched', 'pending'].includes(String(dispatch.status)) && !dispatch.lastHeartbeatAt && ['input_accepted', 'turn_start_unobserved'].includes(String(worker.stage));
   }
 
-  async composerPending(terminal: string): Promise<boolean> {
+  private screen(terminal: string): string[] {
     const tail = object(this.execute(['terminal', 'read', '--terminal', terminal]).terminal).tail;
-    return composerHasUnsentBrief(Array.isArray(tail) ? tail.map(String) : []);
+    return Array.isArray(tail) ? tail.map(String) : [];
+  }
+
+  async composerPending(terminal: string, agent?: string): Promise<boolean> {
+    return unsentBrief(agent, this.screen(terminal));
+  }
+
+  async agentQuota(terminal: string, agent?: string): Promise<string | undefined> {
+    return quotaMessage(agent, this.screen(terminal));
   }
 
   async nudge(terminal: string): Promise<void> {
@@ -381,9 +392,10 @@ export class OrcaRuntime implements RuntimeAdapter {
     this.execute(['orchestration', 'run-use', '--id', input.runId]);
     // Pin the reviewer skill at the base commit: the delivery under review must not choose its reviewer's rules.
     const spec = reviewBrief({ repoPath: input.repoPath, goalId: input.goalId, baseCommit: input.baseCommit, idempotencyKey: input.idempotencyKey, commit: input.commit, reasons: input.reasons, digest: path => this.fileDigest(input.repoPath, input.baseCommit, path) });
-    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', input.commit, '--name', `apos-review-${input.goalId.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, ...launchArgs(this.profile('reviewer')), '--run', input.runId]);
+    const requested = this.profile('reviewer');
+    const started = this.execute(['orchestration', 'worker-start', '--spec', spec, '--worktree', 'new-top-level', '--repo', `path:${input.repoPath}`, '--base-branch', input.commit, '--name', `apos-review-${input.goalId.toLowerCase()}-${input.idempotencyKey.slice(0, 8)}`, ...launchArgs(requested), '--run', input.runId]);
     const ref = extractStartedRef(started, input.repoPath);
-    return { ...ref, owner: 'reviewer', key: input.idempotencyKey, commit: input.commit };
+    return { ...ref, owner: 'reviewer', key: input.idempotencyKey, commit: input.commit, requested };
   }
 
   async wakeLead(input: { repoPath: string; goalId: string; terminal: string; worktree: string; runId: string; events: string[]; idempotencyKey: string; phase?: 'plan' | 'multi' }): Promise<{ dispatchId: string }> {

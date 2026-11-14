@@ -35,47 +35,58 @@
   <text class="f" x="600" y="188" text-anchor="middle" font-size="30" font-weight="600" fill="#f1f5f9">Let AI agents build. <tspan fill="#fb923c">Keep the proof.</tspan></text>
   <text class="f" x="600" y="220" text-anchor="middle" font-size="14" font-weight="500" letter-spacing="5" fill="#94a3b8">AI PROJECT ORCHESTRATION SYSTEM</text>
 
-  <!-- connectors -->
+  <path d="M70 246 H346" stroke="#f59e0b" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round"/>
+  <!-- flow connectors -->
   <g stroke-width="2.5" fill="none" stroke-linecap="round">
-    <line class="flow" x1="178" y1="310" x2="322" y2="310" stroke="#f59e0b"/>
-    <line class="flow" x1="408" y1="310" x2="552" y2="310" stroke="#8b5cf6"/>
-    <line class="flow" x1="648" y1="310" x2="782" y2="310" stroke="#22d3ee"/>
-    <line class="flow" x1="868" y1="310" x2="1012" y2="310" stroke="#34d399"/>
+    <line x1="148" y1="318" x2="268" y2="318" stroke="#f59e0b" stroke-opacity="0.9" stroke-dasharray="6 8"/>
+    <path d="M158 311 L148 318 L158 325 M258 311 L268 318 L258 325" stroke="#f59e0b" stroke-width="2.5"/>
+    <line class="flow" x1="344" y1="318" x2="464" y2="318" stroke="#38bdf8"/>
+    <line class="flow" x1="540" y1="318" x2="660" y2="318" stroke="#8b5cf6"/>
+    <line class="flow" x1="736" y1="318" x2="856" y2="318" stroke="#34d399"/>
+    <line class="flow" x1="932" y1="318" x2="1052" y2="318" stroke="#f472b6"/>
   </g>
-  <!-- feedback: evidence back to the human -->
-  <path d="M1100 342 C1100 392 1100 398 1060 398 L140 398 C100 398 100 392 100 346" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1.5" stroke-dasharray="3 6"/>
-  <text class="f blink" x="600" y="392" text-anchor="middle" font-size="12" letter-spacing="3" fill="#cbd5e1">OUTCOME + EVIDENCE · APPEND-ONLY HASH-CHAINED LOG</text>
-
-  <!-- nodes -->
+  <g fill="#94a3b8" font-size="10" class="f" text-anchor="middle" letter-spacing="1">
+    <text x="208" y="308" fill="#fcd34d">DECIDE GOALS</text>
+    <text x="404" y="308">APPROVED GOAL</text>
+    <text x="600" y="308">PLAN</text>
+    <text x="796" y="308">CHANGES</text>
+    <text x="992" y="308">VERDICT</text>
+  </g>
+  <g stroke="#22d3ee" stroke-opacity="0.55" stroke-width="1.5" stroke-dasharray="3 4">
+    <line x1="110" y1="354" x2="110" y2="374"/>
+    <line x1="306" y1="354" x2="306" y2="374"/>
+    <line x1="502" y1="354" x2="502" y2="374"/>
+    <line x1="698" y1="354" x2="698" y2="374"/>
+    <line x1="894" y1="354" x2="894" y2="374"/>
+    <line x1="1090" y1="354" x2="1090" y2="374"/>
+  </g>
+  <rect x="70" y="374" width="1080" height="42" rx="21" fill="#22d3ee" fill-opacity="0.10" stroke="#22d3ee" stroke-width="2"/>
+  <g class="f" text-anchor="middle"><text x="610" y="400" font-size="13" font-weight="700" letter-spacing="2" fill="#67e8f9">&#9672; CONTROLLER  <tspan fill="#cbd5e1" font-weight="500">no LLM · runs every gate itself · append-only hash-chained log</tspan></text></g>
   <g class="f" text-anchor="middle">
-    <circle cx="140" cy="310" r="34" fill="#f59e0b" fill-opacity="0.14" stroke="#f59e0b" stroke-width="2"/>
-    <text x="140" y="318" font-size="24" fill="#f59e0b">&#9679;</text>
-    <text x="140" y="270" font-size="15" font-weight="700" fill="#f1f5f9">HUMAN</text>
-
-    <circle cx="365" cy="310" r="34" fill="#8b5cf6" fill-opacity="0.14" stroke="#8b5cf6" stroke-width="2"/>
-    <text x="365" y="318" font-size="24" fill="#a78bfa">&#9670;</text>
-    <text x="365" y="270" font-size="15" font-weight="700" fill="#f1f5f9">LEAD</text>
-
-    <circle class="pulse" cx="600" cy="310" r="40" fill="none" stroke="#22d3ee" stroke-width="2"/>
-    <circle cx="600" cy="310" r="40" fill="#22d3ee" fill-opacity="0.18" stroke="#22d3ee" stroke-width="2.5"/>
-    <text x="600" y="319" font-size="26" fill="#22d3ee">&#9672;</text>
-    <text x="600" y="258" font-size="15" font-weight="700" fill="#f1f5f9">CONTROLLER</text>
-
-    <circle cx="825" cy="310" r="34" fill="#34d399" fill-opacity="0.14" stroke="#34d399" stroke-width="2"/>
-    <text x="825" y="318" font-size="24" fill="#34d399">&#9638;</text>
-    <text x="825" y="270" font-size="15" font-weight="700" fill="#f1f5f9">OWNER</text>
-
-    <circle cx="1060" cy="310" r="34" fill="#f472b6" fill-opacity="0.14" stroke="#f472b6" stroke-width="2"/>
-    <text x="1060" y="318" font-size="24" fill="#f472b6">&#10003;</text>
-    <text x="1060" y="270" font-size="15" font-weight="700" fill="#f1f5f9">REVIEWER</text>
-
-    <!-- captions under nodes -->
-    <g font-size="12" fill="#94a3b8">
-      <text x="140" y="360">decides WHAT</text>
-      <text x="365" y="360">decides HOW</text>
-      <text x="600" y="360" fill="#67e8f9" font-weight="600">no LLM · checks everything</text>
-      <text x="825" y="360">own worktree</text>
-      <text x="1060" y="360">independent session</text>
-    </g>
+    <circle cx="110" cy="318" r="34" fill="#f59e0b" fill-opacity="0.14" stroke="#f59e0b" stroke-width="2"/>
+    <text x="110" y="326" font-size="24" fill="#f59e0b">&#9679;</text>
+    <text x="110" y="264" font-size="15" font-weight="700" fill="#f1f5f9">HUMAN</text>
+    <text x="110" y="281" font-size="12" fill="#94a3b8">decides WHAT</text>
+    <circle cx="306" cy="318" r="34" fill="#38bdf8" fill-opacity="0.14" stroke="#38bdf8" stroke-width="2"/>
+    <text x="306" y="326" font-size="24" fill="#38bdf8">&#9998;</text>
+    <text x="306" y="264" font-size="15" font-weight="700" fill="#f1f5f9">PM</text>
+    <text x="306" y="281" font-size="12" fill="#94a3b8">agent · drafts Goals</text>
+    <circle cx="502" cy="318" r="34" fill="#8b5cf6" fill-opacity="0.14" stroke="#8b5cf6" stroke-width="2"/>
+    <text x="502" y="326" font-size="24" fill="#8b5cf6">&#9670;</text>
+    <text x="502" y="264" font-size="15" font-weight="700" fill="#f1f5f9">LEAD</text>
+    <text x="502" y="281" font-size="12" fill="#94a3b8">decides HOW</text>
+    <circle cx="698" cy="318" r="34" fill="#34d399" fill-opacity="0.14" stroke="#34d399" stroke-width="2"/>
+    <text x="698" y="326" font-size="24" fill="#34d399">&#9638;</text>
+    <text x="698" y="264" font-size="15" font-weight="700" fill="#f1f5f9">OWNER</text>
+    <text x="698" y="281" font-size="12" fill="#94a3b8">builds in own worktree</text>
+    <circle cx="894" cy="318" r="34" fill="#f472b6" fill-opacity="0.14" stroke="#f472b6" stroke-width="2"/>
+    <text x="894" y="326" font-size="24" fill="#f472b6">&#10003;</text>
+    <text x="894" y="264" font-size="15" font-weight="700" fill="#f1f5f9">REVIEWER</text>
+    <text x="894" y="281" font-size="12" fill="#94a3b8">independent session</text>
+    <circle class="pulse" cx="1090" cy="318" r="34" fill="none" stroke="#f59e0b" stroke-width="2"/>
+    <circle cx="1090" cy="318" r="34" fill="#f59e0b" fill-opacity="0.14" stroke="#f59e0b" stroke-width="2"/>
+    <text x="1090" y="326" font-size="24" fill="#f59e0b">&#9679;</text>
+    <text x="1090" y="264" font-size="15" font-weight="700" fill="#f1f5f9">HUMAN</text>
+    <text x="1090" y="281" font-size="12" fill="#94a3b8">outcome + merge</text>
   </g>
 </svg>

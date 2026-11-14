@@ -47,6 +47,8 @@ export function parseCodex(raw: string): Activity[] {
   const out: Activity[] = [];
   for (const row of lines(raw)) {
     const r = obj(row), p = obj(r.payload), at = typeof r.timestamp === 'string' ? r.timestamp : '';
+    // A turn that ended in an error (usage limit, unknown model) leaves only this row; without it the session looks as if it never ran.
+    if (r.type === 'event_msg' && p.type === 'task_complete' && at && obj(p.error).message) { out.push(item(at, 'error', asText(obj(p.error).message))); continue; }
     if (r.type !== 'response_item' || !at) continue;
     if (p.type === 'message' && p.role === 'assistant') { const text = asText(p.content).trim(); if (text) out.push(item(at, 'say', text)); }
     else if (p.type === 'custom_tool_call' || p.type === 'function_call') {

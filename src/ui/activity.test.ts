@@ -137,3 +137,18 @@ it('ships page script that parses (a stray quote once blanked the whole page)', 
   expect(script.length).toBeGreaterThan(1000);
   expect(() => new Function(script)).not.toThrow();
 });
+
+it('shows a Codex session that ended in an error at start instead of "no transcript" (GitHub #6)', async () => {
+  const d = await dispatched();
+  const root = mkdtempSync(join(tmpdir(), 'apos-ui-err-')); dirs.push(root);
+  const day = new Date(d.startedAt);
+  const codexDir = join(root, 'codex', String(day.getFullYear()), String(day.getMonth() + 1).padStart(2, '0'), String(day.getDate()).padStart(2, '0'));
+  mkdirSync(codexDir, { recursive: true });
+  const at = new Date(d.startedAt + 3000).toISOString();
+  writeFileSync(join(codexDir, 'rollout-err.jsonl'),
+    row({ timestamp: new Date(d.startedAt + 1000).toISOString(), type: 'session_meta', payload: { cwd: wt(d.dir) } }) +
+    row({ timestamp: at, type: 'event_msg', payload: { type: 'task_complete', error: { message: 'You’ve hit your usage limit. Upgrade to Pro.', codex_error_info: 'usage_limit_exceeded' } } }));
+  const reply = readActivity(d.events, 'disp-w', undefined, { codex: join(root, 'codex'), claude: join(root, 'none') })!;
+  expect(reply.found).toBe(true);
+  expect(reply.items).toEqual([expect.objectContaining({ kind: 'error', text: expect.stringContaining('usage limit') })]);
+});

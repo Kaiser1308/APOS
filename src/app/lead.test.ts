@@ -36,6 +36,8 @@ class FakeOrca implements RuntimeAdapter, PackageRuntime {
   async resumeSolo(): Promise<RuntimeRef> { this.calls.push('resumeSolo'); return leadRef(); }
   async recover(): Promise<RuntimeRef | undefined> { this.calls.push('recover'); return this.recovered; }
   async inspect(ref: RuntimeRef): Promise<RuntimeObservation> { this.calls.push(`inspect:${ref.dispatchId}`); return { ...this.observation, ref }; }
+  replies: { runId: string; messageId: string; body: string }[] = [];
+  async replyMessage(runId: string, messageId: string, body: string) { this.replies.push({ runId, messageId, body }); }
   async retainWorker(dispatchId: string) { this.calls.push(`retain:${dispatchId}`); }
   async wakeLead(input: { terminal: string; worktree: string; events: string[]; phase?: 'plan' | 'multi' }) { this.wakes.push(input); return { dispatchId: `wake_${this.wakes.length}` }; }
   async startPackage(): Promise<never> { throw new Error('no packages'); }
@@ -106,6 +108,17 @@ describe('a Lead that ends its turn before its plan is accepted (Q4)', () => {
     expect(orca.wakes[0]).toMatchObject({ terminal: 'term_lead', worktree: 'id:repo::C:/lead-wt', phase: 'plan' });
     expect(orca.wakes[0].events[0]).toMatch(/appetite raised to 300 min/);
     expect(store.getGoal(spec.id)?.lead).toMatchObject({ current: 'wake_1', settled: undefined });
+    await expect(service.wake(spec.id, dir, 'again')).rejects.toThrow(/still in its turn/);
+    store.close();
+  });
+
+  it('answers the pending Lead question with lead wake instead of refusing (GitHub #3)', async () => {
+    const { store, add, orca, service, dir } = fixture();
+    await service.start(spec.id, dir);
+    add('human-notified', { kind: 'lead-question', goalId: spec.id, messageId: 'msg-q', subject: 'Which database?' });
+    expect(await service.wake(spec.id, dir, 'use sqlite')).toBe('lead_1');
+    expect(orca.replies).toEqual([{ runId: 'run_lead', messageId: 'msg-q', body: 'use sqlite' }]);
+    expect(orca.wakes).toEqual([]);
     await expect(service.wake(spec.id, dir, 'again')).rejects.toThrow(/still in its turn/);
     store.close();
   });

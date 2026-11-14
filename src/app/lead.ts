@@ -76,6 +76,18 @@ export class LeadService {
   async wake(goalId: string, repoPath: string, note: string): Promise<string> {
     const state = this.store.getGoal(goalId);
     if (!state?.lead) throw new Error(`No APOS-dispatched Lead for ${goalId}`);
+    if (!state.lead.settled) {
+      // A Lead waiting on an unanswered question is still "in its turn", yet it is waiting for the Human: reply on Orca.
+      const events = this.store.events(goalId);
+      const answered = new Set(events.filter(item => item.type === 'decision-logged').map(item => (item.data as { answers?: string })?.answers));
+      const question = [...events].reverse().find(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'lead-question' && !answered.has((item.data as { messageId?: string }).messageId));
+      const messageId = (question?.data as { messageId?: string } | undefined)?.messageId;
+      if (messageId && this.runtime.replyMessage) {
+        await this.runtime.replyMessage(state.lead.ref.runId, messageId, note);
+        this.record(goalId, 'decision-logged', { note: `human answered Lead question ${messageId}: ${note}`, answers: messageId });
+        return state.lead.current;
+      }
+    }
     if (!state.lead.settled) throw new Error(`The Lead of ${goalId} is still in its turn; wait for it to report worker_done`);
     if (!['selected', 'planned', 'ready'].includes(state.status)) throw new Error(`${goalId} is ${state.status}: the controller resumes its owner itself`);
     if (!this.runtime.wakeLead) throw new Error('Configured runtime cannot wake the Lead');

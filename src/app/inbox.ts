@@ -17,7 +17,11 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
     if (state.status === 'verified') items.push({ goalId, kind: 'awaiting-outcome', detail: `gate ${state.gate?.result} on ${state.gate?.deliveryCommit}`, at: lastOf('verified') ?? events.at(-1)?.at });
     // A notice about a closed or stopped Goal is history, and the supervisor's `awaiting-outcome` notice repeats the verified status item above.
     if (state.status === 'closed' || state.status === 'stopped') continue;
+    const answered = new Set(events.filter(item => item.type === 'decision-logged').map(item => (item.data as { answers?: string } | null)?.answers).filter(Boolean));
     for (const notice of events.filter(item => item.type === 'human-notified')) {
+      const data = notice.data as { kind?: unknown; messageId?: string } | null;
+      // A Lead question the Human has already answered is history.
+      if (data?.kind === 'lead-question' && data.messageId && answered.has(data.messageId)) continue;
       if (state.status === 'verified' && (notice.data as { kind?: unknown } | null)?.kind === 'awaiting-outcome') continue;
       items.push({ goalId, kind: 'notice', detail: JSON.stringify(notice.data), at: notice.at });
     }

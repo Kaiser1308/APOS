@@ -53,3 +53,13 @@ it('shows which agent and model the Lead runs on when a Goal is selected (GitHub
   expect(text).toMatch(/Lead runs on codex model=gpt-6\.1-terra \(default\)/);
   expect(text.indexOf('Lead runs on')).toBeLessThan(text.indexOf('Dispatched Lead'));
 });
+
+it('rejects a --model that cannot be a model id, and accepts a normal one (GitHub #4)', async () => {
+  const { invoke, output } = await project();
+  await expect(invoke('profile', 'set', 'lead', '--agent', 'claude', '--model', 'opus 4')).rejects.toThrow(/not a model id/);
+  await expect(invoke('profile', 'set', 'lead', '--agent', 'claude', '--model', '--bad')).rejects.toThrow();
+  await invoke('profile', 'set', 'lead', '--agent', 'claude', '--model', 'claude-opus-5-5');
+  output.length = 0;
+  await invoke('profile', 'show');
+  expect(output.join('\n')).toMatch(/lead: claude model=claude-opus-5-5/);
+});

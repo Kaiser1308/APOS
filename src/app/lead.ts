@@ -80,7 +80,9 @@ export class LeadService {
       // A Lead waiting on an unanswered question is still "in its turn", yet it is waiting for the Human: reply on Orca.
       const events = this.store.events(goalId);
       const answered = new Set(events.filter(item => item.type === 'decision-logged').map(item => (item.data as { answers?: string })?.answers));
-      const question = [...events].reverse().find(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'lead-question' && !answered.has((item.data as { messageId?: string }).messageId));
+      // Only a question asked since the Lead's latest start or wake is still open; older ones were overtaken.
+      const since = events.map((item, index) => ['lead-started', 'lead-woken'].includes(item.type) ? index : -1).reduce((a, b) => Math.max(a, b), -1);
+      const question = [...events].slice(since + 1).reverse().find(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'lead-question' && !answered.has((item.data as { messageId?: string }).messageId));
       const messageId = (question?.data as { messageId?: string } | undefined)?.messageId;
       if (messageId && this.runtime.replyMessage) {
         await this.runtime.replyMessage(state.lead.ref.runId, messageId, note);

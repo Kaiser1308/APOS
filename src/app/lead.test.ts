@@ -123,6 +123,16 @@ describe('a Lead that ends its turn before its plan is accepted (Q4)', () => {
     store.close();
   });
 
+  it('does not answer a question the Lead asked before its latest wake (stale question)', async () => {
+    const { store, add, orca, service, dir } = fixture();
+    await service.start(spec.id, dir);
+    add('human-notified', { kind: 'lead-question', goalId: spec.id, messageId: 'msg-old', subject: 'old' });
+    add('lead-woken', { dispatchId: 'lead_2', events: [] });
+    await expect(service.wake(spec.id, dir, 'hello')).rejects.toThrow(/still in its turn/);
+    expect(orca.replies).toEqual([]);
+    store.close();
+  });
+
   it('reports a Lead idle past the quiet spell once, and a planning phase past the wall time once (F3, F12)', async () => {
     let now = Date.parse('2026-11-14T00:00:00.000Z');
     const { store, orca, service, dir } = fixture(() => now);

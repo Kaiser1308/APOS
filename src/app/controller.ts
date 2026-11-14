@@ -43,7 +43,8 @@ export class ControllerService {
         // "keep working" reply would reach an agent that cannot answer.
         const quota = quotaEscalation(message);
         const payloadDispatch = message.payload && typeof message.payload === 'object' ? (message.payload as { dispatchId?: unknown }).dispatchId : undefined;
-        const quotaDispatch = message.dispatchId ?? message.dispatch_id ?? (typeof payloadDispatch === 'string' ? payloadDispatch : undefined);
+        // Orca does not always name the dispatch; while planning the Lead is the only agent that could have asked.
+        const quotaDispatch = message.dispatchId ?? message.dispatch_id ?? (typeof payloadDispatch === 'string' ? payloadDispatch : planning ? state.lead?.current : undefined);
         const owner = quota && quotaDispatch ? ownerOf(this.store.getGoal(goalId)!, quotaDispatch) : undefined;
         if (quota && quotaDispatch && owner) {
           const agent = await dispatchAgent(this.runtime, quotaDispatch, owner.requested);

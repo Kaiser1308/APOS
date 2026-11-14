@@ -117,6 +117,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   };
   /** Writes a role profile for the Human, warning about an agent APOS has no screen rules for. */
   const applyProfile = (roles: Role[], change: { agent: string; model?: string; effort?: string }) => {
+    if (change.model !== undefined && (!change.model.trim() || /\s/.test(change.model) || change.model.startsWith('-'))) throw new Error(`--model "${change.model}" is not a model id (no spaces, not starting with a dash); check the exact id in the agent's own model list`);
     setProfile(home(), roles, change);
     if (!(KNOWN_AGENTS as readonly string[]).includes(change.agent)) write(`warning: ${change.agent} is not a known agent (${KNOWN_AGENTS.join(', ')}); Orca must accept it, and its screen is read with every rule set`);
   };

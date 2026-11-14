@@ -6,7 +6,7 @@ import { attemptLimit, handingOff } from '../domain/transitions.js';
 import { requiresIndependentReview, reviewReasons } from '../domain/reviews.js';
 import type { GateReport } from '../domain/gate.js';
 import type { GoalRepository } from '../store/journal.js';
-import { CORE_SKILL, activationLine, committedFileDigest, packageReportPath, reviewResultPath, soloReportPath } from '../runtime/brief.js';
+import { CORE_SKILL, aposCommand, activationLine, committedFileDigest, packageReportPath, reviewResultPath, soloReportPath } from '../runtime/brief.js';
 import { isDeadSession, worktreePath, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
 import type { TelemetryProbe } from '../runtime/telemetry.js';
 import { GateService } from './gate.js';
@@ -353,7 +353,7 @@ export class MultiSupervisor {
     // Derived from the recorded review, not from the tick that read it: a wake Orca refuses is retried.
     const verdict = state.gate && !state.integration ? [...state.reviews].reverse().find(item => item.subject === 'goal' && item.commitRef.toLowerCase() === state!.gate!.deliveryCommit.toLowerCase()) : undefined;
     if (verdict) events.push(verdict.result === 'pass'
-      ? `Goal review passed on ${verdict.commitRef}: submit the acceptance evidence and run "apos integration complete ${goalId} --file <json>" for that commit`
+      ? `Goal review passed on ${verdict.commitRef}: submit the acceptance evidence and run ${aposCommand(repoPath)} integration complete ${goalId} --file <json> for that commit`
       : `Goal review requested changes on ${verdict.commitRef}: ${verdict.note}`);
     const packages = Object.values(state.packages ?? {});
     if (packages.length && packages.every(item => item.status === 'verified') && !state.integration) events.push('all packages verified: ready to integrate');

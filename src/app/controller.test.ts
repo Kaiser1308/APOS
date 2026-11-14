@@ -187,6 +187,15 @@ describe('Lead messages before a plan is accepted (GitHub #3, #5)', () => {
     return { dir, store, runtime, calls };
   };
 
+  it('reports a quota escalation without a dispatch id as the planning Lead out of quota', async () => {
+    const { dir, store, runtime } = setup([{ id: 'msg-quota', type: 'escalation', subject: 'Agent hit an error: usage limit reached', body: 'Details from the agent: You have hit your usage limit' }]);
+    await new ControllerService(store, runtime).tick(dir);
+    const kinds = store.events(spec.id).filter(item => item.type === 'human-notified').map(item => (item.data as { kind?: string }).kind);
+    expect(kinds).toContain('agent-exhausted');
+    expect(kinds).not.toContain('lead-question');
+    store.close();
+  });
+
   it('relays a Lead question to the inbox while the Goal is selected, once, without answering it', async () => {
     const { dir, store, runtime, calls } = setup([{ id: 'msg-q', type: 'question', subject: 'Which database?', body: 'sqlite or postgres' }]);
     const controller = new ControllerService(store, runtime);

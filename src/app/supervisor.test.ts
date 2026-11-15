@@ -10,7 +10,7 @@ import { ESCALATION_REPLY } from './controller.js';
 import { CORE_SKILL, activationLine, committedFileDigest, reviewResultPath, soloReportPath } from '../runtime/brief.js';
 import { ProjectJournal } from '../store/journal.js';
 import { SqliteStore } from '../store/sqlite.js';
-import { SoloSupervisor } from './supervisor.js';
+import { SoloSupervisor } from './solo-supervisor.js';
 import { SoloService } from './solo.js';
 import { OrcaRefused, composerHasUnsentBrief } from '../runtime/orca.js';
 import { unsentBrief } from '../runtime/screens.js';

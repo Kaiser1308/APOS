@@ -6,7 +6,8 @@ import { handingOff, type GoalState } from '../domain/transitions.js';
 /** Minutes a handoff may stay pending before the Human is told. */
 export const HANDOFF_PENDING_MINUTES = 10;
 import { dispatchAgent, ownerOf, quotaEscalation, recordExhausted } from './watch.js';
-import { MultiSupervisor, SoloSupervisor, type SupervisorOptions } from './supervisor.js';
+import { MultiSupervisor } from './multi-supervisor.js';
+import { SoloSupervisor, type SupervisorOptions } from './solo-supervisor.js';
 import type { OrcaMessage, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { PackageRuntimeRef, RuntimeRef } from '../domain/runtime-refs.js';
 import type { GoalRepository } from '../ports/goal-repository.js';

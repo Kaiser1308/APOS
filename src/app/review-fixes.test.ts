@@ -10,7 +10,7 @@ import type { WorkPackageSpec } from '../domain/packages.js';
 import { OrcaRefused } from '../runtime/orca.js';
 import { DEFAULT_PROFILES, packageReportPath } from '../runtime/brief.js';
 import { HandoffService } from './handoff.js';
-import { MultiSupervisor } from './supervisor.js';
+import { MultiSupervisor } from './multi-supervisor.js';
 import { ControllerService } from './controller.js';
 import type { HandoffInput, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { RuntimeRef } from '../domain/runtime-refs.js';

@@ -7,6 +7,11 @@ on:
 jobs:
   check:
     runs-on: windows-latest
+    # The default temp dir is an 8.3 short path (C:\Users\RUNNER~1\...), which assertGitRoot compares
+    # against Git's long path and rejects. Use the runner's long-named temp directory instead.
+    env:
+      TEMP: ${{ runner.temp }}
+      TMP: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

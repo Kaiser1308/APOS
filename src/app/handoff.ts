@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { newEvent } from './events.js';
 import { attemptLimit, type GoalEventType, type GoalState, type HandoffTarget } from '../domain/transitions.js';
 import { reviewReasons } from '../domain/reviews.js';
 import { OrcaRefused } from '../runtime/orca.js';
@@ -56,7 +57,7 @@ export class HandoffService {
   ) {}
 
   private record(goalId: string, type: GoalEventType, data?: unknown): void {
-    this.store.append({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
+    this.store.append(newEvent(goalId, type, data));
   }
 
   private budget(state: GoalState, attempt: number): Budget | undefined {

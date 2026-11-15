@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { newEvent } from './events.js';
 import type { GoalEventType, GoalState, LeadState } from '../domain/transitions.js';
 import { resolve, sep } from 'node:path';
 import { OrcaRefused, worktreePath } from '../runtime/orca.js';
@@ -67,7 +68,7 @@ export class LeadService {
   ) {}
 
   private record(goalId: string, type: GoalEventType, data?: unknown): void {
-    this.store.append({ id: randomUUID(), goalId, type, data, at: new Date(this.now()).toISOString() });
+    this.store.append(newEvent(goalId, type, data, new Date(this.now()).toISOString()));
   }
 
   private notifyOnce(

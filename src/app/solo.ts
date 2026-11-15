@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { newEvent } from './events.js';
 import { attemptLimit, type GoalEventType, type GoalState } from '../domain/transitions.js';
 import { OrcaRefused } from '../runtime/orca.js';
 import { VerificationService, type VerificationResult } from './verification.js';
@@ -14,7 +15,7 @@ export class SoloService {
   ) {}
 
   private record(goalId: string, type: GoalEventType, data?: unknown): void {
-    this.store.append({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
+    this.store.append(newEvent(goalId, type, data));
   }
 
   /** What the approved appetite leaves after `attempt` starts; the owner sees it in its brief. */

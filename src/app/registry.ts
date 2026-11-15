@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newEvent } from './events.js';
 import type { GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
@@ -33,13 +33,7 @@ export class GoalRegistryService {
     const state = this.store.getGoal(goalId);
     if (currentSourceDigest && state && currentSourceDigest(goalId) !== state.spec.source.sha256)
       throw new Error(`Source snapshot for ${goalId} is missing or differs from the Goal sha256`);
-    this.store.append({
-      id: randomUUID(),
-      goalId,
-      type: 'goal-approved',
-      data: { appetite },
-      at: new Date().toISOString(),
-    });
+    this.store.append(newEvent(goalId, 'goal-approved', { appetite }));
   }
 
   recommend(): GoalState | undefined {
@@ -62,6 +56,6 @@ export class GoalRegistryService {
       );
     const pending = state.spec.dependencies.filter(id => this.store.getGoal(id)?.status !== 'closed');
     if (pending.length) throw new Error(`Goal dependencies not closed: ${pending.join(', ')}`);
-    this.store.append({ id: randomUUID(), goalId, type: 'goal-selected', at: new Date().toISOString() });
+    this.store.append(newEvent(goalId, 'goal-selected'));
   }
 }

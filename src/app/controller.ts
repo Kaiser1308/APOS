@@ -1,7 +1,7 @@
+import { newEvent } from './events.js';
 import { PackageService } from './packages.js';
 import { SoloService } from './solo.js';
 import { LeadService } from './lead.js';
-import { randomUUID } from 'node:crypto';
 import { handingOff, type GoalState } from '../domain/transitions.js';
 /** Minutes a handoff may stay pending before the Human is told. */
 export const HANDOFF_PENDING_MINUTES = 10;
@@ -152,13 +152,7 @@ export class ControllerService {
             .events(goalId)
             .some(item => item.type === 'decision-logged' && (item.data as { note?: string }).note === note)
         ) {
-          this.store.append({
-            id: randomUUID(),
-            goalId,
-            type: 'decision-logged',
-            data: { note },
-            at: new Date().toISOString(),
-          });
+          this.store.append(newEvent(goalId, 'decision-logged', { note }));
         }
         result.settled.push(`stale ${message.id}`);
         continue;
@@ -171,13 +165,7 @@ export class ControllerService {
       }
       await this.runtime.retainWorker(ref.dispatchId);
       if (!this.store.getGoal(goalId)?.settlements?.[ref.dispatchId]) {
-        this.store.append({
-          id: randomUUID(),
-          goalId,
-          type: 'worker-settled',
-          data: { dispatchId: ref.dispatchId, outcome },
-          at: new Date().toISOString(),
-        });
+        this.store.append(newEvent(goalId, 'worker-settled', { dispatchId: ref.dispatchId, outcome }));
         result.settled.push(`${ref.dispatchId}:${outcome}`);
       }
     }
@@ -199,18 +187,19 @@ export class ControllerService {
         .some(item => item.type === 'human-notified' && (item.data as { key?: string }).key === pending.key)
     )
       return;
-    this.store.append({
-      id: randomUUID(),
-      goalId,
-      type: 'human-notified',
-      data: {
-        kind: 'needs-decision',
+    this.store.append(
+      newEvent(
         goalId,
-        key: pending.key,
-        note: `the handoff of ${goalId} (from ${pending.from}) has been pending for ${HANDOFF_PENDING_MINUTES}+ min. Run \`apos handoff ${goalId}${pending.target.kind === 'package' ? ` --package ${pending.target.packageId}` : pending.target.kind === 'reviewer' ? ' --reviewer' : ''}\` to finish it (it recovers an agent that started), or check Orca and \`apos execution abandon-intent ${goalId} --key ${pending.key} --reason ...\` to drop it.`,
-      },
-      at: new Date(now).toISOString(),
-    });
+        'human-notified',
+        {
+          kind: 'needs-decision',
+          goalId,
+          key: pending.key,
+          note: `the handoff of ${goalId} (from ${pending.from}) has been pending for ${HANDOFF_PENDING_MINUTES}+ min. Run \`apos handoff ${goalId}${pending.target.kind === 'package' ? ` --package ${pending.target.packageId}` : pending.target.kind === 'reviewer' ? ' --reviewer' : ''}\` to finish it (it recovers an agent that started), or check Orca and \`apos execution abandon-intent ${goalId} --key ${pending.key} --reason ...\` to drop it.`,
+        },
+        new Date(now).toISOString(),
+      ),
+    );
     result.supervised.push(`handoff ${pending.key} pending; Human notified`);
   }
 
@@ -223,11 +212,8 @@ export class ControllerService {
     )
       return;
     const what = message.subject ?? message.body ?? message.type;
-    this.store.append({
-      id: randomUUID(),
-      goalId,
-      type: 'human-notified',
-      data: {
+    this.store.append(
+      newEvent(goalId, 'human-notified', {
         kind: 'lead-question',
         goalId,
         messageId: message.id,
@@ -235,9 +221,8 @@ export class ControllerService {
         subject: message.subject,
         body: message.body,
         note: `the Lead is waiting on you: ${what}. Answer it with \`apos lead wake ${goalId} --note "..."\`.`,
-      },
-      at: new Date().toISOString(),
-    });
+      }),
+    );
     result.supervised.push(`Lead ${message.type} ${message.id}; Human notified`);
   }
 
@@ -247,20 +232,16 @@ export class ControllerService {
       .events(goalId)
       .some(item => item.type === 'human-notified' && (item.data as { messageId?: string }).messageId === message.id);
     if (seen) return;
-    this.store.append({
-      id: randomUUID(),
-      goalId,
-      type: 'human-notified',
-      data: {
+    this.store.append(
+      newEvent(goalId, 'human-notified', {
         kind: 'escalation',
         goalId,
         messageId: message.id,
         messageType: message.type,
         subject: message.subject,
         body: message.body,
-      },
-      at: new Date().toISOString(),
-    });
+      }),
+    );
     if (this.runtime.replyMessage) await this.runtime.replyMessage(runId, message.id, ESCALATION_REPLY);
     result.settled.push(`relayed ${message.type}:${message.id}`);
   }
@@ -294,19 +275,15 @@ export class ControllerService {
     const events = this.store.events(goalId);
     const last = events.at(-1)!;
     if (last.type === 'human-notified' || Date.now() - Date.parse(last.at) < IDLE_MINUTES * 60_000) return;
-    this.store.append({
-      id: randomUUID(),
-      goalId,
-      type: 'human-notified',
-      data: {
+    this.store.append(
+      newEvent(goalId, 'human-notified', {
         kind: 'idle',
         goalId,
         since: last.at,
         lastEvent: last.type,
         note: `no agent running and no controller progress for ${IDLE_MINUTES}+ min after ${last.type}; tick errors: ${result.errors.join('; ') || 'none'}`,
-      },
-      at: new Date().toISOString(),
-    });
+      }),
+    );
     result.supervised.push(`idle since ${last.at} after ${last.type}; Human notified`);
   }
 
@@ -379,13 +356,7 @@ export class ControllerService {
               const ref = item.runtimeRef;
               const outcome = await this.runtime.inspectPackage(ref);
               if (outcome === 'completed' || outcome === 'failed') {
-                this.store.append({
-                  id: randomUUID(),
-                  goalId,
-                  type: 'worker-settled',
-                  data: { dispatchId: ref.dispatchId, outcome },
-                  at: new Date().toISOString(),
-                });
+                this.store.append(newEvent(goalId, 'worker-settled', { dispatchId: ref.dispatchId, outcome }));
                 result.settled.push(`${packageId}:${outcome}`);
               }
             }
@@ -428,13 +399,7 @@ export class ControllerService {
                       (item.data as { note?: string }).note === note,
                   )
               ) {
-                this.store.append({
-                  id: randomUUID(),
-                  goalId,
-                  type: 'human-notified',
-                  data: { kind: 'needs-decision', goalId, note },
-                  at: new Date().toISOString(),
-                });
+                this.store.append(newEvent(goalId, 'human-notified', { kind: 'needs-decision', goalId, note }));
               }
               result.unresolved.push('Solo plan without a Lead');
               results.push(result);
@@ -456,31 +421,26 @@ export class ControllerService {
                 old &&
                 !events.some(item => item.type === 'human-notified' && (item.data as { key?: string }).key === key)
               ) {
-                this.store.append({
-                  id: randomUUID(),
-                  goalId,
-                  type: 'human-notified',
-                  data: {
+                this.store.append(
+                  newEvent(goalId, 'human-notified', {
                     kind: 'needs-decision',
                     goalId,
                     key,
                     note: `Orca outcome for intent ${key} is unknown after 10 min. Check \`orca orchestration task-list\`; if it created nothing, run \`apos execution abandon-intent ${goalId} --key ${key} --reason ...\`.`,
-                  },
-                  at: new Date().toISOString(),
-                });
+                  }),
+                );
               }
             }
             const current = this.store.getGoal(goalId)!;
             if (current.runtimeRef && !handingOff(current) && !current.settlements?.[current.runtimeRef!.dispatchId]) {
               const observation = await this.runtime.inspect(current.runtimeRef);
               if (observation.outcome) {
-                this.store.append({
-                  id: randomUUID(),
-                  goalId,
-                  type: 'worker-settled',
-                  data: { dispatchId: observation.ref.dispatchId, outcome: observation.outcome },
-                  at: new Date().toISOString(),
-                });
+                this.store.append(
+                  newEvent(goalId, 'worker-settled', {
+                    dispatchId: observation.ref.dispatchId,
+                    outcome: observation.outcome,
+                  }),
+                );
                 result.settled.push(`solo:${observation.outcome}`);
               }
             }
@@ -536,27 +496,19 @@ export class ControllerService {
             signature((item.data as { tickError?: string })?.tickError ?? '') === signature(error),
         )
       ) {
-        this.store.append({
-          id: randomUUID(),
-          goalId: result.goalId,
-          type: 'decision-logged',
-          data: { note: `tick error: ${error}`, tickError: error },
-          at: new Date().toISOString(),
-        });
+        this.store.append(
+          newEvent(result.goalId, 'decision-logged', { note: `tick error: ${error}`, tickError: error }),
+        );
         continue;
       }
-      this.store.append({
-        id: randomUUID(),
-        goalId: result.goalId,
-        type: 'human-notified',
-        data: {
+      this.store.append(
+        newEvent(result.goalId, 'human-notified', {
           kind: 'tick-error',
           goalId: result.goalId,
           error,
           note: `the controller fails the same way on every pass: ${error}. If it names an ended session, \`apos handoff ${result.goalId}\` starts a fresh agent.`,
-        },
-        at: new Date().toISOString(),
-      });
+        }),
+      );
     }
   }
 }

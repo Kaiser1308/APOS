@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { newEvent } from './events.js';
 import { assertGitRoot } from '../store/project-history.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
@@ -22,11 +22,8 @@ export class MergeService {
       prior.integrationCommit.toLowerCase() === state.gate.deliveryCommit.toLowerCase()
     )
       return;
-    this.store.append({
-      id: randomUUID(),
-      goalId,
-      type: 'merge-authorized',
-      data: {
+    this.store.append(
+      newEvent(goalId, 'merge-authorized', {
         goalId,
         goalVersion: state.spec.version,
         integrationCommit: state.gate.deliveryCommit,
@@ -34,9 +31,8 @@ export class MergeService {
         scope: 'goal',
         once: true,
         by,
-      },
-      at: new Date().toISOString(),
-    });
+      }),
+    );
   }
 
   /** Merges exactly the authorized, gated commit into the authorized branch; nothing else. */
@@ -91,13 +87,7 @@ export class MergeService {
         throw new Error(`Git merge failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    this.store.append({
-      id: randomUUID(),
-      goalId,
-      type: 'merge-completed',
-      data: { sourceRef, targetBranch, mergeCommit: commit },
-      at: new Date().toISOString(),
-    });
+    this.store.append(newEvent(goalId, 'merge-completed', { sourceRef, targetBranch, mergeCommit: commit }));
     return commit;
   }
 }

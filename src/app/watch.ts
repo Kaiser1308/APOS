@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newEvent } from './events.js';
 import type { GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { RuntimeAdapter } from '../ports/runtime.js';
@@ -119,23 +119,24 @@ export function recordExhausted(
         (item.data as { dispatchId?: string }).dispatchId === input.dispatchId,
     );
   if (seen) return false;
-  store.append({
-    id: randomUUID(),
-    goalId: input.goalId,
-    type: 'human-notified',
-    data: {
-      kind: 'agent-exhausted',
-      goalId: input.goalId,
-      dispatchId: input.dispatchId,
-      role: input.role,
-      ...(input.packageId ? { packageId: input.packageId } : {}),
-      agent: input.agent,
-      model: input.model,
-      message: input.message,
-      note: exhaustedNote(input.role, input.agent, input.message, input.handoffHint),
-    },
-    at: new Date(now()).toISOString(),
-  });
+  store.append(
+    newEvent(
+      input.goalId,
+      'human-notified',
+      {
+        kind: 'agent-exhausted',
+        goalId: input.goalId,
+        dispatchId: input.dispatchId,
+        role: input.role,
+        ...(input.packageId ? { packageId: input.packageId } : {}),
+        agent: input.agent,
+        model: input.model,
+        message: input.message,
+        note: exhaustedNote(input.role, input.agent, input.message, input.handoffHint),
+      },
+      new Date(now()).toISOString(),
+    ),
+  );
   return true;
 }
 
@@ -186,19 +187,20 @@ export async function watchDispatch(
           (item.data as { dispatchId?: string }).dispatchId === input.dispatchId,
       );
   const record = (data: Record<string, unknown>) =>
-    store.append({
-      id: randomUUID(),
-      goalId: input.goalId,
-      type: 'human-notified',
-      data: {
-        goalId: input.goalId,
-        dispatchId: input.dispatchId,
-        role: input.role,
-        ...(input.packageId ? { packageId: input.packageId } : {}),
-        ...data,
-      },
-      at: new Date(now()).toISOString(),
-    });
+    store.append(
+      newEvent(
+        input.goalId,
+        'human-notified',
+        {
+          goalId: input.goalId,
+          dispatchId: input.dispatchId,
+          role: input.role,
+          ...(input.packageId ? { packageId: input.packageId } : {}),
+          ...data,
+        },
+        new Date(now()).toISOString(),
+      ),
+    );
   if (seen('agent-exhausted')) return [];
   const exhausted = await exhaustedAgent(runtime, {
     dispatchId: input.dispatchId,

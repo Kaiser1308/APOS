@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { newEvent } from './events.js';
 import type { CommandCheck } from '../domain/contracts.js';
 import {
   attemptKey,
@@ -214,21 +215,22 @@ export class GateService {
       at: this.now(),
     };
     writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
-    this.store.append({
-      id: randomUUID(),
-      goalId,
-      type: 'package-gate-recorded',
-      data: {
-        packageId,
-        report,
-        signature: checks
-          .filter(c => c.status !== 'pass')
-          .map(c => `${c.checkId}[${c.newFailures.join(',')}]`)
-          .sort()
-          .join('|'),
-      },
-      at: this.now(),
-    });
+    this.store.append(
+      newEvent(
+        goalId,
+        'package-gate-recorded',
+        {
+          packageId,
+          report,
+          signature: checks
+            .filter(c => c.status !== 'pass')
+            .map(c => `${c.checkId}[${c.newFailures.join(',')}]`)
+            .sort()
+            .join('|'),
+        },
+        this.now(),
+      ),
+    );
     return report;
   }
 
@@ -300,7 +302,7 @@ export class GateService {
       at: this.now(),
     };
     writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
-    this.store.append({ id: randomUUID(), goalId, type: 'gate-recorded', data: report, at: this.now() });
+    this.store.append(newEvent(goalId, 'gate-recorded', report, this.now()));
     return report;
   }
 
@@ -309,7 +311,7 @@ export class GateService {
     const owner = state?.runtimeRef?.owner;
     if (owner && input.by.trim().toLowerCase() === owner.toLowerCase())
       throw new Error('Manual check must be confirmed by someone other than the owner');
-    this.store.append({ id: randomUUID(), goalId, type: 'check-confirmed', data: input, at: this.now() });
+    this.store.append(newEvent(goalId, 'check-confirmed', input, this.now()));
   }
 
   /**

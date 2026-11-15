@@ -1,3 +1,4 @@
+import { newEvent } from './events.js';
 import { clockStart } from './lead.js';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -69,7 +70,7 @@ export class SoloSupervisor {
   }
 
   private record(goalId: string, type: GoalEventType, data?: unknown): void {
-    this.store.append({ id: randomUUID(), goalId, type, data, at: new Date(this.now()).toISOString() });
+    this.store.append(newEvent(goalId, type, data, new Date(this.now()).toISOString()));
   }
 
   private decide(goalId: string, note: string, actions: string[]): void {
@@ -528,7 +529,7 @@ export async function unstickDispatch(
     item => item.type === 'decision-logged' && String((item.data as { note?: string }).note).startsWith(marker),
   );
   const record = (type: GoalEventType, data: unknown) =>
-    store.append({ id: randomUUID(), goalId: input.goalId, type, data, at: new Date(now()).toISOString() });
+    store.append(newEvent(input.goalId, type, data, new Date(now()).toISOString()));
   if (nudges.length < 3) {
     if (nudges.length && now() - Date.parse(nudges.at(-1)!.at) < 60_000) return [];
     await runtime.nudge(input.terminal);
@@ -615,7 +616,7 @@ export class MultiSupervisor {
   }
 
   private record(goalId: string, type: GoalEventType, data?: unknown): void {
-    this.store.append({ id: randomUUID(), goalId, type, data, at: new Date(this.now()).toISOString() });
+    this.store.append(newEvent(goalId, type, data, new Date(this.now()).toISOString()));
   }
 
   async step(goalId: string, repoPath: string, questions: string[] = []): Promise<string[]> {

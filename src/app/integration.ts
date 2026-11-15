@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { newEvent } from './events.js';
 import { validatePackageGraph } from '../domain/packages.js';
 import type { Evidence } from '../domain/contracts.js';
 import { assertGitRoot } from '../store/project-history.js';
@@ -140,13 +140,13 @@ export class IntegrationService {
       )
     )
       throw new Error('Passing Goal acceptance evidence required');
-    this.store.append({
-      id: randomUUID(),
-      goalId,
-      type: 'integration-completed',
-      data: { commitRef: input.commitRef, conflictResolution: input.conflictResolution, regression: input.regression },
-      at: new Date().toISOString(),
-    });
+    this.store.append(
+      newEvent(goalId, 'integration-completed', {
+        commitRef: input.commitRef,
+        conflictResolution: input.conflictResolution,
+        regression: input.regression,
+      }),
+    );
     const verification = new VerificationService(this.store);
     for (const item of input.acceptance) verification.submitEvidence(goalId, item);
     verification.verify(goalId);

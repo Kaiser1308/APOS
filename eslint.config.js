@@ -64,26 +64,6 @@ const TEMPORARY_EXCEPTIONS = [
     removeAt: 'Task 9',
   },
   {
-    files: [
-      'src/app/controller.ts',
-      'src/app/gate.ts',
-      'src/app/handoff.ts',
-      'src/app/integration.ts',
-      'src/app/lead.ts',
-      'src/app/merge.ts',
-      'src/app/packages.ts',
-      'src/app/registry.ts',
-      'src/app/review.ts',
-      'src/app/solo.ts',
-      'src/app/supervisor.ts',
-      'src/app/verification.ts',
-      'src/app/watch.ts',
-      'src/cli-app.ts',
-    ],
-    rules: { 'no-restricted-syntax': 'off' },
-    removeAt: 'Task 6',
-  },
-  {
     files: ['src/app/multi-supervisor.test.ts', 'src/app/supervisor.test.ts'],
     rules: { 'prefer-const': 'off' },
     removeAt: 'Task 10',
@@ -112,6 +92,11 @@ export default tseslint.config(
     // Ngoại lệ vĩnh viễn: một reducer, xem docs/architecture/convention-refactor.md O8.
     files: ['src/domain/transitions.ts'],
     rules: { 'max-lines': 'off' },
+  },
+  {
+    // Nơi duy nhất được dựng event thủ công (Đ4); luật `as unknown as` vẫn áp dụng.
+    files: ['src/app/events.ts'],
+    rules: { 'no-restricted-syntax': ['error', NO_AS_UNKNOWN_AS] },
   },
   ...TEMPORARY_EXCEPTIONS.map(({ files, rules }) => ({ files, rules })),
 );

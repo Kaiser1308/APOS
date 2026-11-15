@@ -5,8 +5,8 @@ import { Command } from 'commander';
 function readJsonFile(file: string): any {
   return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
 }
+import { newEvent } from './app/events.js';
 import { withControllerLease } from './store/lease.js';
-import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -101,13 +101,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
       close();
     }
   };
-  const event = (goalId: string, type: GoalEventType, data?: unknown) => ({
-    id: randomUUID(),
-    goalId,
-    type,
-    data,
-    at: new Date().toISOString(),
-  });
+  const event = (goalId: string, type: GoalEventType, data?: unknown) => newEvent(goalId, type, data);
   /**
    * Gates A, B and D, appetite changes and overrides belong to the Human. Owners run with a shell and
    * know this CLI, so these commands refuse to run from any agent terminal or worktree APOS dispatched.

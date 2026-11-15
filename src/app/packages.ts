@@ -6,6 +6,7 @@ import {
   type PackageEvidence,
   type WorkPackageSpec,
 } from '../domain/packages.js';
+import { newEvent } from './events.js';
 import { attemptLimit, type GoalEventType } from '../domain/transitions.js';
 import type { PackageBlocker } from '../domain/transitions.js';
 
@@ -21,7 +22,7 @@ export class PackageService {
   ) {}
 
   private record(goalId: string, type: GoalEventType, data: unknown): void {
-    this.store.append({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
+    this.store.append(newEvent(goalId, type, data));
   }
 
   add(goalId: string, value: unknown): WorkPackageSpec {

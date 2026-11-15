@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newEvent } from './events.js';
 import type { Evidence, GoalId } from '../domain/contracts.js';
 import type { GoalEventType } from '../domain/transitions.js';
 import { requiresIndependentReview } from '../domain/reviews.js';
@@ -11,7 +11,7 @@ export class VerificationService {
   constructor(private readonly store: GoalRepository) {}
 
   private record(goalId: GoalId, type: GoalEventType, data?: unknown): void {
-    this.store.append({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
+    this.store.append(newEvent(goalId, type, data));
   }
 
   submitEvidence(goalId: GoalId, evidence: Evidence): void {

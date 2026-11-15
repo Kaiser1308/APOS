@@ -14,18 +14,6 @@ const NO_HAND_BUILT_EVENT = {
   message: 'Tạo event bằng `newEvent()` trong `src/app/events.ts`.',
 };
 
-/**
- * Vi phạm hiện có, tạm cho qua để CI xanh. Mỗi mục ghi task sẽ gỡ.
- * KHÔNG thêm mục mới; chỉ gỡ ra. Rule nào tắt ở đây thì file đó phải sửa ở task `removeAt`.
- */
-const TEMPORARY_EXCEPTIONS = [
-  {
-    files: ['src/app/controller.ts'],
-    rules: { 'max-lines': 'off' },
-    removeAt: 'Task 10b',
-  },
-];
-
 export default tseslint.config(
   { ignores: ['dist/', 'node_modules/', '.superpowers/', 'docs/', 'coverage/'] },
   ...tseslint.configs.recommended,
@@ -54,5 +42,4 @@ export default tseslint.config(
     files: ['src/app/events.ts'],
     rules: { 'no-restricted-syntax': ['error', NO_AS_UNKNOWN_AS] },
   },
-  ...TEMPORARY_EXCEPTIONS.map(({ files, rules }) => ({ files, rules })),
 );

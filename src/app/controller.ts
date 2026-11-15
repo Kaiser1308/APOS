@@ -1,29 +1,21 @@
 import { newEvent } from './events.js';
+import {
+  noteErrors,
+  noticeLeadQuestion,
+  noticePendingHandoff,
+  watchdog,
+  type ControllerTick,
+} from './controller-notices.js';
 import { PackageService } from './package-service.js';
 import { SoloService } from './solo.js';
 import { LeadService } from './lead.js';
-import { handingOff, type GoalState } from '../domain/transitions.js';
-/** Minutes a handoff may stay pending before the Human is told. */
-export const HANDOFF_PENDING_MINUTES = 10;
+import { handingOff } from '../domain/transitions.js';
 import { dispatchAgent, ownerOf, quotaEscalation, recordExhausted } from './watch.js';
 import { MultiSupervisor } from './multi-supervisor.js';
 import { SoloSupervisor, type SupervisorOptions } from './solo-supervisor.js';
 import type { OrcaMessage, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { PackageRuntimeRef, RuntimeRef } from '../domain/runtime-refs.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
-
-export const IDLE_MINUTES = 15;
-export type ControllerTick = {
-  goalId: string;
-  dispatched: string[];
-  recovered: string[];
-  unresolved: string[];
-  resumed: string[];
-  settled: string[];
-  inboxPending: string[];
-  errors: string[];
-  supervised: string[];
-};
 
 /**
  * The standing answer to an owner's question or escalation in Solo. Seen live: an owner escalated a
@@ -94,7 +86,7 @@ export class ControllerService {
           continue;
         }
         if (planning && OWNER_MESSAGES.has(message.type)) {
-          this.noticeLeadQuestion(goalId, message, result);
+          noticeLeadQuestion(this.store, goalId, message, result);
           continue;
         }
         if (state.proposal?.mode.startsWith('solo') && OWNER_MESSAGES.has(message.type)) {
@@ -173,60 +165,6 @@ export class ControllerService {
     if (!result.inboxPending.length) await this.runtime.ackRun(runId, delivery.deliveryId);
   }
 
-  /**
-   * While a handoff is pending the controller leaves the stopped dispatch alone, so a handoff whose CLI died would hold
-   * the Goal silently. After HANDOFF_PENDING_MINUTES the Human is told once how to finish or drop it.
-   */
-  private noticePendingHandoff(state: GoalState, result: ControllerTick): void {
-    const pending = state.handoffIntent;
-    const now = (this.options.now ?? Date.now)();
-    if (!pending || now - Date.parse(pending.at) < HANDOFF_PENDING_MINUTES * 60_000) return;
-    const goalId = state.spec.id;
-    if (
-      this.store
-        .events(goalId)
-        .some(item => item.type === 'human-notified' && (item.data as { key?: string }).key === pending.key)
-    )
-      return;
-    this.store.append(
-      newEvent(
-        goalId,
-        'human-notified',
-        {
-          kind: 'needs-decision',
-          goalId,
-          key: pending.key,
-          note: `the handoff of ${goalId} (from ${pending.from}) has been pending for ${HANDOFF_PENDING_MINUTES}+ min. Run \`apos handoff ${goalId}${pending.target.kind === 'package' ? ` --package ${pending.target.packageId}` : pending.target.kind === 'reviewer' ? ' --reviewer' : ''}\` to finish it (it recovers an agent that started), or check Orca and \`apos execution abandon-intent ${goalId} --key ${pending.key} --reason ...\` to drop it.`,
-        },
-        new Date(now).toISOString(),
-      ),
-    );
-    result.supervised.push(`handoff ${pending.key} pending; Human notified`);
-  }
-
-  /** A question or escalation from the Lead before its plan is accepted: the Human is told once and the Lead is not answered for them. */
-  private noticeLeadQuestion(goalId: string, message: OrcaMessage, result: ControllerTick): void {
-    if (
-      this.store
-        .events(goalId)
-        .some(item => item.type === 'human-notified' && (item.data as { messageId?: string }).messageId === message.id)
-    )
-      return;
-    const what = message.subject ?? message.body ?? message.type;
-    this.store.append(
-      newEvent(goalId, 'human-notified', {
-        kind: 'lead-question',
-        goalId,
-        messageId: message.id,
-        messageType: message.type,
-        subject: message.subject,
-        body: message.body,
-        note: `the Lead is waiting on you: ${what}. Answer it with \`apos lead wake ${goalId} --note "..."\`.`,
-      }),
-    );
-    result.supervised.push(`Lead ${message.type} ${message.id}; Human notified`);
-  }
-
   /** Notifies the Human once per message and answers the owner with the standing rule. */
   private async relay(goalId: string, runId: string, message: OrcaMessage, result: ControllerTick): Promise<void> {
     const seen = this.store
@@ -247,45 +185,8 @@ export class ControllerService {
     result.settled.push(`relayed ${message.type}:${message.id}`);
   }
 
-  /**
-   * Seen live: a Goal sat 26 minutes with no agent running and nothing for the controller to do,
-   * and no tick said so. A Solo Goal whose current dispatch has settled, with no reviewer pending and
-   * no event for IDLE_MINUTES, is reported once per quiet spell.
-   */
   private watchdog(goalId: string, result: ControllerTick): void {
-    const state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'executing' || !state.proposal) return;
-    const ref = state.runtimeRef;
-    // Multi-WP: no package still running and no reviewer pending (seen live: the Lead ended its turn waiting for a review nobody dispatched).
-    const multiIdle =
-      state.proposal.mode === 'multi-wp' &&
-      !state.reviewDispatch &&
-      !state.reviewIntent &&
-      Object.values(state.packages ?? {}).every(
-        item => item.status !== 'executing' || !item.runtimeRef || state.settlements?.[item.runtimeRef!.dispatchId],
-      );
-    const idle =
-      state.proposal.mode === 'multi-wp'
-        ? multiIdle
-        : ref &&
-          state.settlements?.[ref.dispatchId] &&
-          !state.reviewDispatch &&
-          !state.reviewIntent &&
-          !state.resumeIntent;
-    if (!idle) return;
-    const events = this.store.events(goalId);
-    const last = events.at(-1)!;
-    if (last.type === 'human-notified' || Date.now() - Date.parse(last.at) < IDLE_MINUTES * 60_000) return;
-    this.store.append(
-      newEvent(goalId, 'human-notified', {
-        kind: 'idle',
-        goalId,
-        since: last.at,
-        lastEvent: last.type,
-        note: `no agent running and no controller progress for ${IDLE_MINUTES}+ min after ${last.type}; tick errors: ${result.errors.join('; ') || 'none'}`,
-      }),
-    );
-    result.supervised.push(`idle since ${last.at} after ${last.type}; Human notified`);
+    watchdog(this.store, goalId, result);
   }
 
   async tick(repoPath: string): Promise<ControllerTick[]> {
@@ -303,7 +204,7 @@ export class ControllerService {
         errors: [],
         supervised: [],
       };
-      this.noticePendingHandoff(snapshot, result);
+      noticePendingHandoff(this.store, this.options.now ?? Date.now, snapshot, result);
       // The Lead is planning (no plan accepted yet), or its dispatch is still unknown. A running Lead whose Solo plan is
       // accepted is adopted below as the owner, so its end of turn counts as a delivery, not as a planning stop.
       const planning =
@@ -471,45 +372,7 @@ export class ControllerService {
       this.watchdog(goalId, result);
       results.push(result);
     }
-    for (const result of results) this.noteErrors(result);
+    for (const result of results) noteErrors(this.store, result);
     return results;
-  }
-
-  /** An error seen on one pass is logged; the same error on a later pass reaches the Human once, instead of repeating silently on every tick. */
-  private noteErrors(result: ControllerTick): void {
-    // Ids, counters and durations differ on every pass; the same failure must still count as the same.
-    const signature = (text: string) => text.replace(/[0-9a-f]{8,}|\d+/gi, '#');
-    for (const error of new Map(result.errors.map(item => [signature(item), item])).values()) {
-      const events = this.store.events(result.goalId);
-      if (
-        events.some(
-          item =>
-            item.type === 'human-notified' &&
-            (item.data as { kind?: string; error?: string }).kind === 'tick-error' &&
-            signature((item.data as { error?: string }).error ?? '') === signature(error),
-        )
-      )
-        continue;
-      if (
-        !events.some(
-          item =>
-            item.type === 'decision-logged' &&
-            signature((item.data as { tickError?: string })?.tickError ?? '') === signature(error),
-        )
-      ) {
-        this.store.append(
-          newEvent(result.goalId, 'decision-logged', { note: `tick error: ${error}`, tickError: error }),
-        );
-        continue;
-      }
-      this.store.append(
-        newEvent(result.goalId, 'human-notified', {
-          kind: 'tick-error',
-          goalId: result.goalId,
-          error,
-          note: `the controller fails the same way on every pass: ${error}. If it names an ended session, \`apos handoff ${result.goalId}\` starts a fresh agent.`,
-        }),
-      );
-    }
   }
 }

@@ -49,11 +49,6 @@ const TEMPORARY_EXCEPTIONS = [
     removeAt: 'Task 10',
   },
   {
-    files: ['src/runtime/orca.ts'],
-    rules: { 'max-lines': 'off' },
-    removeAt: 'Task 9',
-  },
-  {
     files: ['src/app/multi-supervisor.test.ts', 'src/app/supervisor.test.ts'],
     rules: { 'prefer-const': 'off' },
     removeAt: 'Task 10',

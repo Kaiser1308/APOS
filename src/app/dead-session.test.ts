@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { approval, proposal, spec } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
-import { OrcaRefused, isDeadSession } from '../runtime/orca.js';
+import { OrcaRefused, isDeadSession } from '../runtime/orca/exec.js';
 import { MultiSupervisor } from './multi-supervisor.js';
 import { ControllerService } from './controller.js';
 import { LeadService } from './lead.js';

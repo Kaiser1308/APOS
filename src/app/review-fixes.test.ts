@@ -7,7 +7,7 @@ import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
 import type { GoalEventType } from '../domain/transitions.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
-import { OrcaRefused } from '../runtime/orca.js';
+import { OrcaRefused } from '../runtime/orca/exec.js';
 import { DEFAULT_PROFILES, packageReportPath } from '../runtime/brief.js';
 import { HandoffService } from './handoff.js';
 import { MultiSupervisor } from './multi-supervisor.js';

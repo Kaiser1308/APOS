@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { newEvent } from './events.js';
 import { attemptLimit, type GoalEventType, type GoalState, type HandoffTarget } from '../domain/transitions.js';
 import { reviewReasons } from '../domain/reviews.js';
-import { OrcaRefused } from '../runtime/orca.js';
+import { OrcaRefused } from '../runtime/orca/exec.js';
 import { handoffRole, packageReportPath } from '../runtime/brief.js';
 import { clockStart } from './lead.js';
 import type { GoalRepository } from '../ports/goal-repository.js';

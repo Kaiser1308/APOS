@@ -2,7 +2,7 @@ import { newEvent } from './events.js';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { GoalEventType, GoalState } from '../domain/transitions.js';
-import { worktreePath } from '../runtime/orca.js';
+import { worktreePath } from '../runtime/orca/parse.js';
 import type { RuntimeRef } from '../domain/runtime-refs.js';
 import type { TelemetryProbe } from '../ports/telemetry.js';
 import type { GateReport } from '../domain/gate.js';

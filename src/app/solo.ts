@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { newEvent } from './events.js';
 import { attemptLimit, type GoalEventType, type GoalState } from '../domain/transitions.js';
-import { OrcaRefused } from '../runtime/orca.js';
+import { OrcaRefused } from '../runtime/orca/exec.js';
 import { VerificationService, type VerificationResult } from './verification.js';
 import { clockStart, currentLeadRef } from './lead.js';
 import type { Budget, RuntimeRef } from '../domain/runtime-refs.js';

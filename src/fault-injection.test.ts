@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OrcaRuntime } from './runtime/orca.js';
+import { OrcaRuntime } from './runtime/orca/adapter.js';
 import { DEFAULT_PROFILES } from './runtime/brief.js';
 import { runCli } from './cli.js';
 import { spec as baseSpec, proposal, sourceText } from './domain/fixtures.test-support.js';

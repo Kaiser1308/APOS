@@ -10,7 +10,7 @@ import { applyEvent, type GoalEvent, type GoalEventType } from '../domain/transi
 import { LeadService, LEAD_IDLE_MINUTES, LEAD_INTENT_MINUTES } from './lead.js';
 import { ControllerService } from './controller.js';
 import { assertExecutionSettled } from './replan.js';
-import { OrcaRefused } from '../runtime/orca.js';
+import { OrcaRefused } from '../runtime/orca/exec.js';
 import { runCli } from '../cli.js';
 import type { PackageRuntime, RuntimeAdapter, RuntimeObservation } from '../ports/runtime.js';
 import type { RuntimeRef } from '../domain/runtime-refs.js';

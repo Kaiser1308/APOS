@@ -3,15 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-  composeBase,
-  extractStartedRef,
-  terminalWorktree,
-  interpretWorkerShow,
-  OrcaRuntime,
-  parseOrcaResult,
-} from './orca.js';
-import { DEFAULT_PROFILES } from './brief.js';
+import { terminalWorktree } from './exec.js';
+import { composeBase } from './git.js';
+import { OrcaRuntime } from './adapter.js';
+import { extractStartedRef, interpretWorkerShow, parseOrcaResult } from './parse.js';
+import { DEFAULT_PROFILES } from '../brief.js';
 
 describe('Orca adapter result', () => {
   it('rejects an unknown or failed response rather than claiming a dispatch', () => {
@@ -449,7 +445,7 @@ it('reads the Orca 1.4.254 shapes: run-create answers runId, a start receipt nam
   expect(ref).toMatchObject({ runId: 'run_1', terminal: 'term_1', worktreeId: 'wt::C:/w' });
 });
 
-import { idleMinutesFrom } from './orca.js';
+import { idleMinutesFrom } from './parse.js';
 it('reads how long Orca says an agent has been idle', () => {
   expect(idleMinutesFrom({ activity: 'idle', lastActivity: '10m ago' })).toBe(10);
   expect(idleMinutesFrom({ activity: 'idle', lastActivity: '1h ago' })).toBe(60);

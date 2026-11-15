@@ -7,7 +7,7 @@ import { runCli } from '../cli.js';
 import { spec as baseSpec, proposal, sourceText } from '../domain/fixtures.test-support.js';
 import type { GoalSpec } from '../domain/contracts.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
-import { OrcaRefused } from '../runtime/orca.js';
+import { OrcaRefused } from '../runtime/orca/exec.js';
 import {
   CORE_SKILL,
   activationLine,

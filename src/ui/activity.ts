@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, s
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { GoalEvent } from '../domain/transitions.js';
-import { worktreePath } from '../runtime/orca.js';
+import { worktreePath } from '../runtime/orca/parse.js';
 
 /**
  * What an agent did, read from its own transcript (Codex rollout or Claude Code session). The agents' reasoning is

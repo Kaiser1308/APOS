@@ -361,7 +361,7 @@ it('retains the settled dispatch of a Lead wake-up, so the next wake is not refu
 });
 
 describe('Lead messages before a plan is accepted (GitHub #3, #5)', () => {
-  const setup = (messages: import('../runtime/orca.js').OrcaMessage[]) => {
+  const setup = (messages: import('../ports/runtime.js').OrcaMessage[]) => {
     const dir = mkdtempSync(join(tmpdir(), 'apos-controller-planning-'));
     dirs.push(dir);
     const store = SqliteStore.open(join(dir, 'state.sqlite'));

@@ -12,7 +12,7 @@ import {
   packageReportPath,
   reviewResultPath,
 } from '../runtime/brief.js';
-import { isDeadSession } from '../runtime/orca.js';
+import { isDeadSession } from '../runtime/orca/exec.js';
 import { GateService } from './gate.js';
 import { PackageService } from './packages.js';
 import { GitCommitInspector, IntegrationService } from './integration.js';

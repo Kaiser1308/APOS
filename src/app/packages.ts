@@ -10,7 +10,7 @@ import { newEvent } from './events.js';
 import { attemptLimit, type GoalEventType } from '../domain/transitions.js';
 import type { PackageBlocker } from '../domain/transitions.js';
 
-import { OrcaRefused } from '../runtime/orca.js';
+import { OrcaRefused } from '../runtime/orca/exec.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { PackageRuntime } from '../ports/runtime.js';
 import type { PackageRuntimeRef } from '../domain/runtime-refs.js';

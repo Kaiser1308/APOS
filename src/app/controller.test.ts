@@ -8,6 +8,8 @@ import { PackageService } from './package-service.js';
 import { ControllerService } from './controller.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
+import type { GoalEventType } from '../domain/transitions.js';
+import type { OrcaMessage } from '../ports/runtime.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -42,7 +44,7 @@ it('releases dependency-ready Workers after a restart without duplicate dispatch
   dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
-  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+  const add = (type: GoalEventType, data?: unknown) =>
     store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   add('goal-drafted', spec);
   add('goal-approved', approval);
@@ -98,7 +100,7 @@ it('records a settled Solo Dispatch once and never accepts it without a delivery
   dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
-  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+  const add = (type: GoalEventType, data?: unknown) =>
     store.append({ id: `SOLO-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   // The Solo owner is the Lead APOS dispatched at selection: the controller records it, it never starts another session.
   add('goal-drafted', spec);
@@ -148,7 +150,7 @@ it('processes a settled worker_done, retains its owner, then acknowledges the Or
   dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
-  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+  const add = (type: GoalEventType, data?: unknown) =>
     store.append({ id: `INBOX-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   add('goal-drafted', spec);
   add('goal-approved', approval);
@@ -198,7 +200,7 @@ it('acks a worker_done for a dispatch that is not current, so a lost reviewer ca
   dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
-  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+  const add = (type: GoalEventType, data?: unknown) =>
     store.append({ id: `STALE-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   add('goal-drafted', spec);
   add('goal-approved', approval);
@@ -312,7 +314,7 @@ it('retains the settled dispatch of a Lead wake-up, so the next wake is not refu
   dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
-  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+  const add = (type: GoalEventType, data?: unknown) =>
     store.append({ id: `LW-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   add('goal-drafted', spec);
   add('goal-approved', approval);
@@ -361,12 +363,12 @@ it('retains the settled dispatch of a Lead wake-up, so the next wake is not refu
 });
 
 describe('Lead messages before a plan is accepted (GitHub #3, #5)', () => {
-  const setup = (messages: import('../ports/runtime.js').OrcaMessage[]) => {
+  const setup = (messages: OrcaMessage[]) => {
     const dir = mkdtempSync(join(tmpdir(), 'apos-controller-planning-'));
     dirs.push(dir);
     const store = SqliteStore.open(join(dir, 'state.sqlite'));
     let n = 0;
-    const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+    const add = (type: GoalEventType, data?: unknown) =>
       store.append({ id: `PLAN-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
     add('goal-drafted', spec);
     add('goal-approved', approval);

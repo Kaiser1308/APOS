@@ -48,7 +48,7 @@ module.exports = {
       comment: 'ui không import app và runtime, trừ app/inbox và runtime/orca (ngoại lệ vĩnh viễn, O10).',
       severity: 'error',
       from: { path: '^src/ui/', pathNot: NOT_TEST },
-      to: { path: '^src/(app|runtime)/', pathNot: ['^src/app/inbox[.]ts$', '^src/runtime/orca/'] },
+      to: { path: '^src/(app|runtime)/', pathNot: ['^src/app/inbox[.]ts$', '^src/runtime/orca/parse[.]ts$'] },
     },
   ],
   options: {

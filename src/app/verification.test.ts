@@ -76,7 +76,7 @@ describe('verification gate', () => {
     expect(() => new VerificationService(store).verify(spec.id)).toThrow(/no controller gate/);
   });
   it('rejects a gate that finishes after the owner was resumed, because it judged the earlier attempt', () => {
-    const { store, add } = executing();
+    const { add } = executing();
     const stale = gateReport(DELIVERY);
     add('checkpointed', { phase: 'repair', progress: 'fix', evidenceRefs: [] });
     add('resume-intended', 'key-2');

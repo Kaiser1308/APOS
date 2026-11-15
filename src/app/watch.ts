@@ -67,13 +67,11 @@ export function ownerOf(
   dispatchId: string,
 ): { role: Role; requested?: { agent?: string; model?: string }; packageId?: string; handoffHint: string } | undefined {
   const goalId = state.spec.id;
-  const runtimeRef = state.runtimeRef as
-    { dispatchId?: string; requested?: { agent?: string; model?: string } } | undefined;
+  const runtimeRef = state.runtimeRef;
   if (runtimeRef?.dispatchId === dispatchId || state.lead?.current === dispatchId)
     return {
       role: 'lead',
-      requested: (runtimeRef?.dispatchId === dispatchId ? runtimeRef.requested : state.lead?.ref.requested) as
-        { agent?: string; model?: string } | undefined,
+      requested: runtimeRef?.dispatchId === dispatchId ? runtimeRef.requested : state.lead?.ref.requested,
       handoffHint: `apos handoff ${goalId} --agent <other>`,
     };
   for (const item of Object.values(state.packages ?? {})) {

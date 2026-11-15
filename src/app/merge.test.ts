@@ -7,6 +7,7 @@ import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, gateReport, approval } from '../domain/fixtures.test-support.js';
 import { initProject } from './init-project.js';
 import { MergeService } from './merge.js';
+import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -28,7 +29,7 @@ it('merges only the gated commit, only after the Human authorizes that one merge
   git(['switch', '-q', target]);
   const store = SqliteStore.open(join(dir, '.apos', 'state.sqlite'));
   let n = 0;
-  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+  const add = (type: GoalEventType, data?: unknown) =>
     store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   add('goal-drafted', spec);
   add('goal-approved', approval);

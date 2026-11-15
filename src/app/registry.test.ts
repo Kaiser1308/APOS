@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
 import { GoalRegistryService } from './registry.js';
+import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -19,7 +20,7 @@ const fixture = () => {
 it('recommends and selects only Goals whose dependencies have closed', () => {
   const store = fixture();
   let n = 0;
-  const add = (goalId: string, type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+  const add = (goalId: string, type: GoalEventType, data?: unknown) =>
     store.append({ id: `EV-${++n}`, goalId, type, data, at: '2026-11-08T00:00:00.000Z' });
   const second = { ...spec, id: 'GOAL-002', dependencies: [spec.id], priority: 0 };
   add(spec.id, 'goal-drafted', spec);

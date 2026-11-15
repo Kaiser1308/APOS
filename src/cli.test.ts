@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './cli.js';
 import { controllerHome } from './store/event-log.js';
-import { spec as baseSpec, proposal, sourceText, approval } from './domain/fixtures.test-support.js';
+import { spec as baseSpec, proposal, sourceText } from './domain/fixtures.test-support.js';
 import type { GoalSpec } from './domain/contracts.js';
 
 // The gate really runs this in a fresh worktree at the commit under test.
@@ -336,7 +336,6 @@ it('refuses approval when the source snapshot was edited after drafting, or a re
   const dir = mkdtempSync(join(tmpdir(), 'apos-cli-src-'));
   dirs.push(dir);
   execFileSync('git', ['init', '-q', dir]);
-  const git = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   const output: string[] = [];
   const runtime: RuntimeAdapter = {
     async startLead() {

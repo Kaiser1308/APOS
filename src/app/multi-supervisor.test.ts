@@ -68,7 +68,7 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   const settled = new Set<string>();
   const wakes: string[][] = [];
   const reviewerStarts: string[] = [];
-  let verdict = 'pass';
+  const verdict = 'pass';
   let refusedOnce = false;
   // Orca refuses a wake while the Lead terminal is still bound to its last, unretained dispatch (seen live).
   const retained = new Set<string>();

@@ -375,7 +375,7 @@ describe('Solo autopilot', () => {
   }, 90_000);
 
   it('retries a refused resume after a review asks for changes on a green gate (seen live on SQLFMT)', async () => {
-    const { tick, state, dispatches } = await setup(
+    const { tick, dispatches } = await setup(
       (attempt, commit, line) =>
         commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, `attempt ${attempt}`),
       {
@@ -571,7 +571,7 @@ describe('stalled Codex input', () => {
     add('dispatch-intended', 'k');
     add('execution-started', ref);
     const nudges: string[] = [];
-    let screen = ['› [Pasted Content 7848 chars]', '  GPT-6.1 Terra medium'];
+    const screen = ['› [Pasted Content 7848 chars]', '  GPT-6.1 Terra medium'];
     const runtime: RuntimeAdapter = {
       async startLead() {
         return ref;

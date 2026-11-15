@@ -4,7 +4,7 @@ import type { Appetite } from '../domain/contracts.js';
 import type { GateReport } from '../domain/gate.js';
 import type { GoalEvent, GoalState, GoalStatus } from '../domain/transitions.js';
 import { buildInbox, type InboxItem } from '../app/inbox.js';
-import { ReadOnlyJournal } from '../store/readonly-journal.js';
+import type { ReadOnlyJournal } from '../store/readonly-journal.js';
 
 export type Holder = 'human' | 'lead' | 'controller' | 'done';
 /** Who has the ball. Typed over every status, so a new status cannot ship without a holder. */

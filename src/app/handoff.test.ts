@@ -9,7 +9,7 @@ import type { WorkPackageSpec } from '../domain/packages.js';
 import { DEFAULT_PROFILES } from '../runtime/brief.js';
 import { HandoffService } from './handoff.js';
 import type { HandoffInput, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
-import type { RuntimeProfiles, RuntimeRef } from '../domain/runtime-refs.js';
+import type { RuntimeProfiles } from '../domain/runtime-refs.js';
 
 const dirs: string[] = [];
 const stores: SqliteStore[] = [];

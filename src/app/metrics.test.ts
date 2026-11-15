@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, approval, DELIVERY, gateReport } from '../domain/fixtures.test-support.js';
 import { MetricsService } from './metrics.js';
+import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -16,11 +17,8 @@ it('summarizes attempts, blockers and review rework from the durable event log',
   dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
-  const add = (
-    type: import('../domain/transitions.js').GoalEventType,
-    data?: unknown,
-    at = '2026-11-08T00:00:00.000Z',
-  ) => store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at });
+  const add = (type: GoalEventType, data?: unknown, at = '2026-11-08T00:00:00.000Z') =>
+    store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at });
   add('goal-drafted', spec);
   add('goal-approved', approval);
   add('goal-selected');

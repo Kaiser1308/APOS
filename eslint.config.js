@@ -20,43 +20,14 @@ const NO_HAND_BUILT_EVENT = {
  */
 const TEMPORARY_EXCEPTIONS = [
   {
-    files: [
-      'src/app/controller.test.ts',
-      'src/app/integration.test.ts',
-      'src/app/merge.test.ts',
-      'src/app/metrics.test.ts',
-      'src/app/registry.test.ts',
-      'src/app/review.test.ts',
-      'src/ui/read-model.ts',
-    ],
-    rules: { '@typescript-eslint/consistent-type-imports': 'off' },
-    removeAt: 'Task 10',
-  },
-  {
-    files: [
-      'src/app/handoff.test.ts',
-      'src/app/solo.test.ts',
-      'src/app/supervisor.test.ts',
-      'src/app/verification.test.ts',
-      'src/cli.test.ts',
-    ],
-    rules: { '@typescript-eslint/no-unused-vars': 'off' },
-    removeAt: 'Task 10',
-  },
-  {
     files: ['src/app/controller.ts'],
     rules: { 'max-lines': 'off' },
-    removeAt: 'Task 10',
-  },
-  {
-    files: ['src/app/multi-supervisor.test.ts', 'src/app/supervisor.test.ts'],
-    rules: { 'prefer-const': 'off' },
-    removeAt: 'Task 10',
+    removeAt: 'Task 10b',
   },
 ];
 
 export default tseslint.config(
-  { ignores: ['dist/', 'node_modules/', '.superpowers/', 'docs/'] },
+  { ignores: ['dist/', 'node_modules/', '.superpowers/', 'docs/', 'coverage/'] },
   ...tseslint.configs.recommended,
   {
     files: ['**/*.ts'],

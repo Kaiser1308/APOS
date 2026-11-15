@@ -10,6 +10,7 @@ import { GitCommitInspector, IntegrationService, parseIntegrationInput } from '.
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { ReviewService } from './review.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
+import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -42,7 +43,7 @@ const setup = (risks: string[] = []) => {
   dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
-  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) =>
+  const add = (type: GoalEventType, data?: unknown) =>
     store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   add('goal-drafted', spec);
   add('goal-approved', approval);

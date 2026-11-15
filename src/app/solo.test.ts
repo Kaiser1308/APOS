@@ -100,7 +100,7 @@ describe('Solo dispatch', () => {
     store.close();
   });
   it('resumes phased work with the prior owner and checkpoint', async () => {
-    const { store, add, dir } = fixture();
+    const { store, add } = fixture();
     add('goal-approved', approval);
     add('goal-selected');
     add('lead-dispatch-intended', 'lead-key');
@@ -119,7 +119,7 @@ describe('Solo dispatch', () => {
     store.close();
   });
   it('does not reuse a live terminal for phased resume', async () => {
-    const { store, add, dir } = fixture();
+    const { store, add } = fixture();
     add('goal-approved', approval);
     add('goal-selected');
     add('lead-dispatch-intended', 'lead-key');
@@ -135,7 +135,7 @@ describe('Solo dispatch', () => {
     store.close();
   });
   it('does not verify Solo evidence until Orca reports successful completion', async () => {
-    const { store, add, dir } = fixture();
+    const { store, add } = fixture();
     add('goal-approved', approval);
     add('goal-selected');
     add('lead-dispatch-intended', 'lead-key');
@@ -157,7 +157,7 @@ describe('Solo dispatch', () => {
     store.close();
   });
   it('recovers a lost phased resume response without starting another attempt', async () => {
-    const { store, add, dir } = fixture();
+    const { store, add } = fixture();
     add('goal-approved', approval);
     add('goal-selected');
     add('lead-dispatch-intended', 'lead-key');
@@ -179,7 +179,7 @@ describe('Solo dispatch', () => {
     store.close();
   });
   it('reuses a failed Solo Direct owner and invalidates prior evidence for the repair attempt', async () => {
-    const { store, add, dir } = fixture();
+    const { store, add } = fixture();
     add('goal-approved', approval);
     add('goal-selected');
     add('lead-dispatch-intended', 'lead-key');
@@ -199,7 +199,7 @@ describe('Solo dispatch', () => {
     store.close();
   });
   it('parks Solo after its approved attempt budget is exhausted', async () => {
-    const { store, add, dir } = fixture();
+    const { store, add } = fixture();
     add('goal-approved', { appetite: { ...approval.appetite, maxAttempts: 1 } });
     add('goal-selected');
     add('lead-dispatch-intended', 'lead-key');

@@ -4,3 +4,4 @@ dist/
 .smoke-multi/
 .apos-home/
 *.log
+coverage/

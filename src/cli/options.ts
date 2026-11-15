@@ -1,4 +1,4 @@
-import type { GateOptions } from '../app/gate.js';
+import type { GateOptions } from '../app/gate-service.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { TelemetryProbe } from '../ports/telemetry.js';

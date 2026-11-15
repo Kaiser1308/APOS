@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
-import { PackageService } from './packages.js';
+import { PackageService } from './package-service.js';
 import { ControllerService } from './controller.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';

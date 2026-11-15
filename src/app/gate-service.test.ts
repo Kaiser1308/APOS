@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { ProjectJournal } from '../store/journal.js';
 import { initProject } from './init-project.js';
-import { GateService, GitWorktreeFactory, ShellExecutor } from './gate.js';
+import { GateService, GitWorktreeFactory, ShellExecutor } from './gate-service.js';
 import { VerificationService } from './verification.js';
 import { spec as baseSpec, proposal, sourceText, approval } from '../domain/fixtures.test-support.js';
 import type { GoalSpec } from '../domain/contracts.js';

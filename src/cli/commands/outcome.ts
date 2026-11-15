@@ -7,7 +7,7 @@ import { MergeService } from '../../app/merge.js';
 import { buildInbox } from '../../app/inbox.js';
 import { DEFAULT_UI_PORT, startUi } from '../../ui/server.js';
 import { VerificationService } from '../../app/verification.js';
-import { GateService } from '../../app/gate.js';
+import { GateService } from '../../app/gate-service.js';
 import { loadProfiles } from '../../runtime/brief.js';
 import { controllerHome } from '../../store/event-log.js';
 import type { Role } from '../../domain/runtime-refs.js';

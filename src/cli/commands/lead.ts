@@ -2,7 +2,7 @@ import { newEvent } from '../../app/events.js';
 import { parseExecutionProposal, type PhaseCheckpoint } from '../../domain/contracts.js';
 import { SoloService } from '../../app/solo.js';
 import { LeadService, assertLeadTerminal, currentLeadRef } from '../../app/lead.js';
-import { PackageService } from '../../app/packages.js';
+import { PackageService } from '../../app/package-service.js';
 import { assertExecutionSettled } from '../../app/replan.js';
 import { GoalRegistryService } from '../../app/registry.js';
 import { assertMultiWpPlannable } from '../../domain/packages.js';

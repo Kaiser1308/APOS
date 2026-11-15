@@ -1,6 +1,6 @@
 import { IntegrationService, parseIntegrationInput } from '../../app/integration.js';
 import { MergeService } from '../../app/merge.js';
-import { GateService } from '../../app/gate.js';
+import { GateService } from '../../app/gate-service.js';
 import type { CliContext } from '../context.js';
 
 export function registerIntegration(ctx: CliContext): void {

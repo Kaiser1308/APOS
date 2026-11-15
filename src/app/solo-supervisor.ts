@@ -14,7 +14,7 @@ import type { GoalEventType, GoalState } from '../domain/transitions.js';
 import { attemptLimit, handingOff } from '../domain/transitions.js';
 import { reviewReasons } from '../domain/reviews.js';
 import { CORE_SKILL, activationLine, committedFileDigest, reviewResultPath, soloReportPath } from '../runtime/brief.js';
-import { GateService } from './gate.js';
+import { GateService } from './gate-service.js';
 import { SoloService } from './solo.js';
 import { VerificationService } from './verification.js';
 import type { GoalRepository } from '../ports/goal-repository.js';

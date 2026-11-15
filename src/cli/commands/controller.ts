@@ -2,7 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { withControllerLease } from '../../store/lease.js';
 import { HandoffService } from '../../app/handoff.js';
 import { ControllerService } from '../../app/controller.js';
-import { GateService } from '../../app/gate.js';
+import { GateService } from '../../app/gate-service.js';
 import { CodexSessionProbe } from '../../runtime/telemetry.js';
 import { loadProfiles } from '../../runtime/brief.js';
 import { controllerHome } from '../../store/event-log.js';

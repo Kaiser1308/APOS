@@ -1,4 +1,4 @@
-import { PackageService } from '../../app/packages.js';
+import { PackageService } from '../../app/package-service.js';
 import { parseWorkPackage } from '../../domain/packages.js';
 import type { CliContext } from '../context.js';
 

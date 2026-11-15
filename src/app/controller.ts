@@ -1,5 +1,5 @@
 import { newEvent } from './events.js';
-import { PackageService } from './packages.js';
+import { PackageService } from './package-service.js';
 import { SoloService } from './solo.js';
 import { LeadService } from './lead.js';
 import { handingOff, type GoalState } from '../domain/transitions.js';

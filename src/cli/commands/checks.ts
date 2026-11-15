@@ -3,7 +3,7 @@ import type { Evidence } from '../../domain/contracts.js';
 import { ReviewService } from '../../app/review.js';
 import { MetricsService } from '../../app/metrics.js';
 import { VerificationService } from '../../app/verification.js';
-import { GateService } from '../../app/gate.js';
+import { GateService } from '../../app/gate-service.js';
 import type { CliContext } from '../context.js';
 
 export function registerChecks(ctx: CliContext): void {

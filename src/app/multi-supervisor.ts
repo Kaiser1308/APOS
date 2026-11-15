@@ -13,8 +13,8 @@ import {
   reviewResultPath,
 } from '../runtime/brief.js';
 import { isDeadSession } from '../runtime/orca/exec.js';
-import { GateService } from './gate.js';
-import { PackageService } from './packages.js';
+import { GateService } from './gate-service.js';
+import { PackageService } from './package-service.js';
 import { GitCommitInspector, IntegrationService } from './integration.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';

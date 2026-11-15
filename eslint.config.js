@@ -49,11 +49,6 @@ const TEMPORARY_EXCEPTIONS = [
     removeAt: 'Task 10',
   },
   {
-    files: ['src/cli-app.ts'],
-    rules: { 'max-lines': 'off' },
-    removeAt: 'Task 7',
-  },
-  {
     files: ['src/app/supervisor.ts'],
     rules: { 'max-lines': 'off' },
     removeAt: 'Task 8',

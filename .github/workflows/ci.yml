@@ -7,11 +7,6 @@ on:
 jobs:
   check:
     runs-on: windows-latest
-    # The default temp dir is an 8.3 short path (C:\Users\RUNNER~1\...), which assertGitRoot compares
-    # against Git's long path and rejects. Use the runner's long-named temp directory instead.
-    env:
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,6 +14,12 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The default temp dir is an 8.3 short path (C:\Users\RUNNER~1\...), which assertGitRoot compares
+      # against Git's long path and rejects. Use the runner's long-named temp directory instead.
+      # (The runner context is only available at step level, not in job-level env.)
       - run: npm run check
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
       - run: npm run build
       - run: npm run skills:check

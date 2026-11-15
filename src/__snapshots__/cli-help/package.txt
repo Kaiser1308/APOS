@@ -1,0 +1,18 @@
+Usage: apos package [options] [command]
+
+Options:
+  -h, --help                              display help for command
+
+Commands:
+  add [options]
+  list <goalId>
+  ready <goalId>
+  dispatch <goalId>
+  reconcile <goalId>
+  evidence [options] <goalId>
+  verify <goalId> <packageId>
+  revise [options] <goalId>
+  block [options] <goalId> <packageId>
+  unblock [options] <goalId> <packageId>
+  resume <goalId> <packageId>
+  help [command]                          display help for command

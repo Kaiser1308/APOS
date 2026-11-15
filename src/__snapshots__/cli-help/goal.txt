@@ -1,0 +1,13 @@
+Usage: apos goal [options] [command]
+
+Options:
+  -h, --help               display help for command
+
+Commands:
+  create [options]
+  list
+  approve [options] <id>
+  appetite [options] <id>
+  select <id>
+  revise [options]
+  help [command]           display help for command

@@ -1,0 +1,8 @@
+Usage: apos review [options] [command]
+
+Options:
+  -h, --help                 display help for command
+
+Commands:
+  submit [options] <goalId>
+  help [command]             display help for command

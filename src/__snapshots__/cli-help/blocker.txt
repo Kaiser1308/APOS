@@ -1,0 +1,9 @@
+Usage: apos blocker [options] [command]
+
+Options:
+  -h, --help              display help for command
+
+Commands:
+  report [options] <id>
+  resolve [options] <id>
+  help [command]          display help for command

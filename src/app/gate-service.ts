@@ -3,20 +3,39 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { newEvent } from './events.js';
 import type { CommandCheck } from '../domain/contracts.js';
-import { attemptKey, evaluateCommandCheck, extractFailures, protectedCheck, evaluateManualCheck, requiredChecks, sourceDigest, summarizeGate, type CheckResult, type CheckRun, type GateEnvironment, type GateReport } from '../domain/gate.js';
-import type { GoalRepository } from '../store/journal.js';
+import {
+  attemptKey,
+  evaluateCommandCheck,
+  extractFailures,
+  protectedCheck,
+  evaluateManualCheck,
+  requiredChecks,
+  sourceDigest,
+  summarizeGate,
+  type CheckResult,
+  type CheckRun,
+  type GateEnvironment,
+  type GateReport,
+} from '../domain/gate.js';
 import { assertGitRoot } from '../store/project-history.js';
-import { GitCommitInspector, type CommitInspector } from './integration.js';
-import type { PackageRuntimeRef } from './packages.js';
+import { GitCommitInspector } from './integration.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
+import type { CommitInspector } from '../ports/commit-inspector.js';
 
 export type ExecResult = { exitCode: number | null; timedOut: boolean; output: string };
 export interface CommandExecutor {
   readonly shell: string;
   run(command: string, cwd: string, env: Record<string, string>, timeoutMs: number): ExecResult;
 }
-export interface Workspace { readonly path: string; dispose(): void }
-export interface WorkspaceFactory { checkout(repoPath: string, commit: string): Workspace }
+export interface Workspace {
+  readonly path: string;
+  dispose(): void;
+}
+export interface WorkspaceFactory {
+  checkout(repoPath: string, commit: string): Workspace;
+}
 
 const TIMEOUT_MARK = '[apos] check timed out; process tree killed';
 /**
@@ -44,10 +63,23 @@ child.on('exit', code => {
 export class ShellExecutor implements CommandExecutor {
   readonly shell = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : '/bin/sh';
   run(command: string, cwd: string, env: Record<string, string>, timeoutMs: number): ExecResult {
-    const result = spawnSync(process.execPath, ['-e', LAUNCHER, command, String(timeoutMs)], { cwd, env: { ...process.env, ...env }, encoding: 'utf8', timeout: timeoutMs + 30_000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+    const result = spawnSync(process.execPath, ['-e', LAUNCHER, command, String(timeoutMs)], {
+      cwd,
+      env: { ...process.env, ...env },
+      encoding: 'utf8',
+      timeout: timeoutMs + 30_000,
+      maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true,
+    });
     const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-    const timedOut = (result.status === 124 && output.includes(TIMEOUT_MARK)) || (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
-    return { exitCode: timedOut ? null : result.status, timedOut, output: `${output}${result.error && !timedOut ? `\n[apos] ${result.error.message}` : ''}` };
+    const timedOut =
+      (result.status === 124 && output.includes(TIMEOUT_MARK)) ||
+      (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
+    return {
+      exitCode: timedOut ? null : result.status,
+      timedOut,
+      output: `${output}${result.error && !timedOut ? `\n[apos] ${result.error.message}` : ''}`,
+    };
   }
 }
 
@@ -55,15 +87,24 @@ export class ShellExecutor implements CommandExecutor {
 export class GitWorktreeFactory implements WorkspaceFactory {
   checkout(repoPath: string, commit: string): Workspace {
     const repo = assertGitRoot(repoPath);
-    const full = execFileSync('git', ['-C', repo, 'rev-parse', '--verify', `${commit}^{commit}`], { encoding: 'utf8' }).trim();
+    const full = execFileSync('git', ['-C', repo, 'rev-parse', '--verify', `${commit}^{commit}`], {
+      encoding: 'utf8',
+    }).trim();
     const path = mkdtempSync(join(tmpdir(), 'apos-gate-'));
     execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', '--force', path, full], { stdio: 'ignore' });
     const head = execFileSync('git', ['-C', path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const dispose = () => {
-      try { execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', path], { stdio: 'ignore' }); }
-      catch { rmSync(path, { recursive: true, force: true }); execFileSync('git', ['-C', repo, 'worktree', 'prune'], { stdio: 'ignore' }); }
+      try {
+        execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', path], { stdio: 'ignore' });
+      } catch {
+        rmSync(path, { recursive: true, force: true });
+        execFileSync('git', ['-C', repo, 'worktree', 'prune'], { stdio: 'ignore' });
+      }
     };
-    if (head !== full) { dispose(); throw new Error(`Gate workspace is at ${head}, expected ${full}`); }
+    if (head !== full) {
+      dispose();
+      throw new Error(`Gate workspace is at ${head}, expected ${full}`);
+    }
     return { path, dispose };
   }
 }
@@ -71,9 +112,14 @@ export class GitWorktreeFactory implements WorkspaceFactory {
 /** sha256 of the committed source snapshot, or undefined when none is committed. */
 export function committedSourceDigest(repoPath: string, goalId: string): string | undefined {
   try {
-    const text = execFileSync('git', ['-C', assertGitRoot(repoPath), 'show', `HEAD:.apos/goals/${goalId}/source.md`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const text = execFileSync('git', ['-C', assertGitRoot(repoPath), 'show', `HEAD:.apos/goals/${goalId}/source.md`], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
     return sourceDigest(text);
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
 }
 
 export type GateOptions = {
@@ -94,21 +140,40 @@ export class GateService {
   private readonly digest: (repoPath: string, goalId: string) => string | undefined;
   private readonly now: () => string;
 
-  constructor(private readonly store: GoalRepository, options: GateOptions = {}) {
+  constructor(
+    private readonly store: GoalRepository,
+    options: GateOptions = {},
+  ) {
     this.inspector = options.inspector ?? new GitCommitInspector();
     this.workspaces = options.workspaces ?? new GitWorktreeFactory();
     this.executor = options.executor ?? new ShellExecutor();
-    this.artifactRoot = options.artifactRoot ?? process.env.APOS_ARTIFACTS ?? store.artifactRoot?.() ?? join(homedir(), '.apos', 'artifacts');
-    this.digest = options.sourceDigest ?? (store.currentSourceDigest ? (_repo: string, goalId: string) => store.currentSourceDigest!(goalId) : committedSourceDigest);
+    this.artifactRoot =
+      options.artifactRoot ??
+      process.env.APOS_ARTIFACTS ??
+      store.artifactRoot?.() ??
+      join(homedir(), '.apos', 'artifacts');
+    this.digest =
+      options.sourceDigest ??
+      (store.currentSourceDigest
+        ? (_repo: string, goalId: string) => store.currentSourceDigest!(goalId)
+        : committedSourceDigest);
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
   /** Reruns the Goal's checks on the merge commit, against the target head the merge was made on. */
   runPostMerge(goalId: string, repoPath: string): GateReport {
     const state = this.store.getGoal(goalId);
-    if (state?.status !== 'verified' || !state.merge) throw new Error('Merged, verified Goal required for the post-merge gate');
-    const parent = execFileSync('git', ['-C', assertGitRoot(repoPath), 'rev-parse', `${state.merge.mergeCommit}^1`], { encoding: 'utf8' }).trim();
-    return this.execute(goalId, repoPath, { deliveryCommit: state.merge.mergeCommit, baseCommit: parent }, 'post-merge');
+    if (state?.status !== 'verified' || !state.merge)
+      throw new Error('Merged, verified Goal required for the post-merge gate');
+    const parent = execFileSync('git', ['-C', assertGitRoot(repoPath), 'rev-parse', `${state.merge.mergeCommit}^1`], {
+      encoding: 'utf8',
+    }).trim();
+    return this.execute(
+      goalId,
+      repoPath,
+      { deliveryCommit: state.merge.mergeCommit, baseCommit: parent },
+      'post-merge',
+    );
   }
 
   /** Runs the Goal checks a package's acceptance names, on the package head against its own base. */
@@ -117,27 +182,55 @@ export class GateService {
     const item = state?.packages?.[packageId];
     if (!state || item?.status !== 'executing') throw new Error('Executing package required for package gate');
     const wanted = new Set(item.spec.acceptance.flatMap(criterion => criterion.checkIds ?? []));
-    const base = (item.runtimeRef as PackageRuntimeRef | undefined)?.baseCommit;
+    const base = item.runtimeRef?.baseCommit;
     if (!base) throw new Error('Package base commit unknown');
-    if (!this.inspector.contains(repoPath, base, head)) throw new Error('Package head does not descend from its base commit');
+    if (!this.inspector.contains(repoPath, base, head))
+      throw new Error('Package head does not descend from its base commit');
     const artifacts = join(this.artifactRoot, goalId, `${packageId}-${randomUUID()}`);
     mkdirSync(artifacts, { recursive: true });
-    const checks: CheckResult[] = state.spec.checks.filter(check => wanted.has(check.id)).map(check => {
-      if (check.kind === 'manual') return evaluateManualCheck(check, head, state.manualConfirmations ?? []);
-      const baseRuns = check.expect === 'no-new-failures' ? this.runMany(check, repoPath, base, 'base', artifacts) : [];
-      return this.evaluate(check, repoPath, head, baseRuns, artifacts);
-    });
+    const checks: CheckResult[] = state.spec.checks
+      .filter(check => wanted.has(check.id))
+      .map(check => {
+        if (check.kind === 'manual') return evaluateManualCheck(check, head, state.manualConfirmations ?? []);
+        const baseRuns =
+          check.expect === 'no-new-failures' ? this.runMany(check, repoPath, base, 'base', artifacts) : [];
+        return this.evaluate(check, repoPath, head, baseRuns, artifacts);
+      });
     const changedFiles = this.inspector.files(repoPath, head, base);
     const guard = protectedCheck(goalId, changedFiles);
     if (guard) checks.push(guard);
     const report: GateReport = {
-      gateId: `GATE-${randomUUID()}`, goalId, goalVersion: state.spec.version, sourceSha256: state.spec.source.sha256,
-      baseCommit: base, deliveryCommit: head, attemptKey: `${item.spec.id}@${item.spec.version}:${item.attempts}`, phase: 'delivery',
+      gateId: `GATE-${randomUUID()}`,
+      goalId,
+      goalVersion: state.spec.version,
+      sourceSha256: state.spec.source.sha256,
+      baseCommit: base,
+      deliveryCommit: head,
+      attemptKey: `${item.spec.id}@${item.spec.version}:${item.attempts}`,
+      phase: 'delivery',
       changedFiles,
-      environment: { platform: process.platform, shell: this.executor.shell, node: process.version }, checks, result: summarizeGate(checks), at: this.now()
+      environment: { platform: process.platform, shell: this.executor.shell, node: process.version },
+      checks,
+      result: summarizeGate(checks),
+      at: this.now(),
     };
     writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
-    this.store.append({ id: randomUUID(), goalId, type: 'package-gate-recorded', data: { packageId, report, signature: checks.filter(c => c.status !== 'pass').map(c => `${c.checkId}[${c.newFailures.join(',')}]`).sort().join('|') }, at: this.now() });
+    this.store.append(
+      newEvent(
+        goalId,
+        'package-gate-recorded',
+        {
+          packageId,
+          report,
+          signature: checks
+            .filter(c => c.status !== 'pass')
+            .map(c => `${c.checkId}[${c.newFailures.join(',')}]`)
+            .sort()
+            .join('|'),
+        },
+        this.now(),
+      ),
+    );
     return report;
   }
 
@@ -147,48 +240,78 @@ export class GateService {
     return this.execute(goalId, repoPath, input, 'delivery');
   }
 
-  private execute(goalId: string, repoPath: string, input: { deliveryCommit: string; baseCommit?: string }, phase: 'delivery' | 'post-merge'): GateReport {
+  private execute(
+    goalId: string,
+    repoPath: string,
+    input: { deliveryCommit: string; baseCommit?: string },
+    phase: 'delivery' | 'post-merge',
+  ): GateReport {
     const state = this.store.getGoal(goalId)!;
     const current = this.digest(repoPath, goalId);
-    if (current !== state.spec.source.sha256) throw new Error('Source snapshot changed or missing since approval; revise the Goal before gating');
-    const packageBase = Object.values(state.packages ?? {}).map(item => (item.runtimeRef as PackageRuntimeRef | undefined)?.baseCommit).find(Boolean);
+    if (current !== state.spec.source.sha256)
+      throw new Error('Source snapshot changed or missing since approval; revise the Goal before gating');
+    const packageBase = Object.values(state.packages ?? {})
+      .map(item => item.runtimeRef?.baseCommit)
+      .find(Boolean);
     // The commit the owner's worktree was created from is the truest base; the proposal's is a fallback.
-    const baseCommit = input.baseCommit ?? (state.runtimeRef as { baseCommit?: string } | undefined)?.baseCommit ?? packageBase ?? state.proposal?.baseCommit;
+    const baseCommit = input.baseCommit ?? state.runtimeRef?.baseCommit ?? packageBase ?? state.proposal?.baseCommit;
     if (!baseCommit) throw new Error('Base commit unknown; record it in the proposal or pass --base');
-    for (const [label, ref] of [['base', baseCommit], ['delivery', input.deliveryCommit]] as const) {
-      if (!this.inspector.exists(repoPath, ref)) throw new Error(`Full ${label} commit required and must exist: ${ref}`);
+    for (const [label, ref] of [
+      ['base', baseCommit],
+      ['delivery', input.deliveryCommit],
+    ] as const) {
+      if (!this.inspector.exists(repoPath, ref))
+        throw new Error(`Full ${label} commit required and must exist: ${ref}`);
     }
-    if (!this.inspector.contains(repoPath, baseCommit, input.deliveryCommit)) throw new Error('Delivery commit does not descend from the base commit');
+    if (!this.inspector.contains(repoPath, baseCommit, input.deliveryCommit))
+      throw new Error('Delivery commit does not descend from the base commit');
 
     const attempt = attemptKey(state);
     const gateId = `GATE-${randomUUID()}`;
     const artifacts = join(this.artifactRoot, goalId, gateId);
     mkdirSync(artifacts, { recursive: true });
     const checks: CheckResult[] = requiredChecks(state.spec).map(check => {
-      if (check.kind === 'manual') return evaluateManualCheck(check, input.deliveryCommit, state.manualConfirmations ?? []);
-      const base = check.expect === 'no-new-failures' ? this.runMany(check, repoPath, baseCommit, 'base', artifacts) : [];
+      if (check.kind === 'manual')
+        return evaluateManualCheck(check, input.deliveryCommit, state.manualConfirmations ?? []);
+      const base =
+        check.expect === 'no-new-failures' ? this.runMany(check, repoPath, baseCommit, 'base', artifacts) : [];
       return this.evaluate(check, repoPath, input.deliveryCommit, base, artifacts);
     });
-    const environment: GateEnvironment = { platform: process.platform, shell: this.executor.shell, node: process.version };
+    const environment: GateEnvironment = {
+      platform: process.platform,
+      shell: this.executor.shell,
+      node: process.version,
+    };
     const changedFiles = this.inspector.files(repoPath, input.deliveryCommit, baseCommit);
     // After a merge the target legitimately carries APOS milestone commits; the guard applies to deliveries.
     const guard = phase === 'delivery' ? protectedCheck(goalId, changedFiles) : undefined;
     if (guard) checks.push(guard);
     const report: GateReport = {
-      gateId, goalId, goalVersion: state.spec.version, sourceSha256: state.spec.source.sha256,
-      baseCommit, deliveryCommit: input.deliveryCommit, attemptKey: attempt, phase,
-      changedFiles, environment, checks, result: summarizeGate(checks), at: this.now()
+      gateId,
+      goalId,
+      goalVersion: state.spec.version,
+      sourceSha256: state.spec.source.sha256,
+      baseCommit,
+      deliveryCommit: input.deliveryCommit,
+      attemptKey: attempt,
+      phase,
+      changedFiles,
+      environment,
+      checks,
+      result: summarizeGate(checks),
+      at: this.now(),
     };
     writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
-    this.store.append({ id: randomUUID(), goalId, type: 'gate-recorded', data: report, at: this.now() });
+    this.store.append(newEvent(goalId, 'gate-recorded', report, this.now()));
     return report;
   }
 
   confirmManual(goalId: string, input: { checkId: string; deliveryCommit: string; by: string; note: string }): void {
     const state = this.store.getGoal(goalId);
-    const owner = (state?.runtimeRef as { owner?: string } | undefined)?.owner;
-    if (owner && input.by.trim().toLowerCase() === owner.toLowerCase()) throw new Error('Manual check must be confirmed by someone other than the owner');
-    this.store.append({ id: randomUUID(), goalId, type: 'check-confirmed', data: input, at: this.now() });
+    const owner = state?.runtimeRef?.owner;
+    if (owner && input.by.trim().toLowerCase() === owner.toLowerCase())
+      throw new Error('Manual check must be confirmed by someone other than the owner');
+    this.store.append(newEvent(goalId, 'check-confirmed', input, this.now()));
   }
 
   /**
@@ -196,18 +319,42 @@ export class GateService {
    * (test_run_with_callback), which sent the owner to fix nothing. A new failure counts only if it
    * reproduces on one fresh delivery rerun.
    */
-  private evaluate(check: CommandCheck, repoPath: string, commit: string, base: CheckRun[], artifacts: string): CheckResult {
+  private evaluate(
+    check: CommandCheck,
+    repoPath: string,
+    commit: string,
+    base: CheckRun[],
+    artifacts: string,
+  ): CheckResult {
     const first = evaluateCommandCheck(check, base, this.runMany(check, repoPath, commit, 'delivery', artifacts));
     if (first.status !== 'fail' || check.expect !== 'no-new-failures' || !first.newFailures.length) return first;
     const [again] = this.runMany({ ...check, runs: 1 }, repoPath, commit, 'recheck', artifacts);
     const seen = new Set(again && !again.timedOut ? again.failures : first.newFailures);
     const persistent = first.newFailures.filter(item => seen.has(item));
     const delivery = again ? [...first.delivery, again] : first.delivery;
-    if (persistent.length) return { ...first, delivery, newFailures: persistent, reason: `${persistent.length} new failure(s) vs base, reproduced on recheck` };
-    return { ...first, delivery, status: 'pass', newFailures: [], reason: `new failure(s) did not reproduce on recheck (flaky): ${first.newFailures.join(', ')}` };
+    if (persistent.length)
+      return {
+        ...first,
+        delivery,
+        newFailures: persistent,
+        reason: `${persistent.length} new failure(s) vs base, reproduced on recheck`,
+      };
+    return {
+      ...first,
+      delivery,
+      status: 'pass',
+      newFailures: [],
+      reason: `new failure(s) did not reproduce on recheck (flaky): ${first.newFailures.join(', ')}`,
+    };
   }
 
-  private runMany(check: CommandCheck, repoPath: string, commit: string, role: 'base' | 'delivery' | 'recheck', artifacts: string): CheckRun[] {
+  private runMany(
+    check: CommandCheck,
+    repoPath: string,
+    commit: string,
+    role: 'base' | 'delivery' | 'recheck',
+    artifacts: string,
+  ): CheckRun[] {
     const runs: CheckRun[] = [];
     for (let n = 1; n <= check.runs; n++) {
       const workspace = this.workspaces.checkout(repoPath, commit);
@@ -217,13 +364,17 @@ export class GateService {
         const logRef = join(artifacts, `${check.id}-${role}-${n}.log`);
         writeFileSync(logRef, log);
         runs.push({
-          commit, exitCode: result.exitCode, timedOut: result.timedOut, logRef,
+          commit,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          logRef,
           logSha256: createHash('sha256').update(log).digest('hex'),
-          failures: extractFailures(result.output, check.failurePattern)
+          failures: extractFailures(result.output, check.failurePattern),
         });
-      } finally { workspace.dispose(); }
+      } finally {
+        workspace.dispose();
+      }
     }
     return runs;
   }
 }
-

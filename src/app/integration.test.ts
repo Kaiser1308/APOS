@@ -6,39 +6,104 @@ import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, gateReport as fixtureGate, approval } from '../domain/fixtures.test-support.js';
 import { attemptKey } from '../domain/gate.js';
-import { GitCommitInspector, IntegrationService, parseIntegrationInput, type CommitInspector } from './integration.js';
+import { GitCommitInspector, IntegrationService, parseIntegrationInput } from './integration.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { ReviewService } from './review.js';
+import type { CommitInspector } from '../ports/commit-inspector.js';
+import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const first: WorkPackageSpec = { id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1, owner: 'worker-a', outcome: 'QR intake', scope: ['scanner'], exclusions: [], dependencies: [], interfaces: ['checkIn(token)@v1'], acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }], integration: 'Lead integrates' };
-const second: WorkPackageSpec = { ...first, id: 'WP-02', owner: 'worker-b', outcome: 'History view', scope: ['history'], acceptance: [{ id: 'WP-AC-2', text: 'view history' }] };
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+const first: WorkPackageSpec = {
+  id: 'WP-01',
+  goalId: spec.id,
+  goalVersion: 1,
+  version: 1,
+  owner: 'worker-a',
+  outcome: 'QR intake',
+  scope: ['scanner'],
+  exclusions: [],
+  dependencies: [],
+  interfaces: ['checkIn(token)@v1'],
+  acceptance: [{ id: 'WP-AC-1', text: 'scan', goalAcceptanceId: 'AC-1' }],
+  integration: 'Lead integrates',
+};
+const second: WorkPackageSpec = {
+  ...first,
+  id: 'WP-02',
+  owner: 'worker-b',
+  outcome: 'History view',
+  scope: ['history'],
+  acceptance: [{ id: 'WP-AC-2', text: 'view history' }],
+};
 const setup = (risks: string[] = []) => {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-integration-')); dirs.push(dir);
+  const dir = mkdtempSync(join(tmpdir(), 'apos-integration-'));
+  dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
   let n = 0;
-  const add = (type: import('../domain/transitions.js').GoalEventType, data?: unknown) => store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
-  add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected');
+  const add = (type: GoalEventType, data?: unknown) =>
+    store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+  add('goal-drafted', spec);
+  add('goal-approved', approval);
+  add('goal-selected');
   add('proposal-drafted', { ...proposal, mode: 'multi-wp', risks });
-  add('package-added', first); add('package-added', second); add('proposal-approved');
-  for (const [item, commitRef] of [[first, 'commit-a'], [second, 'commit-b']] as const) {
+  add('package-added', first);
+  add('package-added', second);
+  add('proposal-approved');
+  for (const [item, commitRef] of [
+    [first, 'commit-a'],
+    [second, 'commit-b'],
+  ] as const) {
     add('package-dispatch-intended', { packageId: item.id, key: `key-${item.id}` });
-    add('package-started', { packageId: item.id, ref: { runId: 'run-1', taskId: item.id, dispatchId: item.id, owner: 'worker', repoPath: dir } });
-    add('package-evidence-submitted', { packageId: item.id, packageVersion: 1, owner: item.owner, acceptanceId: item.acceptance[0].id, result: 'pass', command: 'npm test', artifactRef: `log:${item.id}`, commitRef });
+    add('package-started', {
+      packageId: item.id,
+      ref: { runId: 'run-1', taskId: item.id, dispatchId: item.id, owner: 'worker', repoPath: dir },
+    });
+    add('package-evidence-submitted', {
+      packageId: item.id,
+      packageVersion: 1,
+      owner: item.owner,
+      acceptanceId: item.acceptance[0].id,
+      result: 'pass',
+      command: 'npm test',
+      artifactRef: `log:${item.id}`,
+      commitRef,
+    });
   }
-  const gateReport = (commit: string, result?: 'green' | 'red') => ({ ...fixtureGate(commit, result), attemptKey: attemptKey(store.getGoal(spec.id)!) });
+  const gateReport = (commit: string, result?: 'green' | 'red') => ({
+    ...fixtureGate(commit, result),
+    attemptKey: attemptKey(store.getGoal(spec.id)!),
+  });
   add('gate-recorded', gateReport(INTEGRATION));
-  const review = () => new ReviewService(store).submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', session: 'review-1', result: 'pass', commitRef: INTEGRATION, note: 'Checked integrated flow' });
+  const review = () =>
+    new ReviewService(store).submit(spec.id, {
+      subject: 'goal',
+      reviewer: 'reviewer-agent',
+      session: 'review-1',
+      result: 'pass',
+      commitRef: INTEGRATION,
+      note: 'Checked integrated flow',
+    });
   return { store, dir, add, gateReport, review };
 };
 const inspector: CommitInspector = {
   exists: (_repo, ref) => ['commit-a', 'commit-b', INTEGRATION].includes(ref),
-  files: (_repo, ref) => ref === 'commit-a' ? ['src/scanner.ts'] : ref === 'commit-b' ? ['src/history.ts'] : ['src/scanner.ts', 'src/history.ts'],
-  contains: () => true
+  files: (_repo, ref) =>
+    ref === 'commit-a'
+      ? ['src/scanner.ts']
+      : ref === 'commit-b'
+        ? ['src/history.ts']
+        : ['src/scanner.ts', 'src/history.ts'],
+  contains: () => true,
 };
 const INTEGRATION = 'c'.repeat(40);
-const evidence = { commitRef: INTEGRATION, acceptance: [{ acceptanceId: 'AC-1', result: 'pass' as const, command: 'npm test', artifactRef: 'log:acceptance' }], regression: { result: 'pass' as const, command: 'npm test', artifactRef: 'log:regression' } };
+const evidence = {
+  commitRef: INTEGRATION,
+  acceptance: [{ acceptanceId: 'AC-1', result: 'pass' as const, command: 'npm test', artifactRef: 'log:acceptance' }],
+  regression: { result: 'pass' as const, command: 'npm test', artifactRef: 'log:regression' },
+};
 
 it('waits for every package before preparing integration', () => {
   const { store, dir, add } = setup();
@@ -49,9 +114,13 @@ it('waits for every package before preparing integration', () => {
 
 it('detects overlapping changes and requires an integration resolution', () => {
   const { store, dir, add, review } = setup();
-  add('package-verified', { packageId: first.id }); add('package-verified', { packageId: second.id });
+  add('package-verified', { packageId: first.id });
+  add('package-verified', { packageId: second.id });
   review();
-  const overlapping: CommitInspector = { ...inspector, files: (_repo, ref) => ref === 'integration' ? ['src/shared.ts'] : ['src/shared.ts'] };
+  const overlapping: CommitInspector = {
+    ...inspector,
+    files: (_repo, ref) => (ref === 'integration' ? ['src/shared.ts'] : ['src/shared.ts']),
+  };
   const service = new IntegrationService(store, overlapping);
   expect(service.prepare(spec.id, dir).conflicts).toEqual(['src/shared.ts']);
   expect(() => service.complete(spec.id, dir, evidence)).toThrow(/conflict resolution/i);
@@ -62,12 +131,21 @@ it('detects overlapping changes and requires an integration resolution', () => {
 
 it('requires passing Goal acceptance and regression on a real integration commit', () => {
   const { store, dir, add, review } = setup();
-  add('package-verified', { packageId: first.id }); add('package-verified', { packageId: second.id });
+  add('package-verified', { packageId: first.id });
+  add('package-verified', { packageId: second.id });
   review();
   const service = new IntegrationService(store, inspector);
   expect(() => service.complete(spec.id, dir, { ...evidence, commitRef: 'missing' })).toThrow(/commit/i);
-  expect(() => service.complete(spec.id, dir, { ...evidence, regression: { ...evidence.regression, result: 'fail' } })).toThrow(/regression/i);
-  expect(() => new IntegrationService(store, { ...inspector, contains: (_repo, ancestor) => ancestor !== 'commit-b' }).complete(spec.id, dir, evidence)).toThrow(/not integrated/i);
+  expect(() =>
+    service.complete(spec.id, dir, { ...evidence, regression: { ...evidence.regression, result: 'fail' } }),
+  ).toThrow(/regression/i);
+  expect(() =>
+    new IntegrationService(store, { ...inspector, contains: (_repo, ancestor) => ancestor !== 'commit-b' }).complete(
+      spec.id,
+      dir,
+      evidence,
+    ),
+  ).toThrow(/not integrated/i);
   service.complete(spec.id, dir, evidence);
   expect(store.getGoal(spec.id)?.status).toBe('verified');
   store.close();
@@ -75,21 +153,27 @@ it('requires passing Goal acceptance and regression on a real integration commit
 
 it('refuses integration when the controller gate on the integration commit is not green', () => {
   const { store, dir, add, gateReport } = setup();
-  add('package-verified', { packageId: first.id }); add('package-verified', { packageId: second.id });
+  add('package-verified', { packageId: first.id });
+  add('package-verified', { packageId: second.id });
   add('gate-recorded', gateReport(INTEGRATION, 'red'));
-  expect(() => new IntegrationService(store, inspector).complete(spec.id, dir, evidence)).toThrow(/green controller gate/i);
+  expect(() => new IntegrationService(store, inspector).complete(spec.id, dir, evidence)).toThrow(
+    /green controller gate/i,
+  );
   expect(store.getGoal(spec.id)?.integration).toBeUndefined();
   store.close();
 });
 
 it('checks commit existence, changed files and ancestry against Git', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-commits-')); dirs.push(dir);
+  const dir = mkdtempSync(join(tmpdir(), 'apos-commits-'));
+  dirs.push(dir);
   const git = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
   git(['init', '-q']);
-  writeFileSync(join(dir, 'scanner.txt'), 'scanner'); git(['add', 'scanner.txt']);
+  writeFileSync(join(dir, 'scanner.txt'), 'scanner');
+  git(['add', 'scanner.txt']);
   git(['-c', 'user.name=APOS', '-c', 'user.email=apos@local.invalid', 'commit', '-qm', 'scanner']);
   const firstCommit = git(['rev-parse', 'HEAD']);
-  writeFileSync(join(dir, 'history.txt'), 'history'); git(['add', 'history.txt']);
+  writeFileSync(join(dir, 'history.txt'), 'history');
+  git(['add', 'history.txt']);
   git(['-c', 'user.name=APOS', '-c', 'user.email=apos@local.invalid', 'commit', '-qm', 'history']);
   const integrated = git(['rev-parse', 'HEAD']);
   const inspector = new GitCommitInspector();
@@ -103,20 +187,40 @@ it('checks commit existence, changed files and ancestry against Git', () => {
 
 it('requires an independent Goal review for every Multi-WP integration before recording completion', () => {
   const { store, dir, add } = setup();
-  add('package-verified', { packageId: first.id }); add('package-verified', { packageId: second.id });
+  add('package-verified', { packageId: first.id });
+  add('package-verified', { packageId: second.id });
   const service = new IntegrationService(store, inspector);
   expect(() => service.complete(spec.id, dir, evidence)).toThrow(/independent Goal review/i);
   expect(store.getGoal(spec.id)?.integration).toBeUndefined();
-  new ReviewService(store).submit(spec.id, { subject: 'goal', reviewer: 'reviewer-agent', session: 'review-1', result: 'pass', commitRef: INTEGRATION, note: 'Checked integrated auth flow' });
+  new ReviewService(store).submit(spec.id, {
+    subject: 'goal',
+    reviewer: 'reviewer-agent',
+    session: 'review-1',
+    result: 'pass',
+    commitRef: INTEGRATION,
+    note: 'Checked integrated auth flow',
+  });
   service.complete(spec.id, dir, evidence);
   expect(store.getGoal(spec.id)?.status).toBe('verified');
   store.close();
 });
 
 it('reports every missing integration field in one error, with a minimal example (GitHub #11)', () => {
-  expect(() => parseIntegrationInput({ commitRef: 'a'.repeat(40) })).toThrow(/acceptance.*regression\.result.*regression\.command.*regression\.artifactRef/s);
+  expect(() => parseIntegrationInput({ commitRef: 'a'.repeat(40) })).toThrow(
+    /acceptance.*regression\.result.*regression\.command.*regression\.artifactRef/s,
+  );
   expect(() => parseIntegrationInput({})).toThrow(/commitRef.*acceptance.*regression\.result/s);
-  expect(() => parseIntegrationInput({ commitRef: 'a'.repeat(40), acceptance: [{ acceptanceId: 'AC-1', result: 'pass' }], regression: { result: 'pass', command: 'npm test', artifactRef: 'log:1' } })).toThrow(/acceptance\[0\]\.command.*acceptance\[0\]\.artifactRef/s);
-  const ok = { commitRef: 'a'.repeat(40), acceptance: [{ acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:1' }], regression: { result: 'pass', command: 'npm test', artifactRef: 'log:2' } };
+  expect(() =>
+    parseIntegrationInput({
+      commitRef: 'a'.repeat(40),
+      acceptance: [{ acceptanceId: 'AC-1', result: 'pass' }],
+      regression: { result: 'pass', command: 'npm test', artifactRef: 'log:1' },
+    }),
+  ).toThrow(/acceptance\[0\]\.command.*acceptance\[0\]\.artifactRef/s);
+  const ok = {
+    commitRef: 'a'.repeat(40),
+    acceptance: [{ acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:1' }],
+    regression: { result: 'pass', command: 'npm test', artifactRef: 'log:2' },
+  };
   expect(parseIntegrationInput(ok)).toEqual(ok);
 });

@@ -10,18 +10,37 @@ import type { GoalEventType } from '../domain/transitions.js';
 const dirs: string[] = [];
 const stores: SqliteStore[] = [];
 afterEach(() => {
-  for (const store of stores.splice(0)) { try { store.close(); } catch { /* already closed */ } }
+  for (const store of stores.splice(0)) {
+    try {
+      store.close();
+    } catch {
+      /* already closed */
+    }
+  }
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 let n = 0;
 const executing = () => {
-  const dir = mkdtempSync(join(tmpdir(), 'apos-verify-')); dirs.push(dir);
-  const store = SqliteStore.open(join(dir, 'state.sqlite')); stores.push(store);
-  const add = (type: GoalEventType, data?: unknown) => store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
-  add('goal-drafted', spec); add('goal-approved', approval); add('goal-selected'); add('proposal-drafted', proposal); add('proposal-approved'); add('execution-started', { runId: 'run_1' });
+  const dir = mkdtempSync(join(tmpdir(), 'apos-verify-'));
+  dirs.push(dir);
+  const store = SqliteStore.open(join(dir, 'state.sqlite'));
+  stores.push(store);
+  const add = (type: GoalEventType, data?: unknown) =>
+    store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+  add('goal-drafted', spec);
+  add('goal-approved', approval);
+  add('goal-selected');
+  add('proposal-drafted', proposal);
+  add('proposal-approved');
+  add('execution-started', { runId: 'run_1' });
   return { store, add };
 };
-const pass = { acceptanceId: 'AC-1', result: 'pass', command: 'npm test -- checkin', artifactRef: 'commit:abc123' } as const;
+const pass = {
+  acceptanceId: 'AC-1',
+  result: 'pass',
+  command: 'npm test -- checkin',
+  artifactRef: 'commit:abc123',
+} as const;
 
 describe('verification gate', () => {
   it('rejects a self-declared pass when the controller has not run the gate', () => {
@@ -52,14 +71,16 @@ describe('verification gate', () => {
     const { store, add } = executing();
     add('gate-recorded', gateReport(DELIVERY));
     add('checkpointed', { phase: 'repair', progress: 'fix', evidenceRefs: [] });
-    add('resume-intended', 'key-2'); add('runtime-resumed', { runId: 'run_1', dispatchId: 'ctx_2' });
+    add('resume-intended', 'key-2');
+    add('runtime-resumed', { runId: 'run_1', dispatchId: 'ctx_2' });
     expect(() => new VerificationService(store).verify(spec.id)).toThrow(/no controller gate/);
   });
   it('rejects a gate that finishes after the owner was resumed, because it judged the earlier attempt', () => {
-    const { store, add } = executing();
+    const { add } = executing();
     const stale = gateReport(DELIVERY);
     add('checkpointed', { phase: 'repair', progress: 'fix', evidenceRefs: [] });
-    add('resume-intended', 'key-2'); add('runtime-resumed', { runId: 'run_1', dispatchId: 'ctx_2' });
+    add('resume-intended', 'key-2');
+    add('runtime-resumed', { runId: 'run_1', dispatchId: 'ctx_2' });
     expect(() => add('gate-recorded', stale)).toThrow(/earlier owner attempt/);
   });
   it('keeps verified technical delivery open until Human outcome acceptance', () => {
@@ -76,6 +97,8 @@ describe('verification gate', () => {
     add('gate-recorded', gateReport(DELIVERY));
     new VerificationService(store).verify(spec.id);
     expect(store.getGoal(spec.id)?.mergeAuthorization).toBeUndefined();
-    expect(() => add('merge-completed', { sourceRef: DELIVERY, targetBranch: 'main', mergeCommit: DELIVERY })).toThrow(/Human merge authorization/);
+    expect(() => add('merge-completed', { sourceRef: DELIVERY, targetBranch: 'main', mergeCommit: DELIVERY })).toThrow(
+      /Human merge authorization/,
+    );
   });
 });

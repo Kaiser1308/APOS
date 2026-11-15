@@ -1,0 +1,11 @@
+Usage: apos gate [options] [command]
+
+controller-run checks on exact commits; owner claims are not evidence
+
+Options:
+  -h, --help                            display help for command
+
+Commands:
+  run [options] <goalId>
+  confirm [options] <goalId> <checkId>
+  help [command]                        display help for command

@@ -1,17 +1,21 @@
 import { randomUUID } from 'node:crypto';
+import { newEvent } from './events.js';
 import { attemptLimit, type GoalEventType, type GoalState } from '../domain/transitions.js';
-import type { Budget } from '../runtime/brief.js';
-import type { PhaseCheckpoint } from '../domain/contracts.js';
-import type { GoalRepository } from '../store/journal.js';
-import { OrcaRefused, type RuntimeAdapter, type RuntimeRef } from '../runtime/orca.js';
+import { OrcaRefused } from '../runtime/orca/exec.js';
 import { VerificationService, type VerificationResult } from './verification.js';
 import { clockStart, currentLeadRef } from './lead.js';
+import type { Budget, RuntimeRef } from '../domain/runtime-refs.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
+import type { RuntimeAdapter } from '../ports/runtime.js';
 
 export class SoloService {
-  constructor(private readonly store: GoalRepository, private readonly runtime: RuntimeAdapter) {}
+  constructor(
+    private readonly store: GoalRepository,
+    private readonly runtime: RuntimeAdapter,
+  ) {}
 
   private record(goalId: string, type: GoalEventType, data?: unknown): void {
-    this.store.append({ id: randomUUID(), goalId, type, data, at: new Date().toISOString() });
+    this.store.append(newEvent(goalId, type, data));
   }
 
   /** What the approved appetite leaves after `attempt` starts; the owner sees it in its brief. */
@@ -19,7 +23,10 @@ export class SoloService {
     if (!state.appetite) return undefined;
     const started = clockStart(this.store.events(state.spec.id));
     const used = started ? (Date.now() - Date.parse(started)) / 60_000 : 0;
-    return { minutesLeft: state.appetite.maxWallMinutes - used, attemptsLeft: Math.max(0, attemptLimit(state) - attempt) };
+    return {
+      minutesLeft: state.appetite.maxWallMinutes - used,
+      attemptsLeft: Math.max(0, attemptLimit(state) - attempt),
+    };
   }
 
   /**
@@ -28,10 +35,14 @@ export class SoloService {
    */
   async adopt(goalId: string): Promise<RuntimeRef> {
     const state = this.store.getGoal(goalId);
-    if (!state || !state.proposal || !state.proposal.mode.startsWith('solo')) throw new Error('Approved Solo proposal required');
-    if (state.status === 'executing' && state.runtimeRef) return state.runtimeRef as RuntimeRef;
+    if (!state || !state.proposal || !state.proposal.mode.startsWith('solo'))
+      throw new Error('Approved Solo proposal required');
+    if (state.status === 'executing' && state.runtimeRef) return state.runtimeRef;
     if (state.status !== 'ready') throw new Error('Goal is not ready to dispatch');
-    if (!state.lead || state.lead.settled) throw new Error(`No running APOS-dispatched Lead owns ${goalId}: the Human runs \`apos lead start ${goalId}\` and that Lead proposes and commits again`);
+    if (!state.lead || state.lead.settled)
+      throw new Error(
+        `No running APOS-dispatched Lead owns ${goalId}: the Human runs \`apos lead start ${goalId}\` and that Lead proposes and commits again`,
+      );
     const ref = currentLeadRef(state.lead);
     this.record(goalId, 'execution-started', ref);
     return ref;
@@ -39,9 +50,16 @@ export class SoloService {
 
   async resume(goalId: string): Promise<RuntimeRef> {
     const state = this.store.getGoal(goalId);
-    if (!state || state.status !== 'executing' || !state.proposal?.mode.startsWith('solo') || !state.runtimeRef || !state.checkpoint) throw new Error('Solo checkpoint and active owner required');
+    if (
+      !state ||
+      state.status !== 'executing' ||
+      !state.proposal?.mode.startsWith('solo') ||
+      !state.runtimeRef ||
+      !state.checkpoint
+    )
+      throw new Error('Solo checkpoint and active owner required');
     if (state.resumeIntent) {
-      const recovered = await this.runtime.recover?.(state.resumeIntent, (state.runtimeRef as RuntimeRef).runId);
+      const recovered = await this.runtime.recover?.(state.resumeIntent, state.runtimeRef!.runId);
       if (!recovered) throw new Error('Resume outcome unknown; reconcile Orca before retrying');
       this.record(goalId, 'runtime-resumed', recovered);
       return recovered;
@@ -50,14 +68,22 @@ export class SoloService {
       this.record(goalId, 'blocked', { kind: 'technical', note: 'Retry budget exhausted' });
       throw new Error('Solo retry budget exhausted; Lead decision required');
     }
-    const observation = await this.runtime.inspect(state.runtimeRef as RuntimeRef);
-    if (!['completed', 'failed'].includes(observation.outcome ?? '')) throw new Error('Prior Orca dispatch must settle before Solo resume');
+    const observation = await this.runtime.inspect(state.runtimeRef);
+    if (!['completed', 'failed'].includes(observation.outcome ?? ''))
+      throw new Error('Prior Orca dispatch must settle before Solo resume');
     const key = randomUUID();
     this.record(goalId, 'resume-intended', key);
     let next: RuntimeRef;
-    try { next = await this.runtime.resumeSolo(state.runtimeRef as RuntimeRef, state.checkpoint as PhaseCheckpoint, key, this.budget(state, (state.checkpoint as PhaseCheckpoint).attempt ?? (state.soloAttempts ?? 1) + 1)); }
-    catch (error) {
-      if (error instanceof OrcaRefused) this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
+    try {
+      next = await this.runtime.resumeSolo(
+        state.runtimeRef,
+        state.checkpoint,
+        key,
+        this.budget(state, state.checkpoint.attempt ?? (state.soloAttempts ?? 1) + 1),
+      );
+    } catch (error) {
+      if (error instanceof OrcaRefused)
+        this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
       throw error;
     }
     this.record(goalId, 'runtime-resumed', next);
@@ -67,7 +93,7 @@ export class SoloService {
   async reconcile(goalId: string): Promise<'live' | 'settled' | 'unverifiable'> {
     const state = this.store.getGoal(goalId);
     if (!state?.runtimeRef) return 'unverifiable';
-    let ref = state.runtimeRef as RuntimeRef;
+    let ref = state.runtimeRef;
     if (state.resumeIntent) {
       const recovered = await this.runtime.recover?.(state.resumeIntent, ref.runId);
       if (!recovered) return 'unverifiable';
@@ -80,9 +106,11 @@ export class SoloService {
 
   async verify(goalId: string, deliveryCommit?: string): Promise<VerificationResult> {
     const state = this.store.getGoal(goalId);
-    if (state?.status !== 'executing' || !state.proposal?.mode.startsWith('solo') || !state.runtimeRef) throw new Error('Executing Solo Goal required');
-    const observation = await this.runtime.inspect(state.runtimeRef as RuntimeRef);
-    if (observation.outcome !== 'completed') throw new Error('Orca Solo dispatch must complete successfully before verification');
+    if (state?.status !== 'executing' || !state.proposal?.mode.startsWith('solo') || !state.runtimeRef)
+      throw new Error('Executing Solo Goal required');
+    const observation = await this.runtime.inspect(state.runtimeRef);
+    if (observation.outcome !== 'completed')
+      throw new Error('Orca Solo dispatch must complete successfully before verification');
     return new VerificationService(this.store).verify(goalId, deliveryCommit);
   }
 }

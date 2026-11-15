@@ -376,10 +376,14 @@ npm run build         # tsc -> dist/
 
 ```text
 src/
-  domain/    contracts (zod), state machine (transitions), gate and Goal types
+  domain/    contracts (zod), state machine (transitions), gate, packages, runtime-refs; imports nothing else
+  ports/     interfaces the app depends on (runtime, goal repository, commit inspector, telemetry)
   store/     event log, journal, SQLite index, read-only journal
-  app/       controller, gate, packages, review, merge, supervisor, inbox
-  runtime/   Orca adapter, brief builder, telemetry probe
+  runtime/   agent adapters, brief builder, screen rules, telemetry probe
+    orca/    Orca adapter split into exec, parse, git, handoff, packages and adapter
+  app/       controller, gate-service, package-service, review, merge, supervisors, inbox, events
+  cli/       context, options and commands/ (one module per command group); entry point is src/cli.ts
+    commands/
   ui/        read model, story, agent activity, HTTP server, single-page UI
 skills/      stable role skills (apos-core, apos-pm, apos-lead, apos-worker, apos-reviewer)
 docs/        FINAL-DESIGN.md, fault-injection.md, design/

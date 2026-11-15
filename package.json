@@ -11,7 +11,12 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "skills:check": "node scripts/promote-skills.mjs --check",
-    "skills:promote": "node scripts/promote-skills.mjs"
+    "skills:promote": "node scripts/promote-skills.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "deps:check": "depcruise src --config .dependency-cruiser.cjs",
+    "check": "npm run format:check && npm run lint && npm run deps:check && npm run typecheck && npm test"
   },
   "dependencies": {
     "commander": "14.0.2",
@@ -19,7 +24,12 @@
   },
   "devDependencies": {
     "@types/node": "24.9.1",
+    "@vitest/coverage-v8": "4.1.12",
+    "dependency-cruiser": "18.7.0",
+    "eslint": "10.14.0",
+    "prettier": "3.9.10",
     "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
     "vitest": "4.1.12"
   }
 }

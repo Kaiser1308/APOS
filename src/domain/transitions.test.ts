@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { applyEvent, type GoalEvent, type GoalState } from './transitions.js';
 import { spec, proposal, approval } from './fixtures.test-support.js';
 let counter = 0;
-const event = (type: GoalEvent['type'], data?: unknown): GoalEvent => ({ id: `EV-${++counter}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+const event = (type: GoalEvent['type'], data?: unknown): GoalEvent => ({
+  id: `EV-${++counter}`,
+  goalId: spec.id,
+  type,
+  data,
+  at: '2026-11-07T00:00:00.000Z',
+});
 const start = (): GoalState => applyEvent(undefined, event('goal-drafted', spec));
 
 describe('approval gates', () => {
@@ -13,7 +19,10 @@ describe('approval gates', () => {
   it('rejects proposal approval when a Goal criterion is not mapped', () => {
     let state = applyEvent(start(), event('goal-approved', approval));
     state = applyEvent(state, event('goal-selected'));
-    state = applyEvent(state, event('proposal-drafted', { ...proposal, acceptanceMapping: [{ acceptanceId: 'OTHER', verification: 'test' }] }));
+    state = applyEvent(
+      state,
+      event('proposal-drafted', { ...proposal, acceptanceMapping: [{ acceptanceId: 'OTHER', verification: 'test' }] }),
+    );
     expect(() => applyEvent(state, event('proposal-approved'))).toThrow(/verification mapping/);
   });
   it('permits execution only after selection and current proposal approval', () => {
@@ -60,17 +69,32 @@ describe('approval gates', () => {
     state = applyEvent(state, event('goal-selected'));
     state = applyEvent(state, event('proposal-drafted', { ...proposal, mode: 'multi-wp' }));
     const wp = {
-      id: 'WP-01', goalId: spec.id, goalVersion: 1, version: 1,
-      owner: 'worker-a', outcome: 'QR intake works', scope: ['scanner'], exclusions: [],
-      dependencies: [], interfaces: ['checkIn(token) -> result@v1'],
+      id: 'WP-01',
+      goalId: spec.id,
+      goalVersion: 1,
+      version: 1,
+      owner: 'worker-a',
+      outcome: 'QR intake works',
+      scope: ['scanner'],
+      exclusions: [],
+      dependencies: [],
+      interfaces: ['checkIn(token) -> result@v1'],
       acceptance: [{ id: 'WP-AC-1', text: 'valid token checks in', goalAcceptanceId: 'AC-1' }],
-      integration: 'Lead runs check-in flow'
+      integration: 'Lead runs check-in flow',
     };
     state = applyEvent(state, event('package-added', wp));
     expect(state.packages?.['WP-01']?.spec.version).toBe(1);
     expect(() => applyEvent(state, event('package-added', wp))).toThrow(/already exists/i);
     expect(() => applyEvent(state, event('proposal-approved'))).toThrow(/at least two packages/i);
-    state = applyEvent(state, event('package-added', { ...wp, id: 'WP-02', owner: 'worker-b', acceptance: [{ id: 'WP-AC-2', text: 'history works' }] }));
+    state = applyEvent(
+      state,
+      event('package-added', {
+        ...wp,
+        id: 'WP-02',
+        owner: 'worker-b',
+        acceptance: [{ id: 'WP-AC-2', text: 'history works' }],
+      }),
+    );
     expect(applyEvent(state, event('proposal-approved')).status).toBe('ready');
   });
 });

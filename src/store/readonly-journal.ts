@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyEvent, type GoalEvent, type GoalState } from '../domain/transitions.js';
 import { verifyChain } from './event-log.js';
-import type { GoalRepository } from './journal.js';
+import type { GoalRepository } from '../ports/goal-repository.js';
 
 const GOAL_FILE = /^GOAL-[A-Z0-9-]+\.jsonl$/;
 
@@ -20,7 +20,11 @@ export class ReadOnlyJournal implements GoalRepository {
 
   constructor(readonly home: string) {
     const dir = join(home, 'events');
-    const names = existsSync(dir) ? readdirSync(dir).filter(name => GOAL_FILE.test(name)).sort() : [];
+    const names = existsSync(dir)
+      ? readdirSync(dir)
+          .filter(name => GOAL_FILE.test(name))
+          .sort()
+      : [];
     for (const name of names) {
       const goalId = name.slice(0, -'.jsonl'.length);
       try {
@@ -36,11 +40,25 @@ export class ReadOnlyJournal implements GoalRepository {
   }
 
   /** Every Goal that has a log file, including those that failed to load. */
-  goalIds(): string[] { return [...new Set([...this.loaded.keys(), ...this.failures.keys()])].sort(); }
-  getGoal(id: string): GoalState | undefined { return this.loaded.get(id)?.state; }
-  listGoals(): GoalState[] { return [...this.loaded.values()].flatMap(item => item.state ?? []); }
-  events(id: string): GoalEvent[] { return this.loaded.get(id)?.events ?? []; }
-  append(): never { throw new Error('The UI journal is read-only'); }
-  artifactRoot(): string { return process.env.APOS_ARTIFACTS ?? join(this.home, 'artifacts'); }
-  sourcePath(goalId: string, version: number): string { return join(this.home, 'sources', goalId, `v${version}.md`); }
+  goalIds(): string[] {
+    return [...new Set([...this.loaded.keys(), ...this.failures.keys()])].sort();
+  }
+  getGoal(id: string): GoalState | undefined {
+    return this.loaded.get(id)?.state;
+  }
+  listGoals(): GoalState[] {
+    return [...this.loaded.values()].flatMap(item => item.state ?? []);
+  }
+  events(id: string): GoalEvent[] {
+    return this.loaded.get(id)?.events ?? [];
+  }
+  append(): never {
+    throw new Error('The UI journal is read-only');
+  }
+  artifactRoot(): string {
+    return process.env.APOS_ARTIFACTS ?? join(this.home, 'artifacts');
+  }
+  sourcePath(goalId: string, version: number): string {
+    return join(this.home, 'sources', goalId, `v${version}.md`);
+  }
 }

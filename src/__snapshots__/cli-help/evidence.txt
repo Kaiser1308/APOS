@@ -1,0 +1,9 @@
+Usage: apos evidence [options] [command]
+
+Options:
+  -h, --help          display help for command
+
+Commands:
+  add [options] <id>
+  show <id>
+  help [command]      display help for command

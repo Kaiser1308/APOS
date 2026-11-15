@@ -1,0 +1,10 @@
+Usage: apos integration [options] [command]
+
+Options:
+  -h, --help                   display help for command
+
+Commands:
+  prepare <goalId>
+  complete [options] <goalId>
+  merge [options] <goalId>
+  help [command]               display help for command

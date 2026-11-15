@@ -1,0 +1,8 @@
+Usage: apos finding [options] [command]
+
+Options:
+  -h, --help             display help for command
+
+Commands:
+  record [options] <id>
+  help [command]         display help for command

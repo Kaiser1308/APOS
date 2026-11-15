@@ -1,0 +1,17 @@
+Usage: apos execution [options] [command]
+
+Options:
+  -h, --help                     display help for command
+
+Commands:
+  start <id>                     record the Lead as the owner of an accepted
+                                 Solo plan (lead commit does this)
+  checkpoint [options] <id>
+  resume <id>
+  retry [options] <id>
+  abandon-intent [options] <id>  Human: drop a dispatch/resume intent after
+                                 confirming in Orca that it created nothing
+  status <id>
+  reconcile <id>
+  verify [options] <id>
+  help [command]                 display help for command

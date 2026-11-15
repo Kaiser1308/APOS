@@ -1,0 +1,10 @@
+Usage: apos outcome [options] [command]
+
+Options:
+  -h, --help            display help for command
+
+Commands:
+  close [options] <id>
+  revise <id>
+  stop <id>
+  help [command]        display help for command

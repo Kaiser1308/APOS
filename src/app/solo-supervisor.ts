@@ -28,10 +28,8 @@ export type SupervisorOptions = {
   telemetry?: TelemetryProbe;
   now?: () => number;
   inspector?: CommitInspector;
-  /** Moves the Lead to a fresh agent on its worktree (the handoff), for a wake whose session has ended. */ freshLead?: (
-    goalId: string,
-    repoPath: string,
-  ) => Promise<unknown>;
+  /** Moves the Lead to a fresh agent on its worktree (the handoff), for a wake whose session has ended. */
+  freshLead?: (goalId: string, repoPath: string) => Promise<unknown>;
 };
 
 /**
@@ -389,7 +387,7 @@ export class SoloSupervisor {
       this.now,
       this.options.telemetry,
       state,
-      { dispatchId: pending.dispatchId, worktreeId: pending.worktreeId } as RuntimeRef,
+      { dispatchId: pending.dispatchId, worktreeId: pending.worktreeId },
       'reviewer',
     );
     const result = await readReviewResult(this.runtime, repoPath, goalId, pending);

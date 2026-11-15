@@ -29,6 +29,7 @@ export default tseslint.config(
     ignores: TEST_FILES,
     rules: {
       'max-lines': ['error', { max: 400, skipBlankLines: true, skipComments: true }],
+      // Tests are intentionally exempt from both selectors (R4 for the event rule; `as unknown as` is simply not applied to them).
       'no-restricted-syntax': ['error', NO_AS_UNKNOWN_AS, NO_HAND_BUILT_EVENT],
     },
   },
@@ -39,6 +40,8 @@ export default tseslint.config(
   },
   {
     // Nơi duy nhất được dựng event thủ công (Đ4); luật `as unknown as` vẫn áp dụng.
+    // Both selectors share the one `no-restricted-syntax` key, so any per-file override of it must re-list
+    // the selector it does not intend to disable.
     files: ['src/app/events.ts'],
     rules: { 'no-restricted-syntax': ['error', NO_AS_UNKNOWN_AS] },
   },

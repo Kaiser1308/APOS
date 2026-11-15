@@ -162,7 +162,7 @@ export async function recordTelemetry(
   now: () => number,
   probe: TelemetryProbe | undefined,
   state: GoalState,
-  ref: RuntimeRef,
+  ref: Pick<RuntimeRef, 'dispatchId' | 'worktreeId' | 'requested'>,
   role: 'lead' | 'worker' | 'reviewer',
 ): Promise<void> {
   if (state.telemetry?.some(item => item.dispatchId === ref.dispatchId)) return;

@@ -21,5 +21,10 @@ jobs:
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
+          # Some tests run `git commit` in scratch repos and expect a Git identity to exist.
+          GIT_AUTHOR_NAME: apos-ci
+          GIT_AUTHOR_EMAIL: ci@example.invalid
+          GIT_COMMITTER_NAME: apos-ci
+          GIT_COMMITTER_EMAIL: ci@example.invalid
       - run: npm run build
       - run: npm run skills:check

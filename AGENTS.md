@@ -12,7 +12,7 @@ domain  <-  ports  <-  store, runtime, app  <-  cli, ui
 - `ports` chỉ import `domain`.
 - `runtime` và `store` import `domain` và `ports`, không import `app`.
 - `app` import `domain`, `ports`, `store`, `runtime`. Phần nối dây nằm ở `cli/`.
-- `ui` import `domain`, `ports`, `store/readonly-journal`. Ngoại lệ có ghi lại: `app/inbox` và `runtime/orca` (O10).
+- `ui` import `domain`, `ports`, `store/readonly-journal`. Ngoại lệ có ghi lại (O10): `app/inbox` và `runtime/orca/parse.ts` (file runtime duy nhất ui được import, để lấy `worktreePath`).
 - Không có vòng import, trừ vòng chỉ có type trong `domain/`.
 
 Các luật này do dependency-cruiser ép (`.dependency-cruiser.cjs`).
@@ -23,7 +23,7 @@ Các luật này do dependency-cruiser ép (`.dependency-cruiser.cjs`).
 |---|---|
 | Kiểu dữ liệu, zod contract, transitions, gate, packages, reviews | `src/domain/` |
 | Kiểu ref của runtime (`RuntimeRef`, `PackageRuntimeRef`, `RuntimeProfile`) | `src/domain/runtime-refs.ts` |
-| `UserError` (sai input, sai điều kiện trước), `InvariantError` (vi phạm bất biến); chỉ cho code mới hoặc code đang sửa | `src/domain/errors.ts` |
+| `UserError` (sai input, sai điều kiện trước), `InvariantError` (vi phạm bất biến); chỉ cho code mới hoặc code đang sửa, không đổi hàng loạt `throw new Error` cũ (file đã có, chưa chỗ nào dùng) | `src/domain/errors.ts` |
 | Interface cổng (`RuntimeAdapter`, `PackageRuntime`, `CommitInspector`, `TelemetryProbe`) | `src/ports/` |
 | Event log, journal, sqlite | `src/store/` |
 | Adapter agent, parse output Orca, git, brief, telemetry | `src/runtime/` |
@@ -38,4 +38,4 @@ Dữ liệu từ ngoài vào (file, CLI, JSON của Orca) đi qua `parseX(value:
 
 - Chạy `npm run check` trước mỗi commit (format, lint, deps, typecheck, test).
 - `npm run format` để tự format.
-- Không thêm vào `TEMPORARY_EXCEPTIONS` (`eslint.config.js`) hay các dòng `// gỡ ở Task N` (`.dependency-cruiser.cjs`). Chỉ gỡ ra.
+- Không thêm override mới vào `eslint.config.js` hay `.dependency-cruiser.cjs`; nếu một quy tắc cản việc cần làm, hỏi người dùng.

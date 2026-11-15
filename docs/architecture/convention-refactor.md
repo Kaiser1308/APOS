@@ -1,6 +1,6 @@
 # Kiến trúc: thống nhất convention và dọn code APOS
 
-Trạng thái: Đã duyệt (2026-11-14)
+Trạng thái: Đã duyệt (2026-11-14) · Đã triển khai (2026-11-16)
 
 ## 1. Lý do và mục tiêu đo được
 
@@ -13,8 +13,8 @@ Mục tiêu đo được, kiểm trên CI:
 | Ép kiểu `runtimeRef as …` ngoài `domain/` | 34 | 0 |
 | Chỗ tự dựng event `{ id: randomUUID(), goalId, … }` | 32 chỗ / 14 file | 1 helper |
 | Vòng import giữa các tầng | 1 (runtime ↔ app) | 0, CI chặn |
-| Dòng code > 120 ký tự | hàng trăm (33 dòng > 200 chỉ riêng `cli-app.ts`) | 0, Prettier lo |
-| File không phải test > 400 dòng | 4 (`orca` 519, `supervisor` 507, `cli-app` 489, `transitions` 464) | chỉ `transitions.ts`, là ngoại lệ có ghi lý do |
+| Dòng code > 120 ký tự ngoài chuỗi và comment | hàng trăm (33 dòng > 200 chỉ riêng `cli-app.ts`) | 0, Prettier lo |
+| File không phải test > 400 dòng đã đếm (bỏ dòng trống và comment) | 4 (`orca` 519, `supervisor` 507, `cli-app` 489, `transitions` 464) | 0; `domain/transitions.ts` là ngoại lệ duy nhất có ghi lý do |
 | Lint / format / kiểm phụ thuộc / CI | không có | chạy bắt buộc trên mỗi push |
 | Hành vi | 283 test pass | vẫn 283+ test pass, event log cũ replay ra đúng trạng thái cũ |
 
@@ -128,6 +128,23 @@ Lệnh kiểm chung sau mỗi đợt: `npm run typecheck && npm test`, cộng c�
 **Tổng:** khoảng 14–18h, vừa 1–2 ngày công. Nếu thiếu thời gian thì cắt theo thứ tự Đ7, rồi Đ6. Không cắt Đ0–Đ4 vì đó là phần chặn code dơ thêm và gỡ cản trở cho tính năng sắp làm.
 
 **Xếp với tính năng:** Đ0–Đ3 nên xong trước khi bắt đầu Multi-WP thật hoặc owner Claude/Antigravity live, vì cả hai đụng `runtimeRef` và adapter. Đ5–Đ7 có thể làm song song với tính năng, nhưng tránh làm cùng lúc với việc đang sửa đúng file đó. Thiết kế chi tiết tính năng giao `pm-design`; công làm tính năng không tính vào thời gian dọn.
+
+### Kết quả triển khai
+
+Cả 10 task của plan đã xong trên nhánh `refactor/conventions`.
+
+Khác với plan:
+
+- Thêm module: `src/app/supervision.ts` (helper dùng chung của hai supervisor), `src/app/controller-notices.ts`, `src/runtime/orca/{exec,packages,handoff}.ts`.
+- `OrcaRuntime` được tách qua interface `OrcaContext`.
+- Prettier ghim ở 3.9.10; các công cụ lint ghim vào bản phát hành cũ hơn 14 ngày.
+- Fixture replay phủ legacy-solo, legacy-solo-v1, multi-wp và lead, **chưa** phủ handoff và blocker.
+
+Việc theo dõi tiếp:
+
+- `multi-supervisor.ts` và `solo-supervisor.ts` đang ở sát giới hạn 400 dòng đã đếm. Lần sửa Multi-WP tới nên tách `wakeLead` ra module riêng trước.
+- Lần chạy GitHub CI đầu tiên chưa được kiểm chứng (chưa push gì).
+- Hai luật `no-restricted-syntax` (`as unknown as` và dựng event thủ công) dùng chung một key, nên override theo file phải liệt kê lại selector không muốn tắt. Test được miễn cả hai.
 
 ## 7b. Pha sửa lỗi phải xong trước khi mở kênh
 

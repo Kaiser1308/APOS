@@ -10,6 +10,7 @@ import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
 import { loadProfiles } from '../../runtime/brief.js';
 import { controllerHome } from '../../store/event-log.js';
+import { UserError } from '../../domain/errors.js';
 import type { Role } from '../../domain/runtime-refs.js';
 import type { CliContext } from '../context.js';
 
@@ -90,7 +91,7 @@ export function registerOutcome(ctx: CliContext): void {
             );
             write(`Post-merge gate ${report.result} on ${state.merge.mergeCommit}`);
             if (report.result !== 'green')
-              throw new Error(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
+              throw new UserError(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
           }
           if (runtime.releaseWorker)
             for (const dispatchId of Object.keys(state.settlements ?? {})) await runtime.releaseWorker(dispatchId);

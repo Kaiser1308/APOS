@@ -79,8 +79,13 @@ export function registerGoal(ctx: CliContext): void {
         try {
           write(`Dispatched Lead ${id}: ${(await new LeadService(journal, runtime).start(id, repo())).dispatchId}`);
         } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          // A refusal abandons the intent, so a retry is safe. Any other failure leaves the intent pending: Orca may have created the task.
+          const key = journal.getGoal(id)?.leadIntent;
           write(
-            `Lead not dispatched for ${id}: ${error instanceof Error ? error.message : String(error)}. Retry with \`apos lead start ${id}\`.`,
+            key
+              ? `Lead dispatch outcome unknown for ${id}: ${reason}. Do not retry yet: check \`orca orchestration task-list\`, then \`apos execution abandon-intent ${id} --key ${key} --reason ...\` if Orca created nothing, then \`apos lead start ${id}\`.`
+              : `Lead not dispatched for ${id}: ${reason}. Retry with \`apos lead start ${id}\`.`,
           );
         }
       }),

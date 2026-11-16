@@ -5,11 +5,31 @@ import type { GoalEventType, GoalState } from '../domain/transitions.js';
 import { worktreePath } from '../runtime/orca/parse.js';
 import type { RuntimeRef } from '../domain/runtime-refs.js';
 import type { TelemetryProbe } from '../ports/telemetry.js';
+import { attemptKey } from '../domain/gate.js';
 import type { GateReport } from '../domain/gate.js';
 import { reviewResultPath } from '../runtime/brief.js';
 import { dispatchAgent, watchDispatch } from './watch.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { RuntimeAdapter } from '../ports/runtime.js';
+
+/**
+ * True when the latest gate already judged this commit for this attempt as pending on a manual check and
+ * no confirmation has arrived since: rerunning the gate would repeat the same answer and the same notice.
+ */
+export function manualWaitUnchanged(store: GoalRepository, state: GoalState, commit: string): boolean {
+  const events = store.events(state.spec.id);
+  let at = events.length - 1;
+  while (at >= 0 && events[at].type !== 'gate-recorded') at -= 1;
+  if (at < 0) return false;
+  const gate = events[at].data as GateReport;
+  return (
+    gate.result === 'pending' &&
+    gate.phase === 'delivery' &&
+    gate.deliveryCommit === commit &&
+    gate.attemptKey === attemptKey(state) &&
+    !events.slice(at + 1).some(item => item.type === 'check-confirmed')
+  );
+}
 
 export const show = (repo: string, commit: string, path: string): string | undefined => {
   try {

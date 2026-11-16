@@ -7,6 +7,7 @@ import {
   foreignCommits,
   remaining,
   describe,
+  manualWaitUnchanged,
 } from './supervision.js';
 import { newEvent } from './events.js';
 import { clockStart } from './lead.js';
@@ -207,6 +208,7 @@ export class SoloSupervisor {
       );
     }
 
+    if (manualWaitUnchanged(this.store, state, head)) return [...actions, 'awaiting manual check'];
     const gate = this.gate.run(goalId, repoPath, { deliveryCommit: head });
     actions.push(`gate ${gate.result} on ${head}`);
     if (gate.result === 'green') {

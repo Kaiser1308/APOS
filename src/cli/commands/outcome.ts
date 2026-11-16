@@ -10,6 +10,7 @@ import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
 import { loadProfiles } from '../../runtime/brief.js';
 import { controllerHome } from '../../store/event-log.js';
+import { UserError } from '../../domain/errors.js';
 import type { Role } from '../../domain/runtime-refs.js';
 import type { CliContext } from '../context.js';
 
@@ -81,6 +82,16 @@ export function registerOutcome(ctx: CliContext): void {
             write(`Merged ${id}: ${mergeCommit}; post-merge gate ${report.result}`);
             if (report.result !== 'green')
               throw new Error(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
+          }
+          // Merged but not yet closed (the post-merge gate was pending or red): rerun it so a confirmation on the merge commit can count.
+          if (!flags.mergeTo && state.merge && state.postMergeGate?.result !== 'green') {
+            const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(
+              id,
+              repo(),
+            );
+            write(`Post-merge gate ${report.result} on ${state.merge.mergeCommit}`);
+            if (report.result !== 'green')
+              throw new UserError(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
           }
           if (runtime.releaseWorker)
             for (const dispatchId of Object.keys(state.settlements ?? {})) await runtime.releaseWorker(dispatchId);

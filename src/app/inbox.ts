@@ -1,7 +1,17 @@
+import type { GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
 export type InboxKind = 'needs-decision' | 'awaiting-outcome' | 'notice';
 export type InboxItem = { goalId: string; kind: InboxKind; detail: string; at?: string };
+
+type ManualCheckNotice = { deliveryCommit?: string; checks?: string[] };
+
+const manualCheckResolved = (state: GoalState, notice: ManualCheckNotice): boolean =>
+  (notice.checks ?? []).every(checkId =>
+    (state.manualConfirmations ?? []).some(
+      item => item.checkId === checkId && item.deliveryCommit === notice.deliveryCommit,
+    ),
+  );
 
 /**
  * What needs the Human, in the order `apos inbox` prints it. The CLI and the UI both read this, so the
@@ -41,6 +51,8 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
       if (data?.kind === 'lead-question' && data.messageId && answered.has(data.messageId)) continue;
       if (state.status === 'verified' && (notice.data as { kind?: unknown } | null)?.kind === 'awaiting-outcome')
         continue;
+      // A manual-check notice is a question about one commit: it ends once every check it lists is confirmed there.
+      if (data?.kind === 'manual-check' && manualCheckResolved(state, notice.data as ManualCheckNotice)) continue;
       items.push({ goalId, kind: 'notice', detail: JSON.stringify(notice.data), at: notice.at });
     }
   }

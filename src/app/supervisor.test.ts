@@ -10,6 +10,7 @@ import { ESCALATION_REPLY } from './controller.js';
 import { CORE_SKILL, activationLine, committedFileDigest, reviewResultPath, soloReportPath } from '../runtime/brief.js';
 import { ProjectJournal } from '../store/journal.js';
 import { SqliteStore } from '../store/sqlite.js';
+import { buildInbox } from './inbox.js';
 import { SoloSupervisor } from './solo-supervisor.js';
 import { SoloService } from './solo.js';
 import { OrcaRefused } from '../runtime/orca/exec.js';
@@ -62,6 +63,7 @@ async function setup(
     reviewerUnknown?: boolean;
     refuseResumes?: number;
     hungIdleMinutes?: number;
+    manualCheck?: boolean;
   } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'apos-auto-'));
@@ -215,7 +217,17 @@ async function setup(
   const output: string[] = [];
   const invoke = (...args: string[]) =>
     runCli(['--repo', dir, ...args], { runtime, gate: { artifactRoot: artifacts }, write: line => output.push(line) });
-  writeFileSync(join(dir, 'goal.json'), JSON.stringify(spec));
+  const goalSpec: GoalSpec = options.manualCheck
+    ? {
+        ...spec,
+        checks: [
+          ...spec.checks,
+          { id: 'CHK-M', kind: 'manual', procedure: 'Open the page', expectedResult: 'It renders' },
+        ],
+        acceptance: spec.acceptance.map(item => ({ ...item, checkIds: [...item.checkIds, 'CHK-M'] })),
+      }
+    : spec;
+  writeFileSync(join(dir, 'goal.json'), JSON.stringify(goalSpec));
   writeFileSync(join(dir, 'brief.md'), sourceText);
   writeFileSync(join(dir, 'plan.json'), JSON.stringify({ ...proposal, risks: options.risks ?? [] }));
   writeFileSync(join(dir, '.git', 'info', 'exclude'), 'goal.json\nbrief.md\nplan.json\n');
@@ -447,6 +459,84 @@ describe('Solo autopilot', () => {
     expect(state().blocker).toMatchObject({
       note: expect.stringMatching(/needs-decision: the owner.s delivery landed in the managed checkout/),
     });
+  }, 90_000);
+});
+
+describe('manual check waiting on the Human', () => {
+  it('records one gate and one notice for a commit however many ticks pass, and clears the notice once confirmed', async () => {
+    const { tick, state, invoke, dir } = await setup(
+      (attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'),
+      { manualCheck: true },
+    );
+    const events = () => {
+      const opened = ProjectJournal.open(dir);
+      try {
+        return opened.journal.events(spec.id);
+      } finally {
+        opened.close();
+      }
+    };
+    const count = (type: string, kind?: string) =>
+      events().filter(item => item.type === type && (!kind || (item.data as { kind?: string }).kind === kind)).length;
+    for (let i = 0; i < 4; i++) await tick();
+    expect(state().status).toBe('executing');
+    expect(count('gate-recorded')).toBe(1);
+    expect(count('human-notified', 'manual-check')).toBe(1);
+    const commit = state().gate!.deliveryCommit;
+    await invoke('gate', 'confirm', spec.id, 'CHK-M', '--commit', commit, '--by', 'reviewer', '--note', 'looked fine');
+    await tick();
+    expect(state().status).toBe('verified');
+    const inbox: string[] = [];
+    const opened = ProjectJournal.open(dir);
+    try {
+      inbox.push(...buildInbox(opened.journal).map(item => `${item.kind}:${item.detail}`));
+    } finally {
+      opened.close();
+    }
+    expect(inbox.some(line => line.includes('manual-check'))).toBe(false);
+  }, 90_000);
+});
+
+describe('manual check on the merge commit', () => {
+  it('lets the Human confirm a manual check on the merge commit and close the Goal once the post-merge gate is green', async () => {
+    const { tick, state, invoke, git } = await setup(
+      (attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'),
+      { manualCheck: true },
+    );
+    await tick();
+    await invoke(
+      'gate',
+      'confirm',
+      spec.id,
+      'CHK-M',
+      '--commit',
+      state().gate!.deliveryCommit,
+      '--by',
+      'reviewer',
+      '--note',
+      'ok on delivery',
+    );
+    await tick();
+    expect(state().status).toBe('verified');
+    const branch = git('branch', '--show-current');
+    await expect(invoke('outcome', 'close', spec.id, '--merge-to', branch)).rejects.toThrow(
+      /Post-merge gate is pending/,
+    );
+    expect(state()).toMatchObject({ status: 'verified', postMergeGate: { result: 'pending' } });
+    await invoke(
+      'gate',
+      'confirm',
+      spec.id,
+      'CHK-M',
+      '--commit',
+      state().merge!.mergeCommit,
+      '--by',
+      'reviewer',
+      '--note',
+      'ok on merge commit',
+    );
+    await invoke('outcome', 'close', spec.id);
+    expect(state()).toMatchObject({ status: 'closed', postMergeGate: { result: 'green' } });
   }, 90_000);
 });
 

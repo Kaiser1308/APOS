@@ -772,8 +772,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, gate };
     }
     case 'check-confirmed': {
-      requireThat(state.status === 'executing', 'Executing Goal required for manual confirmation');
       const data = event.data as ManualConfirmation;
+      // After a merge the post-merge gate reruns every check on the merge commit, so a verified Goal may be confirmed there.
+      const onMergeCommit =
+        state.status === 'verified' && !!state.merge && data?.deliveryCommit === state.merge.mergeCommit;
+      requireThat(state.status === 'executing' || onMergeCommit, 'Executing Goal required for manual confirmation');
       requireThat(
         state.spec.checks.some(item => item.id === data?.checkId && item.kind === 'manual'),
         'Unknown manual check',

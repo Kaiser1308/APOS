@@ -82,6 +82,16 @@ export function registerOutcome(ctx: CliContext): void {
             if (report.result !== 'green')
               throw new Error(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
           }
+          // Merged but not yet closed (the post-merge gate was pending or red): rerun it so a confirmation on the merge commit can count.
+          if (!flags.mergeTo && state.merge && state.postMergeGate?.result !== 'green') {
+            const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(
+              id,
+              repo(),
+            );
+            write(`Post-merge gate ${report.result} on ${state.merge.mergeCommit}`);
+            if (report.result !== 'green')
+              throw new Error(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
+          }
           if (runtime.releaseWorker)
             for (const dispatchId of Object.keys(state.settlements ?? {})) await runtime.releaseWorker(dispatchId);
         }

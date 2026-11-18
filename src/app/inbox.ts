@@ -84,7 +84,7 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
         goalId: orphan.targetGoalId,
         fromGoalId: orphan.fromGoalId,
         requirementId: orphan.id,
-        note: `Requirement ${orphan.id} (${orphan.text}) was deferred from ${orphan.fromGoalId} to ${orphan.targetGoalId}, which closed without accepting it. Adopt ${orphan.id} in a new Goal or revise ${orphan.fromGoalId} with exclusion.kind="out-of-scope".`,
+        note: `Requirement ${orphan.id} (${orphan.text}) was deferred from ${orphan.fromGoalId} to ${orphan.targetGoalId}, which closed without accepting it. ${orphan.fromGoalId} and ${orphan.targetGoalId} are closed, so the way out is a new Goal that adopts ${orphan.id} (reuse the same requirement id) or excludes it there with an exclusion.`,
       }),
       at: closedAt ?? events.at(-1)?.at,
     });

@@ -233,7 +233,7 @@ it('says so, and does not fail, when there is no transcript or no recorded workt
   dirs.push(none);
   const missing = readActivity(d.events, 'disp-w', undefined, { codex: none, claude: none })!;
   expect(missing).toMatchObject({ found: false, items: [] });
-  expect(missing.reason).toMatch(/No Codex or Claude Code transcript/);
+  expect(missing.reason).toMatch(/No transcript was found.*Codex, Claude Code and Antigravity/);
   expect(readActivity(d.events, 'disp-nope', undefined, { codex: none, claude: none })).toBeUndefined();
   const bare = await dispatched(() => undefined);
   expect(readActivity(bare.events, 'disp-w', undefined, { codex: none, claude: none })!.reason).toMatch(
@@ -417,7 +417,7 @@ it('includes dispatches created via apos handoff in story owners[].dispatches an
   const body = JSON.parse(res.body);
   expect(body.found).toBe(false);
   expect(body.reason).not.toMatch(/No Codex or Claude Code transcript/);
-  expect(body.reason).toContain('antigravity');
+  expect(body.reason).toContain('Antigravity');
   expect(body.reason).toContain('orca orchestration worker-read --dispatch ctx_rev_2');
 });
 

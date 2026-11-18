@@ -46,7 +46,7 @@ export async function exhaustedAgent(
 }
 
 export const exhaustedNote = (role: Role, agent: string | undefined, message: string, handoffHint: string) =>
-  `the ${role} agent${agent ? ` (${agent})` : ''} is out of quota: "${message}". Move its work to another agent on the same worktree: \`${handoffHint}\` (this also makes that agent the ${role} profile; or omit \`--agent\` for a fresh session with the same agent).`;
+  `the ${role} agent${agent ? ` (${agent})` : ''} has stopped on an error: "${message}". Move its work to another agent on the same worktree: \`${handoffHint}\` (this also makes that agent the ${role} profile; or omit \`--agent\` for a fresh session with the same agent).`;
 
 /**
  * Orca reports an agent that ran out of quota itself, as an escalation on the Run (seen live 2026-11-14: subject
@@ -217,7 +217,9 @@ export async function watchDispatch(
       message: exhausted.message,
       handoffHint: input.handoffHint,
     });
-    return [`${input.role} ${input.dispatchId} out of quota (${exhausted.agent ?? 'unknown agent'}); Human notified`];
+    return [
+      `${input.role} ${input.dispatchId} stopped on an error (${exhausted.agent ?? 'unknown agent'}); Human notified`,
+    ];
   }
   const threshold = input.idleNoticeMinutes === undefined ? OWNER_IDLE_MINUTES : input.idleNoticeMinutes;
   if (threshold === null || idleMinutes < threshold || seen('owner-idle')) return [];

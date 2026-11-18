@@ -299,7 +299,7 @@ Order: the Lead integrates and commits; the controller gates that commit and dis
 What to know before relying on it:
 
 - **No reasoning is shown.** Both agents encrypt or blank their reasoning, so only what they wrote and did is visible. This is the agent's own account, not a verified one.
-- **Transcripts are matched to a dispatch by worktree path and time**, not by an id. The page says so.
+- **Transcripts are matched to a dispatch by worktree path and time.** Where the transcript head carries the dispatch id (Antigravity), that id also matches; Codex and Claude Code have no such id, so a reused worktree is told apart only by the time window. The page says so.
 - **Secrets are hidden by pattern** (keys, tokens, `NAME_KEY=value`). That is best effort, not a guarantee, and a transcript can contain anything the agent saw.
 - **There is no login.** It binds to loopback, checks the `Host` header, accepts only GET and HEAD, and resolves every request by id rather than path, but anything running as your OS user can read it. Keep it on a machine only you use.
 - It reads event logs without locking, creating or rebuilding anything. A torn final line is ignored, and a Goal whose hash chain is broken is flagged while the others still show.
@@ -414,5 +414,5 @@ Known limits:
 - **Upgrading from a version before the Lead dispatch.** A Goal selected, planned or accepted under the old flow has no APOS Lead: `lead commit` refuses it and `apos inbox` asks you to run `apos lead start <id>`; the new Lead proposes and commits again. Goals already executing are unaffected. Do not roll back below this version once a log holds `lead-*` events: older builds cannot replay event types they do not know (this build ignores unknown ones).
 - **The Lead runs `apos` with `--repo`.** It works in its own worktree, so its commands must name the managed repo; its brief says so.
 - **Claude and Antigravity owners have not yet run a full Goal live.** Their screen rules come from real captures (`src/runtime/fixtures/screens/`); Orca opens Claude as a chat, so there is no composer to rescue. Antigravity's out-of-quota line is unknown.
-- **Agent activity in the UI is verified against Codex dispatches.** The Claude Code reader works on real Claude Code transcripts but has not yet seen a Worker dispatched by APOS.
+- **Agent activity in the UI is verified against Codex dispatches.** The Claude Code reader works on real Claude Code transcripts but has not yet seen a Worker dispatched by APOS. The Antigravity reader (root `ANTIGRAVITY_HOME`, default `~/.gemini/antigravity-cli`; `history.jsonl` and `brain/<id>/.system_generated/logs/transcript.jsonl`) is tested only against synthetic fixtures, not verified against a real Antigravity run.
 - **Single host, trusted user** (see the trust model).

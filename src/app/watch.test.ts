@@ -99,7 +99,7 @@ describe('watchDispatch', () => {
     expect(await watchDispatch(store, runtime, () => T0, input(dir))).toEqual([]);
     idle.minutes = 3;
     expect(await watchDispatch(store, runtime, () => T0, input(dir))).toEqual([
-      'worker ctx_1 out of quota (claude); Human notified',
+      'worker ctx_1 stopped on an error (claude); Human notified',
     ]);
     expect(agents).toEqual(['claude']);
     expect(await watchDispatch(store, runtime, () => T0, input(dir))).toEqual([]);
@@ -160,7 +160,7 @@ describe('wired into every running dispatch', () => {
     const actions = await new SoloSupervisor(store, fakeRuntime(ref, { minutes: 3 }, { quota: QUOTA }), {
       now: () => T0 + 60_000,
     }).step(spec.id, dir);
-    expect(actions).toContain('lead ctx_1 out of quota (claude); Human notified');
+    expect(actions).toContain('lead ctx_1 stopped on an error (claude); Human notified');
     expect(String(notices('agent-exhausted')[0].note)).toContain(`apos handoff ${spec.id} --agent`);
   });
 
@@ -212,7 +212,7 @@ describe('wired into every running dispatch', () => {
     const actions = await new MultiSupervisor(store, fakeRuntime(ref, { minutes: 3 }, { quota: QUOTA }), {
       now: () => T0 + 60_000,
     }).step(spec.id, dir);
-    expect(actions).toContain('worker ctx_wp out of quota (claude); Human notified');
+    expect(actions).toContain('worker ctx_wp stopped on an error (claude); Human notified');
     expect(notices('agent-exhausted')[0]).toMatchObject({ packageId: 'WP-01', role: 'worker' });
     expect(String(notices('agent-exhausted')[0].note)).toContain('--package WP-01');
   });
@@ -240,7 +240,7 @@ describe('wired into every running dispatch', () => {
       fakeRuntime(ref, { minutes: 3 }, { quota: QUOTA }),
       () => T0 + 60_000,
     ).reconcile(spec.id);
-    expect(actions).toContain('lead ctx_lead out of quota (claude); Human notified');
+    expect(actions).toContain('lead ctx_lead stopped on an error (claude); Human notified');
     expect(notices('agent-exhausted')[0]).toMatchObject({ role: 'lead', agent: 'claude' });
     expect(notices('lead-idle')).toHaveLength(0);
   });

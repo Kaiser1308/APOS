@@ -48,13 +48,16 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
     }
   >();
 
+  const keyOf = (state: GoalState, id: string): string => `${state.spec.source?.sha256 ?? ''}|${id}`;
+
   for (const state of relevant) {
     for (const req of state.spec.requirements ?? []) {
-      const existing = reqMap.get(req.id);
+      const key = keyOf(state, req.id);
+      const existing = reqMap.get(key);
       if (existing) {
         existing.entries.push({ goal: state, req });
       } else {
-        reqMap.set(req.id, {
+        reqMap.set(key, {
           id: req.id,
           text: req.text,
           sourcePath: state.spec.source?.path ?? '',
@@ -65,10 +68,10 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
     }
   }
 
-  // Also check if another Goal in `goals` (even with a newer source snapshot) accepted a requirement id
+  // Another Goal of the SAME source may accept/defer a requirement id; other sources never mix.
   for (const state of goals) {
     for (const req of state.spec.requirements ?? []) {
-      const existing = reqMap.get(req.id);
+      const existing = reqMap.get(keyOf(state, req.id));
       if (existing && !existing.entries.some(e => e.goal.spec.id === state.spec.id)) {
         existing.entries.push({ goal: state, req });
       }

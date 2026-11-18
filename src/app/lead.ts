@@ -256,7 +256,9 @@ export class LeadService {
           note: exhaustedNote('lead', exhausted.agent, exhausted.message, `apos handoff ${goalId} --agent <other>`),
         })
       )
-        actions.push(`lead ${lead.current} out of quota (${exhausted.agent ?? 'unknown agent'}); Human notified`);
+        actions.push(
+          `lead ${lead.current} stopped on an error (${exhausted.agent ?? 'unknown agent'}); Human notified`,
+        );
     } else if (
       this.store
         .events(goalId)

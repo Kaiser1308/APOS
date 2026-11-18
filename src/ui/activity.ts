@@ -1,63 +1,24 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { GoalEvent } from '../domain/transitions.js';
 import { worktreePath } from '../runtime/orca/parse.js';
+import { findAntigravity } from './activity-antigravity.js';
+import {
+  MAX_ITEMS,
+  asText,
+  completeOnly,
+  item,
+  lines,
+  norm,
+  obj,
+  readScan,
+  type Activity,
+  type Agent,
+} from './activity-shared.js';
 
-/**
- * What an agent did, read from its own transcript (Codex rollout or Claude Code session). The agents' reasoning is
- * encrypted or empty in both formats, so only what they wrote, ran and got back is shown, never inferred thoughts.
- */
-export type ActivityKind = 'say' | 'plan' | 'command' | 'file-change' | 'result' | 'error';
-export type Activity = { at: string; kind: ActivityKind; text: string; truncated: boolean };
-export type Agent = 'codex' | 'claude' | 'antigravity';
-
-export const MAX_ITEM_CHARS = 4000;
-export const MAX_SCAN_BYTES = 8_000_000;
-export const MAX_ITEMS = 200;
-
-const SECRET_PATTERNS: [RegExp, string][] = [
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
-  [/\bsk-[A-Za-z0-9_-]{16,}/g, '[redacted key]'],
-  [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, '[redacted token]'],
-  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, '[redacted token]'],
-  [/\bAKIA[0-9A-Z]{16}\b/g, '[redacted key]'],
-  [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, '[redacted token]'],
-  [/\b(Bearer)\s+[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [redacted]'],
-  [/\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*)\s*[=:]\s*["']?[^\s"']{4,}/gi, '$1=[redacted]'],
-];
-/** Pattern-based: it hides common shapes of secrets and does not promise to hide every one. */
-export function redact(text: string): string {
-  return SECRET_PATTERNS.reduce((out, [pattern, to]) => out.replace(pattern, to), text);
-}
-
-function clip(text: string): { text: string; truncated: boolean } {
-  const safe = redact(text);
-  return safe.length > MAX_ITEM_CHARS
-    ? { text: `${safe.slice(0, MAX_ITEM_CHARS)}…`, truncated: true }
-    : { text: safe, truncated: false };
-}
-const item = (at: string, kind: ActivityKind, raw: string): Activity => ({ at, kind, ...clip(raw) });
-const obj = (value: unknown): Record<string, unknown> =>
-  value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-const asText = (value: unknown): string => {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value))
-    return value
-      .map(part => (typeof part === 'string' ? part : asText(obj(part).text ?? obj(part).content)))
-      .filter(Boolean)
-      .join('\n');
-  return value === undefined || value === null ? '' : JSON.stringify(value);
-};
-const lines = (raw: string): unknown[] =>
-  raw.split('\n').flatMap(line => {
-    if (!line) return [];
-    try {
-      return [JSON.parse(line)];
-    } catch {
-      return [];
-    }
-  });
+export { MAX_ITEMS, MAX_ITEM_CHARS, MAX_SCAN_BYTES, redact } from './activity-shared.js';
+export type { Activity, ActivityKind, Agent } from './activity-shared.js';
 
 /** Codex rollout lines to activity. Developer and user turns and encrypted reasoning are skipped. */
 export function parseCodex(raw: string): Activity[] {
@@ -144,71 +105,6 @@ export const defaultRoots = (): Roots => ({
   claude: join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects'),
   antigravity: process.env.ANTIGRAVITY_HOME ?? join(homedir(), '.gemini', 'antigravity-cli'),
 });
-const norm = (path: string) => resolve(path).replace(/\\/g, '/').toLowerCase();
-const unquote = (value: unknown): string => {
-  if (typeof value !== 'string') return '';
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed === 'string' ? parsed : value;
-  } catch {
-    return value;
-  }
-};
-
-/** Antigravity CLI transcript lines (`brain/<id>/.system_generated/logs/transcript.jsonl`) to activity. */
-export function parseAntigravity(raw: string): Activity[] {
-  const out: Activity[] = [];
-  for (const row of lines(raw)) {
-    const r = obj(row),
-      at = typeof r.created_at === 'string' ? r.created_at : '';
-    if (!at) continue;
-    if (r.type === 'PLANNER_RESPONSE') {
-      const text = typeof r.content === 'string' ? r.content.trim() : '';
-      if (text) out.push(item(at, 'say', text));
-      for (const part of Array.isArray(r.tool_calls) ? (r.tool_calls as unknown[]) : []) {
-        const tc = obj(part),
-          name = String(tc.name ?? 'tool'),
-          args = obj(tc.args);
-        if (name === 'run_command') out.push(item(at, 'command', unquote(args.CommandLine) || asText(args)));
-        else if (/^(write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content)$/.test(name))
-          out.push(item(at, 'file-change', `${name} ${unquote(args.Path ?? args.TargetFile)}`));
-        else if (/plan|task/i.test(name)) out.push(item(at, 'plan', `${name}: ${asText(args)}`));
-        else out.push(item(at, 'command', `${name}: ${asText(args)}`));
-      }
-    } else if (r.type === 'GENERIC') {
-      const text = asText(r.content ?? r.error)
-        .replace(/^(?:Created At: [^\r\n]+\r?\n|Completed At: [^\r\n]+\r?\n)+/g, '')
-        .trim();
-      if (!text) continue;
-      const isErr =
-        r.status === 'ERROR' ||
-        Boolean(r.error) ||
-        /(?:Command exited with code [1-9]|Encountered error)/i.test(text.slice(0, 400));
-      out.push(item(at, isErr ? 'error' : 'result', text));
-    }
-  }
-  return out;
-}
-
-/** Reads a file for a scan: all of it, or only its last MAX_SCAN_BYTES (cut at a line start) when it is larger. */
-function readScan(file: string): { head: string; body: string } {
-  const size = statSync(file).size;
-  const fd = openSync(file, 'r');
-  try {
-    const headLen = Math.min(size, 65_536),
-      head = Buffer.alloc(headLen);
-    readSync(fd, head, 0, headLen, 0);
-    if (size <= MAX_SCAN_BYTES) return { head: head.toString('utf8'), body: readFileSync(file, 'utf8') };
-    const tail = Buffer.alloc(MAX_SCAN_BYTES);
-    readSync(fd, tail, 0, MAX_SCAN_BYTES, size - MAX_SCAN_BYTES);
-    const text = tail.toString('utf8');
-    return { head: head.toString('utf8'), body: text.slice(text.indexOf('\n') + 1) };
-  } finally {
-    closeSync(fd);
-  }
-}
-/** A line is complete only when it ends in a newline; the agent may still be writing the last one. */
-const completeOnly = (raw: string) => (raw.endsWith('\n') ? raw : raw.slice(0, raw.lastIndexOf('\n') + 1));
 const jsonls = (dir: string) =>
   existsSync(dir)
     ? readdirSync(dir)
@@ -267,31 +163,7 @@ export function findTranscripts(
     const items = inWindow(parseClaude(completeOnly(scan.body)));
     if (items.length) found.push({ agent: 'claude', file, items });
   }
-  if (roots.antigravity && existsSync(roots.antigravity)) {
-    const convIds = new Set<string>();
-    const historyFile = join(roots.antigravity, 'history.jsonl');
-    if (existsSync(historyFile)) {
-      const scan = readScan(historyFile);
-      for (const row of lines(completeOnly(scan.body))) {
-        const r = obj(row);
-        if (typeof r.workspace === 'string' && norm(r.workspace) === target && typeof r.conversationId === 'string')
-          convIds.add(r.conversationId);
-      }
-    }
-    const brainDir = join(roots.antigravity, 'brain');
-    if (existsSync(brainDir)) {
-      for (const convId of readdirSync(brainDir)) {
-        const file = join(brainDir, convId, '.system_generated', 'logs', 'transcript.jsonl');
-        if (!existsSync(file)) continue;
-        const scan = readScan(file);
-        const headNorm = scan.head.replace(/\\\\/g, '/').replace(/\\/g, '/').toLowerCase();
-        if (!convIds.has(convId) && !(dispatchId && scan.head.includes(dispatchId)) && !headNorm.includes(target))
-          continue;
-        const items = inWindow(parseAntigravity(completeOnly(scan.body)));
-        if (items.length) found.push({ agent: 'antigravity', file, items });
-      }
-    }
-  }
+  if (roots.antigravity) found.push(...findAntigravity(roots.antigravity, target, dispatchId, inWindow));
   return found;
 }
 
@@ -392,12 +264,12 @@ export function readActivity(
       return none(
         `Transcript reader for runtime "${mine.agent}" is not supported yet. Run \`orca orchestration worker-read --dispatch ${mine.dispatchId}\` to inspect its output.`,
       );
-    if (mine.agent === 'antigravity')
-      return none(
-        `No antigravity transcript was found for this worktree and time. Run \`orca orchestration worker-read --dispatch ${mine.dispatchId}\` to inspect its terminal output.`,
-      );
+    const read = `Run \`orca orchestration worker-read --dispatch ${mine.dispatchId}\` to inspect its terminal output.`;
+    const label = { codex: 'Codex', claude: 'Claude Code', antigravity: 'Antigravity' }[mine.agent ?? ''];
     return none(
-      `No Codex or Claude Code transcript (or Antigravity transcript) was found for this worktree and time. Run \`orca orchestration worker-read --dispatch ${mine.dispatchId}\` to inspect its output.`,
+      label
+        ? `No ${label} transcript was found for this worktree and time. ${read}`
+        : `No transcript was found for this worktree and time (the dispatch did not record its runtime, so Codex, Claude Code and Antigravity were all checked). ${read}`,
     );
   }
   // A forked Codex session replays its parent's records with the same timestamps; show each record once.

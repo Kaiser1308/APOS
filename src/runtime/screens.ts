@@ -8,7 +8,7 @@ export type ScreenRules = {
   working(lines: string[]): boolean;
   /** A brief sits in the input box, not submitted. */
   unsentBrief(lines: string[]): boolean;
-  /** The agent's own "out of quota" line, trimmed, when it is on screen. */
+  /** The agent's own stop line (out of quota, executor init failure, network error), trimmed, when it is on screen. */
   quota(lines: string[]): string | undefined;
 };
 

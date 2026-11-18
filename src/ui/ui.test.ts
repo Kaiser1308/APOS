@@ -409,6 +409,18 @@ it('tells the story of a Goal: what the Human gave, what the Lead decided, and w
   expect(before.lead).toMatchObject({ mode: 'solo-direct', approved: false, approach: 'reuse the <b>API</b>' });
   expect(before.lead!.modeLabel).toMatch(/1 owner/);
   expect(before.lead!.whySplit).toMatch(/không ghi lý do chia/);
+  expect(before.lead!.whySplit).toContain('not recorded');
+  g.add('proposal-revised', {
+    ...proposal,
+    version: 2,
+    goalId: 'GOAL-S',
+    approach: 'reuse the <b>API</b>',
+    splitRationale: undefined,
+    rationale: 'repo trống, các mảng phụ thuộc chặt vào model chung',
+  });
+  expect(buildStory(new ReadOnlyJournal(p.home), 'GOAL-S')!.lead!.whySplit).toBe(
+    'repo trống, các mảng phụ thuộc chặt vào model chung',
+  );
   g.add('proposal-approved');
   g.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   g.add('decision-logged', { note: 'cookie session, not JWT' });

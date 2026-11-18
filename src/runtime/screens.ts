@@ -63,8 +63,23 @@ const antigravity: ScreenRules = {
     if (!/^>/.test(box[0] ?? '')) return false;
     return box.join(' ').replace(/^>\s*/, '').trim().length > 120;
   },
-  // No real quota sample yet: unverified, so nothing is claimed and owner-idle covers it.
-  quota: () => undefined,
+  quota(lines) {
+    const pattern =
+      /^(?:\[assistant\]\s*)?[⚠⎿●•■]?\s*(failed to construct executor:[^\r\n]+|There was a network issue connecting to the server, please try again\.)/i;
+    const index = lines
+      .map((line, at) => ({ line, at }))
+      .filter(item => pattern.test(item.line))
+      .at(-1)?.at;
+    if (index === undefined) return undefined;
+    const trailing = lines.slice(index + 1).filter(line => line.trim());
+    if (
+      trailing.some(
+        line => !/^(?:Error ID:\s*[0-9a-f-]+|─{10,}|>\s*$|\?\s+for shortcuts\b|ctx\s+[▰▱])/i.test(line.trim()),
+      )
+    )
+      return undefined;
+    return pattern.exec(lines[index])?.[1]?.trim();
+  },
 };
 
 export const SCREENS: Record<AgentId, ScreenRules> = { codex, claude, antigravity };

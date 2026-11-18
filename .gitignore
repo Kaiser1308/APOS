@@ -5,3 +5,4 @@ dist/
 .apos-home/
 *.log
 coverage/
+.worktrees/

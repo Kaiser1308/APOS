@@ -10,4 +10,5 @@ Commands:
   appetite [options] <id>
   select <id>
   revise [options]
+  wait [options] <id>
   help [command]           display help for command

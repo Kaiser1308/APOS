@@ -37,6 +37,8 @@ export class GoalRegistryService {
   }
 
   recommend(): GoalState | undefined {
+    const countAccepted = (state: GoalState) =>
+      state.spec.requirements.filter(item => item.disposition === 'acceptance').length;
     return this.store
       .listGoals()
       .filter(
@@ -44,7 +46,7 @@ export class GoalRegistryService {
           state.status === 'approved' &&
           state.spec.dependencies.every(id => this.store.getGoal(id)?.status === 'closed'),
       )
-      .sort((a, b) => a.spec.priority - b.spec.priority)[0];
+      .sort((a, b) => countAccepted(b) - countAccepted(a) || a.spec.priority - b.spec.priority)[0];
   }
 
   select(goalId: string): void {

@@ -328,7 +328,7 @@ export class ControllerService {
                     kind: 'needs-decision',
                     goalId,
                     key,
-                    note: `Orca outcome for intent ${key} is unknown after 10 min. Check \`orca orchestration task-list\`; if it created nothing, run \`apos execution abandon-intent ${goalId} --key ${key} --reason ...\`.`,
+                    note: `Orca outcome for intent ${key} is unknown after 10 min. Check \`orca orchestration task-list --run <run_id>\` (find \`<run_id>\` with \`orca orchestration run-list\`); if it created nothing, run \`apos execution abandon-intent ${goalId} --key ${key} --reason ...\`.`,
                   }),
                 );
               }

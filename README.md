@@ -155,9 +155,10 @@ apos --repo C:\path\to\project lead commit GOAL-001
 # 5. Supervise (inside an Orca terminal), or run one pass at a time
 apos controller watch            # or: apos controller tick
 
-# 6. Watch from a browser, and see what needs you
-apos ui                          # http://127.0.0.1:4343
-apos inbox
+# 6. Watch from a browser, or wait for the next event that needs you (no polling loop needed)
+apos ui                                         # http://127.0.0.1:4343
+apos inbox --wait --timeout 5m                  # blocks until a gate, decision, notice or verified Goal needs you
+apos goal wait GOAL-001 --until verified,blocked --timeout 5m
 
 # 7. Gate D: accept the outcome and merge the gated commit
 apos outcome close GOAL-001 --merge-to main
@@ -170,6 +171,7 @@ A minimal `execution.json` for a Solo plan:
   "id": "EXEC-1", "version": 1, "goalId": "GOAL-001", "goalVersion": 1,
   "mode": "solo-direct",
   "approach": "Implement slugify: lowercase, strip punctuation, split on whitespace, join with dashes",
+  "rationale": "Single cohesive module with no independent package seam",
   "risks": [], "sharedPaths": [],
   "estimatedCost": { "spendUsd": 1, "wallMinutes": 15 },
   "acceptanceMapping": [{ "acceptanceId": "AC-1", "verification": "node --test" }],
@@ -177,7 +179,7 @@ A minimal `execution.json` for a Solo plan:
 }
 ```
 
-If a dispatch or resume outcome stays unknown for 10 minutes it appears in `apos inbox`. Check `orca orchestration task-list`; if Orca created nothing, run `apos execution abandon-intent <id> --key <key> --reason ...`.
+If a dispatch or resume outcome stays unknown for 10 minutes it appears in `apos inbox`. Check `orca orchestration task-list --run <run_id>` (find `<run_id>` with `orca orchestration run-list`); if Orca created nothing, run `apos execution abandon-intent <id> --key <key> --reason ...`.
 
 ## The Goal contract
 
@@ -199,7 +201,15 @@ A Goal is a strictly validated JSON document (`src/domain/contracts.ts`). A mini
   "scope": ["slugify.js"],
   "exclusions": ["no new dependencies"],
   "acceptance": [
-    { "id": "AC-1", "text": "npm test passes", "requirementIds": ["R-1"], "checkIds": ["CHK-1"] }
+    {
+      "id": "AC-1",
+      "text": "npm test passes",
+      "requirementIds": ["R-1"],
+      "examples": [{ "input": "Hello, World!", "expected": "hello-world" }],
+      "boundaries": ["empty string returns empty string"],
+      "prohibited": ["must not throw on non-ASCII characters"],
+      "checkIds": ["CHK-1"]
+    }
   ],
   "checks": [
     { "id": "CHK-1", "kind": "command", "command": "npm test", "expect": "pass" }
@@ -209,8 +219,8 @@ A Goal is a strictly validated JSON document (`src/domain/contracts.ts`). A mini
 }
 ```
 
-- `requirements[]` lists every requirement lifted from the source, with its span and `disposition: acceptance | excluded` (an excluded one needs `exclusionReason`).
-- `acceptance[]` carries `requirementIds`, `checkIds`, and optionally `examples`, `boundaries`, `prohibited` and `ambiguity` (`resolved` with a decision, or `blocked` with a question).
+- `requirements[]` lists every requirement lifted from the source, with its span and `disposition: acceptance | excluded`. An excluded requirement must specify `exclusionReason` and `exclusion`: either `{ "kind": "deferred", "to": "GOAL-002" }` (planned for another Goal, which may be a sketch Goal with only `outcome` and `requirements` or not created yet) or `{ "kind": "out-of-scope" }` (dropped with Human approval at Gate A). Run `apos plan [--source brief.md]` to see the multi-Goal plan and each requirement's coverage (`covered`, `planned`, `deferred`, `orphan`, `out-of-scope`).
+- `acceptance[]` carries `requirementIds`, `checkIds`, and optionally `examples` (`{ "input": "<text>", "expected": "<text>" }[]` — objects, not strings), `boundaries` (`string[]`), `prohibited` (`string[]`), and `ambiguity` (`{ "status": "resolved", "decision": "<text>" } | { "status": "blocked", "question": "<text>" }`).
 - `checks[]` are either `{ kind: "command", command, expect: "pass" | "no-new-failures", failurePattern?, runs, timeoutMs, env }` or `{ kind: "manual", procedure, expectedResult }`. `no-new-failures` needs a `failurePattern` (a regex that recognises a failing line); it runs base and delivery and fails only on failures that are new at delivery.
 
 **Simplest: leave `source` out of `goal.json`.** `goal create` then fills `path`, `sha256`, `capturedAt` and `origin` from `--source`. If you write the `sha256` yourself, APOS hashes the text with CRLF turned into LF, so `Get-FileHash` or `shasum` of a CRLF file on Windows will not match; the error prints the digest APOS expects.
@@ -223,7 +233,7 @@ The **appetite** (`size`, `maxSpendUsd`, `maxWallMinutes`, `maxAttempts`, `overr
 
 ### Solo (default)
 
-**Before dispatch** (`lead commit`), the controller checks the plan's source hash and Goal version, that there are no open questions, and that the estimate fits the appetite. For Multi-WP it also checks at least two packages, an acyclic graph, versioned interfaces (`name@vN`), acceptance coverage and a split rationale.
+**Before dispatch** (`lead commit`), the controller checks the plan's source hash and Goal version, that there are no open questions, that `rationale` (or `splitRationale`) explains why the Lead chose Solo or Multi-WP, and that the estimate fits the appetite. For Multi-WP it also checks at least two packages, an acyclic graph, versioned interfaces (`name@vN`), acceptance coverage and a split rationale.
 
 **The Lead is dispatched at gate B.** `goal select` starts the Lead in its own Orca worktree, cut from the managed repo's HEAD at that moment (its base commit). The appetite's wall clock starts here: planning counts. `lead propose` and `lead commit` are accepted only from that Lead's terminal, and the plan gates against the Lead's base, even if `main` moves meanwhile. If Orca refused the dispatch, `apos lead start <id>` retries it; an unknown outcome is recovered by key and reaches `apos inbox` after 10 minutes.
 
@@ -282,8 +292,8 @@ Order: the Lead integrates and commits; the controller gates that commit and dis
 
 - **Needs you:** gate A and B waiting, `needs-decision`, notices, and verified Goals awaiting an outcome. The list matches `apos inbox`, plus the two gates the CLI does not list.
 - **Goals by who holds them:** Human, Lead, Controller / agent, Done.
-- **Story tab** (default per Goal): what the Human gave; what the Lead decided (mode, approach, why it split or did not, risks, verification, estimated cost against the appetite); and for each owner the decisions, checkpoints, evidence, blockers, findings and reviews it put on record.
-- **Agent activity:** for each dispatch, the agent's own transcript (Codex rollouts under `~/.codex/sessions`, Claude Code sessions under `~/.claude/projects`; `CODEX_HOME` and `CLAUDE_CONFIG_DIR` move them), newest first, refreshing every 3 seconds while the owner runs: what it said, planned, ran and got back.
+- **Story tab** (default per Goal): what the Human gave; what the Lead decided (mode, approach, why it split or did not, risks, verification, estimated cost against the appetite); and for each owner the latest checkpoint, observed worktree progress (commits since base and uncommitted changes), decisions, checkpoints, evidence, blockers, findings and reviews it put on record.
+- **Agent activity:** for each dispatch, the agent's own transcript (Codex rollouts under `~/.codex/sessions`, Claude Code sessions under `~/.claude/projects`, Antigravity transcripts under `~/.gemini/antigravity-cli`; `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `ANTIGRAVITY_HOME` move them), newest first, refreshing every 3 seconds while the owner runs: what it said, planned, ran and got back.
 - **Also:** lifecycle, Work Package graph, gate results with their logs, telemetry and appetite use, and the full event timeline.
 
 What to know before relying on it:
@@ -320,7 +330,7 @@ The repo gets readable Goal documents (`.apos/goals/<id>/`) committed only at mi
 | `APOS_HOME` | Move the controller home. |
 | `APOS_SKILLS` / `APOS_DEV_SKILLS` | Skills source for `init` / for `skills:check` and `skills:promote`. |
 | `APOS_ARTIFACTS` | Move the gate-log folder. |
-| `CODEX_HOME`, `CLAUDE_CONFIG_DIR` | Where agent transcripts are read from (UI and telemetry). |
+| `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `ANTIGRAVITY_HOME` | Where agent transcripts are read from (UI and telemetry). |
 
 ## Trust model
 
@@ -336,10 +346,12 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `migrate` | Import APOS v1 Goal histories into the controller log. |
 | `goal create --file <json> --source <path> [--origin <text>]` | Draft a Goal bound to a source snapshot. |
 | `goal list` | List Goals and their status. |
+| `plan [--source <path>] [--json]` | Show the multi-Goal plan (including sketch and deferred Goals) and requirement coverage (`covered`, `planned`, `deferred`, `orphan`, `out-of-scope`). |
 | `goal approve <id> --size <S\|M\|L> --max-spend <usd> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>]` | **Gate A (Human).** |
 | `goal appetite <id> --reason <text> [appetite flags]` | **Human.** Change the controller budget, not the scope. |
 | `goal select <id>` | **Gate B (Human).** Also dispatches the Goal's Lead. |
 | `goal revise --file <json> --source <path>` | New Goal version; needs re-approval. |
+| `goal wait <id> --until <state[,state...]> [--timeout <dur>]` | Block read-only until `<id>` reaches one of the target statuses or emits a new notice (exit code 2 on timeout). |
 | `lead recommend` | Recommend the next eligible Goal. |
 | `lead start <id>` | **Human.** Dispatch the Lead of a selected Goal (retry after a refused dispatch, or for a Goal selected before this version). |
 | `lead wake <id> --note <text>` | **Human.** Resume a Lead that ended its turn before its plan was accepted, in its own terminal, with your decision. |
@@ -359,7 +371,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `finding record <id> --kind <intent_gap\|bad_plan\|patch\|defer> --note <text> [--by <name>]` | Record a finding. |
 | `outcome close <id> [--merge-to <branch>] [--by <name>]`, `outcome revise <id>`, `outcome stop <id>` | **Gate D (Human).** |
 | `execution start\|resume\|status\|reconcile\|verify <id>`, `review submit <goalId>` | Lower-level controls the controller normally drives itself; see `--help`. `review submit` is Human-only. |
-| `inbox` | What needs the Human: notices, blocked Goals, verified Goals awaiting an outcome. |
+| `inbox [--wait] [--timeout <dur>] [--since <cursor>] [--json]` | What needs the Human: notices, blocked Goals, verified Goals awaiting an outcome (with `--wait`, also Gate A/B waiting; blocks read-only on the event log and exits 2 on timeout). |
 | `ui [--port <n>]` | Read-only local web view. |
 | `metrics show <goalId>` | Tokens, attempts and wall time. |
 

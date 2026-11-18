@@ -5,6 +5,14 @@ import { HandoffService } from '../../app/handoff.js';
 import type { HandoffTarget } from '../../domain/transitions.js';
 import { MergeService } from '../../app/merge.js';
 import { buildInbox } from '../../app/inbox.js';
+import {
+  buildHumanInbox,
+  controllerActive,
+  filterInboxSince,
+  parseDurationMs,
+  readOnlyRepo,
+  watchEvents,
+} from '../../app/wait.js';
 import { DEFAULT_UI_PORT, startUi } from '../../ui/server.js';
 import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
@@ -104,13 +112,66 @@ export function registerOutcome(ctx: CliContext): void {
   program
     .command('inbox')
     .description('what needs the Human: notices, blocked Goals, verified Goals awaiting outcome')
-    .action(() =>
-      withJournal(journal => {
-        const items = buildInbox(journal);
-        if (!items.length) write('Inbox is clean: nothing waits for the Human.');
-        for (const item of items) write(`${item.goalId}\t${item.kind}\t${item.detail}`);
-      }),
-    );
+    .option('--wait', 'block until an item needs the Human')
+    .option('--timeout <dur>', 'max time to wait (e.g. 30s, 5m)', '5m')
+    .option('--since <cursor>', 'report only items newer than this cursor')
+    .option('--json', 'emit machine-readable JSON')
+    .action(async (flags: { wait?: boolean; timeout?: string; since?: string; json?: boolean }) => {
+      if (!flags.wait && !flags.since && !flags.json) {
+        withJournal(journal => {
+          const items = buildInbox(journal);
+          if (!items.length) write('Inbox is clean: nothing waits for the Human.');
+          for (const item of items) write(`${item.goalId}\t${item.kind}\t${item.detail}`);
+        });
+        return;
+      }
+      if (!existsSync(join(repo(), '.apos', 'project.yaml'))) throw new Error('Run apos init first');
+      const homeDir = options.home ?? controllerHome(repo());
+      const timeoutMs = parseDurationMs(flags.timeout);
+      const check = () => {
+        const current = filterInboxSince(buildHumanInbox(readOnlyRepo(homeDir)), flags.since);
+        return current.fresh.length ? current : undefined;
+      };
+      let hit = check();
+      if (!hit && flags.wait) {
+        if (!controllerActive(homeDir))
+          write(
+            'warning: no active controller watch detected (no tick in the last 2 min); run `apos controller watch` so Goals can advance.',
+          );
+        hit = await watchEvents(homeDir, timeoutMs, check);
+      }
+      if (!hit && flags.wait) {
+        const snapshot = readOnlyRepo(homeDir);
+        const goals = snapshot.listGoals();
+        const cursor = filterInboxSince(buildHumanInbox(snapshot), flags.since).cursor;
+        const summary = goals.length ? goals.map(g => `${g.spec.id}:${g.status}`).join(', ') : 'no Goals';
+        if (flags.json)
+          write(
+            JSON.stringify({
+              timeout: true,
+              cursor,
+              items: [],
+              goals: goals.map(g => ({ id: g.spec.id, status: g.status })),
+            }),
+          );
+        else write(`timeout after ${flags.timeout ?? '5m'}: ${summary} (cursor: ${cursor})`);
+        process.exitCode = 2;
+        return;
+      }
+      const result = hit ?? filterInboxSince(buildHumanInbox(readOnlyRepo(homeDir)), flags.since);
+      process.exitCode = 0;
+      if (flags.json) {
+        write(JSON.stringify({ cursor: result.cursor, items: result.fresh }));
+        return;
+      }
+      if (!result.fresh.length) {
+        write('Inbox is clean: nothing waits for the Human.');
+        write(`cursor: ${result.cursor}`);
+        return;
+      }
+      for (const item of result.fresh) write(`${item.goalId}\t${item.kind}\t${item.detail}`);
+      write(`cursor: ${result.cursor}`);
+    });
   program
     .command('ui')
     .description('read-only web view of this project on 127.0.0.1; it never writes controller state')

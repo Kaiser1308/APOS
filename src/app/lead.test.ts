@@ -373,6 +373,11 @@ describe('the Lead terminal through the CLI (I3, I5)', () => {
     await expect(invoke('lead', 'commit', spec.id, '--terminal', 'term_other')).rejects.toThrow(
       /not the Lead terminal/,
     );
+    writeFileSync(
+      join(dir, 'no-rationale.json'),
+      JSON.stringify({ ...proposal, version: 2, splitRationale: undefined }),
+    );
+    await expect(invoke('lead', 'propose', '--file', join(dir, 'no-rationale.json'))).rejects.toThrow(/rationale/);
     await invoke('lead', 'commit', spec.id);
     const opened = ProjectJournal.open(dir);
     try {

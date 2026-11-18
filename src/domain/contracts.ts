@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UserError } from './errors.js';
 
 const namedText = z.string().trim().min(1);
 const id = z
@@ -18,11 +19,17 @@ const sourceSchema = z.object({
 });
 
 /** One requirement lifted out of the source. Every one must be covered by acceptance or excluded with a reason. */
+const exclusionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('deferred'), to: id }),
+  z.object({ kind: z.literal('out-of-scope') }),
+]);
+
 const requirementSchema = z.object({
   id,
   sourceSpan: namedText,
   text: namedText,
   disposition: z.enum(['acceptance', 'excluded']),
+  exclusion: exclusionSchema.optional(),
   exclusionReason: namedText.optional(),
 });
 
@@ -68,15 +75,20 @@ const goalSchema = z
     outcome: namedText,
     source: sourceSchema,
     requirements: z.array(requirementSchema).min(1),
-    scope: z.array(namedText).min(1),
-    exclusions: z.array(namedText),
-    acceptance: z.array(acceptanceSchema).min(1),
-    checks: z.array(checkSchema).min(1),
-    dependencies: z.array(id),
-    priority: z.number().int().nonnegative(),
+    scope: z.array(namedText).default([]),
+    exclusions: z.array(namedText).default([]),
+    acceptance: z.array(acceptanceSchema).default([]),
+    checks: z.array(checkSchema).default([]),
+    dependencies: z.array(id).default([]),
+    priority: z.number().int().nonnegative().default(1),
   })
   .superRefine((goal, ctx) => {
     const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
+    const sketch = goal.acceptance.length === 0 && goal.checks.length === 0;
+    if (!sketch && goal.acceptance.length === 0)
+      issue(['acceptance'], 'Goal must declare at least one acceptance criterion');
+    if (!sketch && goal.checks.length === 0) issue(['checks'], 'Goal must declare at least one check');
+    if (!sketch && goal.scope.length === 0) issue(['scope'], 'Goal must declare at least one scope entry');
     const unique = (items: { id: string }[], label: string, path: string) => {
       const seen = new Set<string>();
       for (const item of items) {
@@ -134,6 +146,8 @@ const proposalSchema = z
     /** Hash of the source the Lead planned from; the controller refuses a plan made against another source. */
     sourceSha256: sha256.optional(),
     estimatedCost: z.object({ spendUsd: z.number().nonnegative(), wallMinutes: z.number().positive() }).optional(),
+    /** Why one owner beats splitting, or why splitting beats one owner. */
+    rationale: namedText.optional(),
     /** Why splitting beats one owner; required for Multi-WP. */
     splitRationale: namedText.optional(),
     /** Paths whose change forces an independent review (shared interfaces, schemas). */
@@ -145,7 +159,7 @@ const proposalSchema = z
   })
   .superRefine((proposal, ctx) => {
     if (proposal.mode !== 'multi-wp') return;
-    if (!proposal.splitRationale)
+    if (!proposal.splitRationale && !proposal.rationale)
       ctx.addIssue({
         code: 'custom',
         path: ['splitRationale'],
@@ -199,8 +213,31 @@ export type Evidence = {
 export function parseGoalSpec(value: unknown): GoalSpec {
   return goalSchema.parse(value);
 }
+export const isSketchGoal = (goal: GoalSpec): boolean => goal.acceptance.length === 0;
+export function assertGoalExclusionComplete(goal: GoalSpec): void {
+  for (const [index, item] of goal.requirements.entries()) {
+    if (item.disposition !== 'excluded') continue;
+    if (!item.exclusion?.kind)
+      throw new UserError(
+        `requirements.${index}.exclusion.kind: Excluded requirement ${item.id} must specify exclusion.kind ("deferred" with "to", or "out-of-scope")`,
+      );
+    if (item.exclusion.kind === 'deferred' && item.exclusion.to === goal.id)
+      throw new UserError(
+        `requirements.${index}.exclusion.to: Requirement ${item.id} cannot be deferred to its own Goal ${goal.id}`,
+      );
+  }
+}
 export function parseExecutionProposal(value: unknown): ExecutionProposal {
   return proposalSchema.parse(value);
+}
+export function proposalRationale(proposal: ExecutionProposal): string | undefined {
+  return proposal.rationale ?? proposal.splitRationale;
+}
+export function assertProposalRationale(proposal: ExecutionProposal): void {
+  if (!proposalRationale(proposal))
+    throw new UserError(
+      'Proposal rationale (or splitRationale) is required: explain why this Goal uses one Solo owner or splits into packages',
+    );
 }
 
 /**
@@ -208,6 +245,10 @@ export function parseExecutionProposal(value: unknown): ExecutionProposal {
  * shape them; approval requires every requirement covered or excluded, and no blocked ambiguity.
  */
 export function goalApprovalBlockers(goal: GoalSpec): string[] {
+  if (isSketchGoal(goal))
+    return [
+      `Goal ${goal.id} is a sketch (no acceptance criteria or checks yet); revise it with apos goal revise before approval`,
+    ];
   const blockers: string[] = [];
   const covered = new Set(goal.acceptance.flatMap(item => item.requirementIds));
   for (const item of goal.requirements) {

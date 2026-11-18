@@ -575,6 +575,21 @@ describe('the agent behind each dispatch', () => {
     ).toBe("You've hit your weekly limit · resets 1am (Asia/Ho_Chi_Minh)");
     expect(await fake(['[assistant] done']).agentQuota('term_1', 'claude')).toBeUndefined();
   });
+
+  it('falls back to worker-read --source auto when terminal read fails for a structured worker (#23)', async () => {
+    const runtime = new OrcaRuntime(args => {
+      if (args[0] === 'terminal' && args[1] === 'read')
+        throw new Error('error: archive_unavailable: Worker Dispatch ctx_1 has no terminal output');
+      if (args[0] === 'orchestration' && args[1] === 'worker-read')
+        return {
+          output: '[assistant]\n⚠ There was a network issue connecting to the server, please try again.',
+        };
+      return {};
+    });
+    expect(await runtime.agentQuota('structworker_1', 'antigravity', 'ctx_1')).toBe(
+      'There was a network issue connecting to the server, please try again.',
+    );
+  });
 });
 
 describe('handing work to another agent', () => {

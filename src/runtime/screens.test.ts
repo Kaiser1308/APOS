@@ -37,6 +37,32 @@ describe('screen rules per agent', () => {
     expect(quotaMessage('antigravity', fixture('claude', 'quota-weekly'))).toBeUndefined();
   });
 
+  it('antigravity: detects executor init failure in TUI and network error in transcript (#23, #24)', () => {
+    const tuiExecutorError = [
+      '⚠ failed to construct executor: plan model not specified; you must specify a valid model',
+      'Error ID: a9b30ee6-d52f-4b3a-a4c3-8449eb28e9aa-1',
+      '─'.repeat(109),
+      '>',
+      '─'.repeat(109),
+      '? for shortcuts                                                              auto · Gemini 4 Argon · medium',
+      'ctx ▰▱▱▱▱ 0% · 0 tok · 5h ▱▱▱▱▱ 0% · 7d ▱▱▱▱▱ 0%',
+    ];
+    expect(quotaMessage('antigravity', tuiExecutorError)).toBe(
+      'failed to construct executor: plan model not specified; you must specify a valid model',
+    );
+    const transcriptNetworkError = [
+      '[assistant]',
+      '⚠ There was a network issue connecting to the server, please try again.',
+    ];
+    expect(quotaMessage('antigravity', transcriptNetworkError)).toBe(
+      'There was a network issue connecting to the server, please try again.',
+    );
+    // Does not fire if the agent recovered and kept working afterwards
+    expect(
+      quotaMessage('antigravity', [...transcriptNetworkError, '[assistant] Retrying the step now.']),
+    ).toBeUndefined();
+  });
+
   it('does not fire on an agent discussing limits, or while it is working', () => {
     expect(
       quotaMessage('claude', [

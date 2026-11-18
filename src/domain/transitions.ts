@@ -57,6 +57,7 @@ export type GoalEventType =
   | 'intent-abandoned'
   | 'handoff-intended'
   | 'owner-handed-off'
+  | 'owner-progress-observed'
   | 'verified'
   | 'outcome-accepted'
   | 'outcome-revised'
@@ -1079,6 +1080,9 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'human-notified':
       requireThat(event.data && typeof event.data === 'object', 'Notification details required');
+      return state;
+    case 'owner-progress-observed':
+      requireThat(event.data && typeof event.data === 'object', 'Progress observation details required');
       return state;
     case 'outcome-accepted':
       requireThat(state.status === 'verified', 'Technical verification required');

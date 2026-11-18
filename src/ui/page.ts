@@ -164,6 +164,21 @@ details > summary { cursor:pointer; color:var(--accent); }
   }
   function renderList(view) {
     var goals = state.snap ? state.snap.goals : [];
+    var plan = state.snap && state.snap.plan;
+    if (plan && plan.requirements && plan.requirements.length) {
+      var psec = h("section", null, [h("h2", { text: "Kế hoạch (" + plan.requirements.length + " requirements)" })]);
+      var deferredGoals = (plan.goals || []).filter(function (g) { return g.status === "deferred" || g.sketch; });
+      if (deferredGoals.length) {
+        psec.appendChild(h("div", { class: "mute", style: "margin-bottom:6px", text: "Goal phác thảo / dự kiến: " + deferredGoals.map(function (g) { return g.id + " (" + g.status + (g.sketch && g.status !== "deferred" ? ", sketch" : "") + ")"; }).join(", ") }));
+      }
+      var rt = h("table", null, [h("tr", null, ["Req", "Trạng thái", "Goal", "Nội dung"].map(function (c) { return h("th", { text: c }); }))]);
+      plan.requirements.forEach(function (r) {
+        var cls = r.status === "covered" ? "pass" : r.status === "orphan" ? "red" : r.status === "planned" ? "executing" : "lead";
+        rt.appendChild(h("tr", null, [h("td", { text: r.id }), h("td", null, [chip(r.status, cls)]), h("td", { text: r.goalId || "-" }), h("td", { text: r.text })]));
+      });
+      psec.appendChild(rt);
+      view.appendChild(psec);
+    }
     HOLDERS.forEach(function (hd) {
       var group = goals.filter(function (g) { return (g.holder || "human") === hd[0]; });
       if (hd[0] === "human") group = group.concat(goals.filter(function (g) { return !g.holder; }));
@@ -280,6 +295,7 @@ details > summary { cursor:pointer; color:var(--accent); }
     var max = state.detail && state.detail.appetite ? "/" + state.detail.appetite.maxAttempts : "";
     c.appendChild(h("div", { class: "ct" }, [h("span", { text: o.label }), o.status ? chip(o.status) : null, h("span", { class: "mute", text: "lần thử " + o.attempts + max + (o.dependencies.length ? " · sau " + o.dependencies.join(", ") : "") })]));
     if (o.outcome) c.appendChild(h("div", { class: "mute", text: o.outcome }));
+    if (o.latestCheckpoint) c.appendChild(h("div", { style: "margin:4px 0" }, [chip("checkpoint", "executing"), h("span", { text: " " + o.latestCheckpoint.phase + ": " + o.latestCheckpoint.progress + " · " + age(o.latestCheckpoint.at) })]));
     o.dispatches.forEach(function (d) {
       c.appendChild(h("div", null, [h("a", { href: "#", text: (state.open[d.dispatchId] ? "Ẩn" : "Xem") + " hoạt động của " + d.role + " " + d.dispatchId, onclick: function (e) { e.preventDefault(); toggleAct(d.dispatchId); } })]));
       if (state.open[d.dispatchId]) c.appendChild(actView(d));

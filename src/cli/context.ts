@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { parseGoalSpec } from '../domain/contracts.js';
+import { assertGoalExclusionComplete, parseGoalSpec } from '../domain/contracts.js';
 import { sourceDigest } from '../domain/gate.js';
 import type { Role } from '../domain/runtime-refs.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
@@ -48,6 +48,7 @@ function goalWithSource(file: string, sourcePath: string, origin: string) {
     ...raw,
     source: given ?? { path: sourcePath, sha256: digest, capturedAt: new Date().toISOString(), origin },
   });
+  assertGoalExclusionComplete(spec);
   return { spec, text };
 }
 

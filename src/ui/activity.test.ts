@@ -8,6 +8,7 @@ import { initProject } from '../app/init-project.js';
 import { ProjectJournal } from '../store/journal.js';
 import { ReadOnlyJournal } from '../store/readonly-journal.js';
 import { approval, proposal, sourceText, spec } from '../domain/fixtures.test-support.js';
+import { attemptKey } from '../domain/gate.js';
 import type { GoalEventType } from '../domain/transitions.js';
 import { readActivity, redact } from './activity.js';
 import { buildStory } from './story.js';
@@ -305,4 +306,181 @@ it('shows a Codex session that ended in an error at start instead of "no transcr
   expect(reply.items).toEqual([
     expect.objectContaining({ kind: 'error', text: expect.stringContaining('usage limit') }),
   ]);
+});
+
+it('includes dispatches created via apos handoff in story owners[].dispatches and serves their activity (#26)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-ui-ho-'));
+  dirs.push(dir);
+  const home = mkdtempSync(join(tmpdir(), 'apos-ui-ho-home-'));
+  dirs.push(home);
+  execFileSync('git', ['init', '-q', dir]);
+  await initProject(dir);
+  const opened = ProjectJournal.open(dir, home);
+  let n = 0;
+  const baseAt = Date.parse('2026-11-18T03:00:00.000Z');
+  const add = (type: GoalEventType, data?: unknown) =>
+    opened.journal.append({
+      id: `EV-${++n}`,
+      goalId: 'GOAL-H',
+      type,
+      data,
+      at: new Date(baseAt + n * 1000).toISOString(),
+    });
+  opened.journal.appendWithSource(
+    {
+      id: `EV-${++n}`,
+      goalId: 'GOAL-H',
+      type: 'goal-drafted',
+      data: { ...spec, id: 'GOAL-H' },
+      at: new Date(baseAt + n * 1000).toISOString(),
+    },
+    sourceText,
+  );
+  const base = 'a'.repeat(40);
+  const delivery = 'b'.repeat(40);
+  add('goal-approved', approval);
+  add('goal-selected');
+  add('lead-dispatch-intended', 'lk');
+  add('lead-started', {
+    runId: 'run_1',
+    taskId: 't_lead',
+    dispatchId: 'ctx_lead_1',
+    repoPath: dir,
+    terminal: 'term_1',
+    worktreeId: `repo::${wt(dir)}`,
+    baseCommit: base,
+  });
+  add('proposal-drafted', { ...proposal, goalId: 'GOAL-H', baseCommit: base });
+  add('proposal-approved');
+  add('execution-started', {
+    runId: 'run_1',
+    taskId: 't_lead',
+    dispatchId: 'ctx_lead_1',
+    owner: 'lead',
+    repoPath: dir,
+    terminal: 'term_1',
+    worktreeId: `repo::${wt(dir)}`,
+    baseCommit: base,
+  });
+  add('gate-recorded', {
+    gateId: 'G-1',
+    goalId: 'GOAL-H',
+    goalVersion: 1,
+    sourceSha256: spec.source.sha256,
+    baseCommit: base,
+    deliveryCommit: delivery,
+    attemptKey: attemptKey(opened.journal.getGoal('GOAL-H')!),
+    phase: 'delivery',
+    changedFiles: ['a.js'],
+    environment: { platform: 'win32', shell: 'cmd', node: 'v24' },
+    checks: [],
+    result: 'green',
+    at: new Date(baseAt + 10_000).toISOString(),
+  });
+  add('review-intended', { key: 'rk1', commit: delivery });
+  add('review-dispatched', {
+    dispatchId: 'ctx_rev_1',
+    runId: 'run_1',
+    key: 'rk1',
+    commit: delivery,
+    worktreeId: `repo::${join(dir, 'rev-wt')}`,
+    terminal: 'term_rev_1',
+  });
+  add('handoff-intended', { key: 'hk1', target: { kind: 'reviewer' }, from: 'ctx_rev_1', runId: 'run_1' });
+  add('owner-handed-off', {
+    key: 'hk1',
+    target: { kind: 'reviewer' },
+    from: 'ctx_rev_1',
+    ref: {
+      dispatchId: 'ctx_rev_2',
+      runId: 'run_1',
+      key: 'hk1',
+      commit: delivery,
+      worktreeId: `repo::${join(dir, 'rev-wt')}`,
+      terminal: 'term_rev_2',
+      requested: { agent: 'antigravity' },
+    },
+  });
+  opened.close();
+  const story = buildStory(new ReadOnlyJournal(home), 'GOAL-H')!;
+  expect(story.owners[0].dispatches.map(d => `${d.role}:${d.dispatchId}`)).toEqual([
+    'lead:ctx_lead_1',
+    'reviewer:ctx_rev_1',
+    'reviewer:ctx_rev_2',
+  ]);
+  const res = route(home, new URL('/api/goals/GOAL-H/activity/ctx_rev_2', 'http://localhost'), {
+    codex: join(dir, 'none'),
+    claude: join(dir, 'none'),
+    antigravity: join(dir, 'none'),
+  });
+  expect(res.status).toBe(200);
+  const body = JSON.parse(res.body);
+  expect(body.found).toBe(false);
+  expect(body.reason).not.toMatch(/No Codex or Claude Code transcript/);
+  expect(body.reason).toContain('antigravity');
+  expect(body.reason).toContain('orca orchestration worker-read --dispatch ctx_rev_2');
+});
+
+it('reads Antigravity transcripts by worktree and time without touching the Antigravity folder (#25)', async () => {
+  const d = await dispatched();
+  const agyRoot = mkdtempSync(join(tmpdir(), 'apos-ui-agy-'));
+  dirs.push(agyRoot);
+  const convId = '565fab09-7316-453f-bd7f-ef85c19f426a';
+  const iso = (seconds: number) => new Date(d.startedAt + seconds * 1000).toISOString();
+  writeFileSync(
+    join(agyRoot, 'history.jsonl'),
+    row({ display: 'the brief', timestamp: d.startedAt + 500, workspace: wt(d.dir), conversationId: convId }),
+  );
+  const logDir = join(agyRoot, 'brain', convId, '.system_generated', 'logs');
+  mkdirSync(logDir, { recursive: true });
+  writeFileSync(
+    join(logDir, 'transcript.jsonl'),
+    row({
+      step_index: 0,
+      source: 'USER_EXPLICIT',
+      type: 'USER_INPUT',
+      status: 'DONE',
+      created_at: iso(1),
+      content: '<USER_REQUEST>\nthe secret brief\n</USER_REQUEST>',
+    }) +
+      row({
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: iso(2),
+        thinking: 'internal reasoning that must stay hidden',
+        content: 'Implementing the workspace sync now. Token sk-abcdefghijklmnopqrstuv',
+        tool_calls: [
+          { name: 'write_file', args: { Path: JSON.stringify(join(wt(d.dir), 'src/sync.js')) } },
+          { name: 'run_command', args: { CommandLine: JSON.stringify('npm test') } },
+        ],
+      }) +
+      row({
+        step_index: 2,
+        source: 'MODEL',
+        type: 'GENERIC',
+        status: 'ERROR',
+        created_at: iso(3),
+        content:
+          'Created At: 2026-11-18T11:00:03+07:00\nCompleted At: 2026-11-18T11:00:04+07:00\nCommand exited with code 1.\nFAIL sync.test.js',
+      }),
+  );
+  const before = hashTree(agyRoot);
+  const reply = readActivity(d.events, 'disp-w', undefined, {
+    codex: join(agyRoot, 'none'),
+    claude: join(agyRoot, 'none'),
+    antigravity: agyRoot,
+  })!;
+  expect(hashTree(agyRoot)).toBe(before);
+  expect(reply.found).toBe(true);
+  expect(reply.matched).toEqual([{ agent: 'antigravity', name: 'transcript.jsonl' }]);
+  const text = reply.items.map(item => `${item.kind}:${item.text}`).join('\n');
+  expect(text).toContain('say:Implementing the workspace sync now.');
+  expect(text).toContain('file-change:write_file');
+  expect(text).toContain('command:npm test');
+  expect(text).toContain('error:Command exited with code 1.');
+  expect(text).not.toContain('internal reasoning');
+  expect(text).not.toContain('the secret brief');
+  expect(text).not.toContain('sk-abcdefghijklmnopqrstuv');
 });

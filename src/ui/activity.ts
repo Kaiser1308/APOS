@@ -10,7 +10,7 @@ import { worktreePath } from '../runtime/orca/parse.js';
  */
 export type ActivityKind = 'say' | 'plan' | 'command' | 'file-change' | 'result' | 'error';
 export type Activity = { at: string; kind: ActivityKind; text: string; truncated: boolean };
-export type Agent = 'codex' | 'claude';
+export type Agent = 'codex' | 'claude' | 'antigravity';
 
 export const MAX_ITEM_CHARS = 4000;
 export const MAX_SCAN_BYTES = 8_000_000;
@@ -138,12 +138,57 @@ export function parseClaude(raw: string): Activity[] {
   return out;
 }
 
-export type Roots = { codex: string; claude: string };
+export type Roots = { codex: string; claude: string; antigravity?: string };
 export const defaultRoots = (): Roots => ({
   codex: join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'sessions'),
   claude: join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects'),
+  antigravity: process.env.ANTIGRAVITY_HOME ?? join(homedir(), '.gemini', 'antigravity-cli'),
 });
 const norm = (path: string) => resolve(path).replace(/\\/g, '/').toLowerCase();
+const unquote = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === 'string' ? parsed : value;
+  } catch {
+    return value;
+  }
+};
+
+/** Antigravity CLI transcript lines (`brain/<id>/.system_generated/logs/transcript.jsonl`) to activity. */
+export function parseAntigravity(raw: string): Activity[] {
+  const out: Activity[] = [];
+  for (const row of lines(raw)) {
+    const r = obj(row),
+      at = typeof r.created_at === 'string' ? r.created_at : '';
+    if (!at) continue;
+    if (r.type === 'PLANNER_RESPONSE') {
+      const text = typeof r.content === 'string' ? r.content.trim() : '';
+      if (text) out.push(item(at, 'say', text));
+      for (const part of Array.isArray(r.tool_calls) ? (r.tool_calls as unknown[]) : []) {
+        const tc = obj(part),
+          name = String(tc.name ?? 'tool'),
+          args = obj(tc.args);
+        if (name === 'run_command') out.push(item(at, 'command', unquote(args.CommandLine) || asText(args)));
+        else if (/^(write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content)$/.test(name))
+          out.push(item(at, 'file-change', `${name} ${unquote(args.Path ?? args.TargetFile)}`));
+        else if (/plan|task/i.test(name)) out.push(item(at, 'plan', `${name}: ${asText(args)}`));
+        else out.push(item(at, 'command', `${name}: ${asText(args)}`));
+      }
+    } else if (r.type === 'GENERIC') {
+      const text = asText(r.content ?? r.error)
+        .replace(/^(?:Created At: [^\r\n]+\r?\n|Completed At: [^\r\n]+\r?\n)+/g, '')
+        .trim();
+      if (!text) continue;
+      const isErr =
+        r.status === 'ERROR' ||
+        Boolean(r.error) ||
+        /(?:Command exited with code [1-9]|Encountered error)/i.test(text.slice(0, 400));
+      out.push(item(at, isErr ? 'error' : 'result', text));
+    }
+  }
+  return out;
+}
 
 /** Reads a file for a scan: all of it, or only its last MAX_SCAN_BYTES (cut at a line start) when it is larger. */
 function readScan(file: string): { head: string; body: string } {
@@ -182,7 +227,13 @@ function cwdOf(head: string, key: 'session_meta' | 'cwd'): string | undefined {
 
 export type Transcript = { agent: Agent; file: string; items: Activity[] };
 /** Transcripts whose recorded cwd is the dispatch's worktree, cut to [since, until] (30 s of slack for clock drift). */
-export function findTranscripts(worktree: string, since: string, until: string, roots: Roots): Transcript[] {
+export function findTranscripts(
+  worktree: string,
+  since: string,
+  until: string,
+  roots: Roots,
+  dispatchId?: string,
+): Transcript[] {
   const target = norm(worktree),
     from = Date.parse(since) - 30_000,
     to = Date.parse(until) + 30_000;
@@ -216,6 +267,31 @@ export function findTranscripts(worktree: string, since: string, until: string, 
     const items = inWindow(parseClaude(completeOnly(scan.body)));
     if (items.length) found.push({ agent: 'claude', file, items });
   }
+  if (roots.antigravity && existsSync(roots.antigravity)) {
+    const convIds = new Set<string>();
+    const historyFile = join(roots.antigravity, 'history.jsonl');
+    if (existsSync(historyFile)) {
+      const scan = readScan(historyFile);
+      for (const row of lines(completeOnly(scan.body))) {
+        const r = obj(row);
+        if (typeof r.workspace === 'string' && norm(r.workspace) === target && typeof r.conversationId === 'string')
+          convIds.add(r.conversationId);
+      }
+    }
+    const brainDir = join(roots.antigravity, 'brain');
+    if (existsSync(brainDir)) {
+      for (const convId of readdirSync(brainDir)) {
+        const file = join(brainDir, convId, '.system_generated', 'logs', 'transcript.jsonl');
+        if (!existsSync(file)) continue;
+        const scan = readScan(file);
+        const headNorm = scan.head.replace(/\\\\/g, '/').replace(/\\/g, '/').toLowerCase();
+        if (!convIds.has(convId) && !(dispatchId && scan.head.includes(dispatchId)) && !headNorm.includes(target))
+          continue;
+        const items = inWindow(parseAntigravity(completeOnly(scan.body)));
+        if (items.length) found.push({ agent: 'antigravity', file, items });
+      }
+    }
+  }
   return found;
 }
 
@@ -225,6 +301,7 @@ export type Dispatch = {
   owner: string;
   at: string;
   worktree?: string;
+  agent?: string;
 };
 /** Every dispatch the controller recorded for a Goal, with the worktree it ran in. The request names an id, never a path. */
 export function dispatchesOf(events: GoalEvent[]): Dispatch[] {
@@ -240,12 +317,14 @@ export function dispatchesOf(events: GoalEvent[]): Dispatch[] {
           : typeof source.worktree === 'string'
             ? source.worktree
             : undefined;
+      const agent = typeof obj(source.requested).agent === 'string' ? String(obj(source.requested).agent) : undefined;
       out.push({
         dispatchId: source.dispatchId,
         role,
         owner,
         at: event.at,
         worktree: id?.includes('::') ? worktreePath(id) : id && /[\\/]/.test(id) ? id : undefined,
+        ...(agent ? { agent } : {}),
       });
     };
     // The Lead's own dispatch; when it then becomes the Solo owner, execution-started repeats its id and is not listed twice.
@@ -257,6 +336,19 @@ export function dispatchesOf(events: GoalEvent[]): Dispatch[] {
     else if (event.type === 'review-dispatched')
       add('reviewer', typeof data.packageId === 'string' ? data.packageId : 'goal', data);
     else if (event.type === 'lead-woken') add('lead', 'goal', data);
+    else if (event.type === 'owner-handed-off') {
+      const target = obj(data.target);
+      const prior = out.find(entry => entry.dispatchId === data.from);
+      const role: Dispatch['role'] =
+        target.kind === 'package' ? 'worker' : target.kind === 'reviewer' ? 'reviewer' : (prior?.role ?? 'lead');
+      const owner =
+        target.kind === 'package' ? String(target.packageId ?? prior?.owner ?? 'goal') : (prior?.owner ?? 'goal');
+      add(role, owner, {
+        worktree: prior?.worktree,
+        requested: prior?.agent ? { agent: prior.agent } : undefined,
+        ...ref,
+      });
+    }
   }
   return out;
 }
@@ -294,8 +386,20 @@ export function readActivity(
     .filter(entry => entry.worktree === mine.worktree && entry.at > mine.at && entry.dispatchId !== mine.dispatchId)
     .map(entry => entry.at)
     .sort()[0];
-  const transcripts = findTranscripts(mine.worktree, mine.at, next ?? now.toISOString(), roots);
-  if (!transcripts.length) return none('No Codex or Claude Code transcript was found for this worktree and time.');
+  const transcripts = findTranscripts(mine.worktree, mine.at, next ?? now.toISOString(), roots, mine.dispatchId);
+  if (!transcripts.length) {
+    if (mine.agent && !['codex', 'claude', 'antigravity'].includes(mine.agent))
+      return none(
+        `Transcript reader for runtime "${mine.agent}" is not supported yet. Run \`orca orchestration worker-read --dispatch ${mine.dispatchId}\` to inspect its output.`,
+      );
+    if (mine.agent === 'antigravity')
+      return none(
+        `No antigravity transcript was found for this worktree and time. Run \`orca orchestration worker-read --dispatch ${mine.dispatchId}\` to inspect its terminal output.`,
+      );
+    return none(
+      `No Codex or Claude Code transcript (or Antigravity transcript) was found for this worktree and time. Run \`orca orchestration worker-read --dispatch ${mine.dispatchId}\` to inspect its output.`,
+    );
+  }
   // A forked Codex session replays its parent's records with the same timestamps; show each record once.
   const seen = new Set<string>();
   const merged = transcripts

@@ -67,7 +67,8 @@ it('does not tell the Human to retry when the dispatch outcome is unknown: the i
   const output = await selectWithFailure(
     new Error('Orca orchestration run failed: state=failed stage=turn_start_unobserved'),
   );
-  expect(output).toContain('orca orchestration task-list');
+  expect(output).toContain('orca orchestration task-list --run <run_id>');
+  expect(output).toContain('orca orchestration run-list');
   expect(output).toContain(`apos execution abandon-intent ${spec.id} --key `);
   // `lead start` is still the step after abandoning, but it must not be offered as the immediate retry.
   expect(output).not.toMatch(/Retry with `apos lead start/);

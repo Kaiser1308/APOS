@@ -24,7 +24,9 @@ export async function withControllerLease<T>(
   const path = join(home, 'controller.lease');
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      writeFileSync(path, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }), { flag: 'wx' });
+      const now = new Date().toISOString();
+      writeFileSync(path, JSON.stringify({ pid: process.pid, at: now }), { flag: 'wx' });
+      writeFileSync(join(home, 'controller.heartbeat'), JSON.stringify({ pid: process.pid, at: now }));
       try {
         return { ran: true, value: await fn() };
       } finally {

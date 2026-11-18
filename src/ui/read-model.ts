@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Appetite } from '../domain/contracts.js';
 import type { GateReport } from '../domain/gate.js';
+import { buildPlan, type PlanSummary } from '../domain/plan.js';
 import type { GoalEvent, GoalState, GoalStatus } from '../domain/transitions.js';
 import { buildInbox, type InboxItem } from '../app/inbox.js';
 import type { ReadOnlyJournal } from '../store/readonly-journal.js';
@@ -50,6 +51,7 @@ export type Snapshot = {
   tickRunning: boolean;
   inbox: UiInboxItem[];
   goals: GoalRow[];
+  plan?: PlanSummary;
 };
 
 const lastAt = (events: GoalEvent[]) => events.at(-1)?.at;
@@ -168,7 +170,8 @@ export function buildSnapshot(repo: ReadOnlyJournal, now: () => Date = () => new
     .sort()
     .at(-1);
   const inbox: UiInboxItem[] = [...gateItems(repo), ...buildInbox(repo)];
-  return { readAt: now().toISOString(), lastEventAt, tickRunning: tickRunning(repo.home), inbox, goals };
+  const plan = buildPlan(repo.listGoals());
+  return { readAt: now().toISOString(), lastEventAt, tickRunning: tickRunning(repo.home), inbox, goals, plan };
 }
 
 export type GateView = {

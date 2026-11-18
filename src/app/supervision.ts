@@ -1,5 +1,6 @@
 import { newEvent } from './events.js';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { GoalEventType, GoalState } from '../domain/transitions.js';
 import { worktreePath } from '../runtime/orca/parse.js';
@@ -135,6 +136,75 @@ export function describe(gate: GateReport): string {
     .join('; ');
 }
 
+/**
+ * Observes a running owner's worktree read-only (`git --no-optional-locks`): commits since `baseCommit` and whether
+ * uncommitted changes exist. Appends `owner-progress-observed` only when the observed state changed since the last one.
+ */
+export function observeOwnerProgress(
+  store: GoalRepository,
+  now: () => number,
+  input: { goalId: string; dispatchId: string; packageId?: string },
+): string[] {
+  const state = store.getGoal(input.goalId);
+  const ref = input.packageId ? state?.packages?.[input.packageId]?.runtimeRef : state?.runtimeRef;
+  const tree = worktreePath(ref?.worktreeId);
+  const base = ref?.baseCommit;
+  if (!tree || !base || !existsSync(tree)) return [];
+  const git = (...args: string[]) =>
+    execFileSync('git', ['--no-optional-locks', '-C', tree, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  try {
+    const logLines = git('log', '--reverse', '--format=%H%x09%cI%x09%s', `${base}..HEAD`)
+      .split(/\r?\n/)
+      .filter(Boolean);
+    const commits = logLines.map(line => {
+      const [hash = '', at = '', subject = ''] = line.split('\t');
+      const filesChanged = git('diff-tree', '--no-commit-id', '--name-only', '-r', hash)
+        .split(/\r?\n/)
+        .filter(Boolean).length;
+      return { hash, at, subject, filesChanged };
+    });
+    const dirtyFiles = git('status', '--porcelain').split(/\r?\n/).filter(Boolean).length;
+    const dirty = dirtyFiles > 0;
+    if (!commits.length && !dirty) return [];
+    const sig = (commitsList: { hash?: string }[], isDirty: boolean, count: number) =>
+      JSON.stringify({ hashes: commitsList.map(c => c.hash), dirty: isDirty, dirtyFiles: count });
+    const prev = [...store.events(input.goalId)]
+      .reverse()
+      .find(
+        item =>
+          item.type === 'owner-progress-observed' &&
+          ((item.data as { packageId?: string } | null)?.packageId ?? undefined) === input.packageId,
+      );
+    const prevData = prev?.data as { commits?: { hash?: string }[]; dirty?: boolean; dirtyFiles?: number } | undefined;
+    if (
+      prevData &&
+      sig(prevData.commits ?? [], Boolean(prevData.dirty), prevData.dirtyFiles ?? 0) === sig(commits, dirty, dirtyFiles)
+    )
+      return [];
+    store.append(
+      newEvent(
+        input.goalId,
+        'owner-progress-observed',
+        {
+          dispatchId: input.dispatchId,
+          ...(input.packageId ? { packageId: input.packageId } : {}),
+          head: commits.at(-1)?.hash ?? base,
+          commits,
+          dirty,
+          dirtyFiles,
+        },
+        new Date(now()).toISOString(),
+      ),
+    );
+    return ['observed owner progress'];
+  } catch {
+    return [];
+  }
+}
+
 /** Watches an unsettled dispatch, then nudges it when its brief sits unsent: the two checks every wake runs together. */
 export async function watchAndUnstick(
   store: GoalRepository,
@@ -144,6 +214,13 @@ export async function watchAndUnstick(
   since: string | undefined,
 ): Promise<string[]> {
   return [
+    ...(watch.role !== 'reviewer'
+      ? observeOwnerProgress(store, now, {
+          goalId: watch.goalId,
+          dispatchId: watch.dispatchId,
+          packageId: watch.packageId,
+        })
+      : []),
     ...(await watchDispatch(store, runtime, now, watch)),
     ...(await unstickDispatch(store, runtime, now, {
       goalId: watch.goalId,

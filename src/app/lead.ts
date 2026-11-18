@@ -99,7 +99,7 @@ export class LeadService {
       const recovered = await this.runtime.recover?.(state.leadIntent);
       if (!recovered)
         throw new Error(
-          `Lead dispatch outcome unknown for ${goalId}; check \`orca orchestration task-list\`, then \`apos execution abandon-intent ${goalId} --key ${state.leadIntent} --reason ...\` if Orca created nothing`,
+          `Lead dispatch outcome unknown for ${goalId}; check \`orca orchestration task-list --run <run_id>\` (find \`<run_id>\` with \`orca orchestration run-list\`), then \`apos execution abandon-intent ${goalId} --key ${state.leadIntent} --reason ...\` if Orca created nothing`,
         );
       this.record(goalId, 'lead-started', recovered);
       return recovered;
@@ -213,7 +213,7 @@ export class LeadService {
           if (
             this.notifyOnce(goalId, 'needs-decision', data => data.key === key, {
               key,
-              note: `Orca outcome for the Lead dispatch ${key} is unknown after ${LEAD_INTENT_MINUTES} min. Check \`orca orchestration task-list\`; if it created nothing, run \`apos execution abandon-intent ${goalId} --key ${key} --reason ...\` and then \`apos lead start ${goalId}\`.`,
+              note: `Orca outcome for the Lead dispatch ${key} is unknown after ${LEAD_INTENT_MINUTES} min. Check \`orca orchestration task-list --run <run_id>\` (find \`<run_id>\` with \`orca orchestration run-list\`); if it created nothing, run \`apos execution abandon-intent ${goalId} --key ${key} --reason ...\` and then \`apos lead start ${goalId}\`.`,
             })
           )
             actions.push('Lead dispatch unknown; Human notified');

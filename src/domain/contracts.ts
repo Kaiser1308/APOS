@@ -104,6 +104,11 @@ const goalSchema = z
     for (const [index, item] of goal.requirements.entries()) {
       if (item.disposition === 'excluded' && !item.exclusionReason)
         issue(['requirements', index], `Excluded requirement ${item.id} needs a reason`);
+      if (item.disposition === 'acceptance' && item.exclusion)
+        issue(
+          ['requirements', index, 'exclusion'],
+          `Requirement ${item.id} is an acceptance requirement and cannot also carry an exclusion: drop the exclusion or mark it excluded`,
+        );
     }
     for (const [index, item] of goal.acceptance.entries()) {
       for (const requirementId of item.requirementIds) {
@@ -233,10 +238,10 @@ export function parseExecutionProposal(value: unknown): ExecutionProposal {
 export function proposalRationale(proposal: ExecutionProposal): string | undefined {
   return proposal.rationale ?? proposal.splitRationale;
 }
-export function assertProposalRationale(proposal: ExecutionProposal): void {
+export function assertProposalRationale(proposal: ExecutionProposal, recovery = ''): void {
   if (!proposalRationale(proposal))
     throw new UserError(
-      'Proposal rationale (or splitRationale) is required: explain why this Goal uses one Solo owner or splits into packages',
+      `Proposal rationale (or splitRationale) is required: explain why this Goal uses one Solo owner or splits into packages${recovery}`,
     );
 }
 

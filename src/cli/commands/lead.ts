@@ -94,7 +94,10 @@ export function registerLead(ctx: CliContext): void {
           throw new Error(
             `Current proposal required: ${id} has no proposal yet (run apos lead propose --file <execution.json> first)`,
           );
-        assertProposalRationale(state.proposal);
+        assertProposalRationale(
+          state.proposal,
+          `. This saved proposal predates that field: add a "rationale" string to your execution JSON, re-run apos lead propose --file <execution.json>, then apos lead commit ${id}`,
+        );
         assertMultiWpPlannable(state.proposal);
         if (flags.terminal && flags.terminal !== leadState.ref.terminal)
           throw new Error(

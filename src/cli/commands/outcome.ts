@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { HandoffService } from '../../app/handoff.js';
 import type { HandoffTarget } from '../../domain/transitions.js';
 import { MergeService } from '../../app/merge.js';
-import { buildInbox } from '../../app/inbox.js';
 import {
   buildHumanInbox,
   controllerActive,
@@ -119,7 +118,8 @@ export function registerOutcome(ctx: CliContext): void {
     .action(async (flags: { wait?: boolean; timeout?: string; since?: string; json?: boolean }) => {
       if (!flags.wait && !flags.since && !flags.json) {
         withJournal(journal => {
-          const items = buildInbox(journal);
+          // Same item set as --since, --wait and --json: gates A and B included, as in the UI's "Needs you" (#28).
+          const items = buildHumanInbox(journal);
           if (!items.length) write('Inbox is clean: nothing waits for the Human.');
           for (const item of items) write(`${item.goalId}\t${item.kind}\t${item.detail}`);
         });

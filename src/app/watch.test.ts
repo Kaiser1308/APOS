@@ -410,10 +410,27 @@ describe('owner worktree progress observation (#27)', () => {
       head: head1,
       dirty: true,
       dirtyFiles: 1,
+      commits: [],
+      commitCount: 1,
+      latest: expect.objectContaining({ hash: head1 }),
     });
+
+    // A second commit records only that commit (not the first again), with the running total
+    git('add', 'next.js');
+    git('commit', '-qm', 'step 2: sync');
+    const head2 = git('rev-parse', 'HEAD');
+    await sup.step(spec.id, dir);
+    const observed3 = store.events(spec.id).filter(e => e.type === 'owner-progress-observed')[2];
+    expect(observed3.data).toMatchObject({
+      head: head2,
+      dirty: false,
+      commitCount: 2,
+      commits: [expect.objectContaining({ hash: head2, subject: 'step 2: sync', filesChanged: 1 })],
+    });
+    expect((observed3.data as { commits: unknown[] }).commits).toHaveLength(1);
 
     // Story view includes the worktree progress so the Owner card is not empty
     const story = buildStory(store as never, spec.id)!;
-    expect(story.owners[0].entries.some(e => e.text.includes('step 1: merge engine'))).toBe(true);
+    expect(story.owners[0].entries.some(e => e.text.includes('step 2: sync'))).toBe(true);
   });
 });

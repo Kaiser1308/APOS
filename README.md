@@ -290,7 +290,7 @@ Order: the Lead integrates and commits; the controller gates that commit and dis
 
 `apos ui [--port 4343]` serves a **read-only** web view of one project on `127.0.0.1`. It observes; it never runs the controller (start `controller watch` separately) and never writes controller state.
 
-- **Needs you:** gate A and B waiting, `needs-decision`, notices, and verified Goals awaiting an outcome. The list matches `apos inbox`, plus the two gates the CLI does not list.
+- **Needs you:** gate A and B waiting, `needs-decision`, notices, and verified Goals awaiting an outcome. The list matches `apos inbox`.
 - **Goals by who holds them:** Human, Lead, Controller / agent, Done.
 - **Story tab** (default per Goal): what the Human gave; what the Lead decided (mode, approach, why it split or did not, risks, verification, estimated cost against the appetite); and for each owner the latest checkpoint, observed worktree progress (commits since base and uncommitted changes), decisions, checkpoints, evidence, blockers, findings and reviews it put on record.
 - **Agent activity:** for each dispatch, the agent's own transcript (Codex rollouts under `~/.codex/sessions`, Claude Code sessions under `~/.claude/projects`, Antigravity transcripts under `~/.gemini/antigravity-cli`; `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `ANTIGRAVITY_HOME` move them), newest first, refreshing every 3 seconds while the owner runs: what it said, planned, ran and got back.
@@ -371,7 +371,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `finding record <id> --kind <intent_gap\|bad_plan\|patch\|defer> --note <text> [--by <name>]` | Record a finding. |
 | `outcome close <id> [--merge-to <branch>] [--by <name>]`, `outcome revise <id>`, `outcome stop <id>` | **Gate D (Human).** |
 | `execution start\|resume\|status\|reconcile\|verify <id>`, `review submit <goalId>` | Lower-level controls the controller normally drives itself; see `--help`. `review submit` is Human-only. |
-| `inbox [--wait] [--timeout <dur>] [--since <cursor>] [--json]` | What needs the Human: notices, blocked Goals, verified Goals awaiting an outcome (with `--wait`, also Gate A/B waiting; blocks read-only on the event log and exits 2 on timeout). |
+| `inbox [--wait] [--timeout <dur>] [--since <cursor>] [--json]` | What needs the Human: notices, blocked Goals, verified Goals awaiting an outcome, and Gate A/B waiting (plain, `--since`, `--json` and `--wait` all list the same items; `--since` takes the cursor printed last time, which only holds the items waiting then; `--wait` blocks read-only on the event log and exits 2 on timeout). |
 | `ui [--port <n>]` | Read-only local web view. |
 | `metrics show <goalId>` | Tokens, attempts and wall time. |
 
@@ -411,6 +411,7 @@ Known limits:
 - **Spend is not enforced.** `maxSpendUsd` and `overrunPolicy` are recorded, but there is no price table and an overrun only notifies. The controller never stops a running owner on its own; it only declines to resume it. Only the Human's `apos handoff` stops one.
 - **Multi-WP has run live only on a toy Goal**, not yet where packages truly depend on each other or where the review asks for changes.
 - **The quality pilot did not beat the baseline.** On the SQLFMT task APOS ended with 28/32 target tests against the single-agent baseline's 32/32, and the controller blocked the Goal rather than verify it. The current aim is a smooth controller, not accuracy.
+- **Upgrading from a version before `rationale`.** A proposal saved without `rationale` (or `splitRationale`) is refused by `lead commit`. Add a `rationale` string to the execution JSON, re-run `apos lead propose --file <execution.json>` from the Lead terminal, then `apos lead commit <id>`.
 - **Upgrading from a version before the Lead dispatch.** A Goal selected, planned or accepted under the old flow has no APOS Lead: `lead commit` refuses it and `apos inbox` asks you to run `apos lead start <id>`; the new Lead proposes and commits again. Goals already executing are unaffected. Do not roll back below this version once a log holds `lead-*` events: older builds cannot replay event types they do not know (this build ignores unknown ones).
 - **The Lead runs `apos` with `--repo`.** It works in its own worktree, so its commands must name the managed repo; its brief says so.
 - **Claude and Antigravity owners have not yet run a full Goal live.** Their screen rules come from real captures (`src/runtime/fixtures/screens/`); Orca opens Claude as a chat, so there is no composer to rescue. Antigravity's out-of-quota line is unknown.

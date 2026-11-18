@@ -14,6 +14,9 @@ import { readActivity, redact } from './activity.js';
 import { buildStory } from './story.js';
 import { route } from './server.js';
 
+// These tests build scratch Git repos and spawn many git processes; a loaded parallel run on Windows measured 3-5x slower than alone, past the default.
+vi.setConfig({ testTimeout: 60_000 });
+
 vi.setConfig({ testTimeout: 60_000 });
 const dirs: string[] = [];
 afterEach(() => {

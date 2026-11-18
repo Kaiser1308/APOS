@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,6 +14,9 @@ import { OrcaRefused } from '../runtime/orca/exec.js';
 import { runCli } from '../cli.js';
 import type { PackageRuntime, RuntimeAdapter, RuntimeObservation } from '../ports/runtime.js';
 import type { RuntimeRef } from '../domain/runtime-refs.js';
+
+// These tests build scratch Git repos and spawn many git processes; a loaded parallel run on Windows measured 3-5x slower than alone, past the default.
+vi.setConfig({ testTimeout: 60_000 });
 
 const dirs: string[] = [];
 afterEach(() => {

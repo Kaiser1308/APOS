@@ -34,7 +34,8 @@ async function setup() {
   return { dir, home, sourceFile, out, invoke };
 }
 
-describe('PM plan and requirement coverage tracking (#21)', () => {
+// Every CLI call commits to a scratch Git repo; a full parallel run on Windows measured 3-5x slower than alone.
+describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 }, () => {
   it('refuses goal create when an excluded requirement lacks exclusion.kind, naming the field', async () => {
     const { dir, sourceFile, invoke } = await setup();
     const badGoal = {
@@ -201,6 +202,12 @@ describe('PM plan and requirement coverage tracking (#21)', () => {
       item => item.detail.includes('orphan-requirement') && item.detail.includes('R-2'),
     );
     expect(orphanNotices).toHaveLength(1);
+    // The inbox recomputes the orphan; closing writes no orphan event of its own.
+    expect(
+      new ReadOnlyJournal(home)
+        .events('GOAL-002')
+        .filter(item => item.type === 'human-notified' && JSON.stringify(item.data).includes('orphan-requirement')),
+    ).toHaveLength(0);
 
     // Revise GOAL-001 to mark R-2 out-of-scope -> notice disappears
     const goal1Revised = {

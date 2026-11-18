@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { goalApprovalBlockers, parseExecutionProposal, parseGoalSpec } from './contracts.js';
-import { spec } from './fixtures.test-support.js';
+import { assertProposalRationale, goalApprovalBlockers, parseExecutionProposal, parseGoalSpec } from './contracts.js';
+import { proposal, spec } from './fixtures.test-support.js';
 
 const goal = spec;
 
@@ -35,6 +35,18 @@ describe('Goal contract', () => {
     expect(() => parseGoalSpec({ ...goal, requirements: [{ ...excluded, exclusionReason: 'later Goal' }] })).toThrow(
       /excluded requirement R-1/,
     );
+  });
+  it('tells the Human how to recover when a saved proposal lacks rationale', () => {
+    expect(() =>
+      assertProposalRationale(
+        parseExecutionProposal({ ...proposal, rationale: undefined, splitRationale: undefined }),
+        '. Re-run apos lead propose',
+      ),
+    ).toThrow(/Re-run apos lead propose/);
+  });
+  it('rejects an acceptance requirement that also carries an exclusion', () => {
+    const both = { ...goal.requirements[0], exclusion: { kind: 'out-of-scope' as const } };
+    expect(() => parseGoalSpec({ ...goal, requirements: [both] })).toThrow(/cannot also carry an exclusion/);
   });
   it('requires a failure pattern to compare base and delivery failures', () => {
     const check = { id: 'CHK-1', kind: 'command', command: 'npm test', expect: 'no-new-failures' };

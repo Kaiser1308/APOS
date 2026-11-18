@@ -107,8 +107,9 @@ export function filterInboxSince(items: HumanInboxItem[], since?: string): { fre
       .filter(Boolean),
   );
   const fresh = items.filter(item => !seen.has(itemCursorId(item)));
-  const merged = [...new Set([...seen, ...items.map(itemCursorId)])];
-  return { fresh, cursor: merged.join(',') || 'none' };
+  // The cursor lists only the items waiting now, so it stays as small as the inbox and an item that is
+  // resolved and later returns is reported again.
+  return { fresh, cursor: items.map(itemCursorId).join(',') || 'none' };
 }
 
 /** Watches `<home>/events` (with a 100ms polling fallback on Windows) until `check()` returns a value or `timeoutMs` elapses. */

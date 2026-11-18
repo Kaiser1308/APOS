@@ -69,9 +69,10 @@ function entryOf(event: GoalEvent): { owner: string; entry: StoryEntry } | undef
       return { owner, entry: { ...base, kind: 'report', text: `${str(data.phase)}: ${str(data.progress)}` } };
     case 'owner-progress-observed': {
       const commits = Array.isArray(data.commits) ? (data.commits as Record<string, unknown>[]) : [];
-      const latest = commits.at(-1);
+      const latest = (data.latest as Record<string, unknown> | undefined) ?? commits.at(-1);
+      const total = typeof data.commitCount === 'number' ? data.commitCount : commits.length;
       const text = latest
-        ? `worktree: ${commits.length} commit(s), latest ${str(latest.hash).slice(0, 7)} "${str(latest.subject)}" (${str(latest.filesChanged)} file(s))${data.dirty ? ` + ${str(data.dirtyFiles)} uncommitted` : ''}`
+        ? `worktree: ${total} commit(s), latest ${str(latest.hash).slice(0, 7)} "${str(latest.subject)}" (${str(latest.filesChanged)} file(s))${data.dirty ? ` + ${str(data.dirtyFiles)} uncommitted` : ''}`
         : `worktree: ${str(data.dirtyFiles)} uncommitted file(s)`;
       return { owner, entry: { ...base, kind: 'report', text } };
     }

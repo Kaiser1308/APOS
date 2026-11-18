@@ -55,28 +55,7 @@ export class VerificationService {
   }
 
   recordOutcome(goalId: GoalId, decision: 'close' | 'revise' | 'stop'): void {
-    if (decision === 'close') {
-      const closing = this.store.getGoal(goalId);
-      const acceptedIds = new Set(
-        (closing?.spec.requirements ?? []).filter(r => r.disposition === 'acceptance').map(r => r.id),
-      );
-      for (const other of this.store.listGoals()) {
-        if (other.spec.id === goalId) continue;
-        for (const req of other.spec.requirements) {
-          if (req.disposition === 'excluded' && req.exclusion?.kind === 'deferred' && req.exclusion.to === goalId) {
-            if (!acceptedIds.has(req.id)) {
-              this.record(goalId, 'human-notified', {
-                kind: 'orphan-requirement',
-                goalId,
-                fromGoalId: other.spec.id,
-                requirementId: req.id,
-                note: `Requirement ${req.id} was deferred from ${other.spec.id} to ${goalId}, which closed without accepting it.`,
-              });
-            }
-          }
-        }
-      }
-    }
+    // Orphaned deferred requirements are not journaled: the inbox recomputes them from the Goal specs on every read.
     const type = { close: 'outcome-accepted', revise: 'outcome-revised', stop: 'outcome-stopped' } as const;
     this.record(goalId, type[decision]);
   }

@@ -52,7 +52,8 @@ async function setupProject(withControllerHeartbeat = true) {
   return { dir, home, opened, add };
 }
 
-describe('apos inbox --wait and apos goal wait (#28)', () => {
+// Scratch-repo setup spawns many git processes; under a loaded parallel run it takes several times longer.
+describe('apos inbox --wait and apos goal wait (#28)', { timeout: 60_000 }, () => {
   it('returns immediately for Gate A waiting, and with --since waits for a new event instead of repeating', async () => {
     const { dir, home, opened, add } = await setupProject(true);
     const out1: string[] = [];

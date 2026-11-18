@@ -136,6 +136,19 @@ export function describe(gate: GateReport): string {
     .join('; ');
 }
 
+type Commit = { hash: string; at: string; subject: string; filesChanged: number };
+const MAX_OBSERVED_COMMITS = 20;
+
+/** Whether `commit` is still an ancestor of HEAD (false after a rewrite, or when the commit is unknown). */
+function isAncestor(git: (...args: string[]) => string, commit: string): boolean {
+  try {
+    git('merge-base', '--is-ancestor', commit, 'HEAD');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Observes a running owner's worktree read-only (`git --no-optional-locks`): commits since `baseCommit` and whether
  * uncommitted changes exist. Appends `owner-progress-observed` only when the observed state changed since the last one.
@@ -156,21 +169,10 @@ export function observeOwnerProgress(
       stdio: ['ignore', 'pipe', 'ignore'],
     });
   try {
-    const logLines = git('log', '--reverse', '--format=%H%x09%cI%x09%s', `${base}..HEAD`)
-      .split(/\r?\n/)
-      .filter(Boolean);
-    const commits = logLines.map(line => {
-      const [hash = '', at = '', subject = ''] = line.split('\t');
-      const filesChanged = git('diff-tree', '--no-commit-id', '--name-only', '-r', hash)
-        .split(/\r?\n/)
-        .filter(Boolean).length;
-      return { hash, at, subject, filesChanged };
-    });
+    const head = git('rev-parse', 'HEAD').trim();
     const dirtyFiles = git('status', '--porcelain').split(/\r?\n/).filter(Boolean).length;
     const dirty = dirtyFiles > 0;
-    if (!commits.length && !dirty) return [];
-    const sig = (commitsList: { hash?: string }[], isDirty: boolean, count: number) =>
-      JSON.stringify({ hashes: commitsList.map(c => c.hash), dirty: isDirty, dirtyFiles: count });
+    if (head === base && !dirty) return [];
     const prev = [...store.events(input.goalId)]
       .reverse()
       .find(
@@ -178,12 +180,37 @@ export function observeOwnerProgress(
           item.type === 'owner-progress-observed' &&
           ((item.data as { packageId?: string } | null)?.packageId ?? undefined) === input.packageId,
       );
-    const prevData = prev?.data as { commits?: { hash?: string }[]; dirty?: boolean; dirtyFiles?: number } | undefined;
-    if (
-      prevData &&
-      sig(prevData.commits ?? [], Boolean(prevData.dirty), prevData.dirtyFiles ?? 0) === sig(commits, dirty, dirtyFiles)
-    )
+    const prevData = prev?.data as
+      | {
+          head?: string;
+          dirty?: boolean;
+          dirtyFiles?: number;
+          commits?: Commit[];
+          latest?: Commit;
+          commitCount?: number;
+        }
+      | undefined;
+    // Unchanged head and dirty state costs no further git process.
+    if (prevData?.head === head && Boolean(prevData.dirty) === dirty && (prevData.dirtyFiles ?? 0) === dirtyFiles)
       return [];
+    let commits: Commit[] = [];
+    let commitCount = prevData?.commitCount;
+    if (prevData?.head !== head) {
+      // Inspect only commits made since the last observed head (the whole range after a rewrite or on the first look).
+      const since = prevData?.head && isAncestor(git, prevData.head) ? prevData.head : base;
+      // One git process lists the new commits with their files; the marker keeps subjects and file names apart.
+      const out = git('log', '--reverse', '--name-only', '--format=%x01%H%x09%cI%x09%s', `${since}..HEAD`);
+      commits = out
+        .split('\u0001')
+        .filter(Boolean)
+        .map(block => {
+          const [header = '', ...files] = block.split(/\r?\n/);
+          const [hash = '', at = '', subject = ''] = header.split('\t');
+          return { hash, at, subject, filesChanged: files.filter(Boolean).length };
+        });
+      commitCount = Number(git('rev-list', '--count', `${base}..HEAD`).trim());
+    }
+    const latest = commits.at(-1) ?? prevData?.latest ?? prevData?.commits?.at(-1);
     store.append(
       newEvent(
         input.goalId,
@@ -191,8 +218,11 @@ export function observeOwnerProgress(
         {
           dispatchId: input.dispatchId,
           ...(input.packageId ? { packageId: input.packageId } : {}),
-          head: commits.at(-1)?.hash ?? base,
-          commits,
+          head,
+          // Only the commits new since the last observation, newest MAX_OBSERVED_COMMITS at most; commitCount is the total.
+          commits: commits.slice(-MAX_OBSERVED_COMMITS),
+          commitCount,
+          ...(latest ? { latest } : {}),
           dirty,
           dirtyFiles,
         },

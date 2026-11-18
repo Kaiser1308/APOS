@@ -1,5 +1,10 @@
 import { newEvent } from '../../app/events.js';
-import { parseExecutionProposal, type PhaseCheckpoint } from '../../domain/contracts.js';
+import {
+  assertProposalRationale,
+  parseExecutionProposal,
+  proposalRationale,
+  type PhaseCheckpoint,
+} from '../../domain/contracts.js';
 import { SoloService } from '../../app/solo.js';
 import { LeadService, assertLeadTerminal, currentLeadRef } from '../../app/lead.js';
 import { PackageService } from '../../app/package-service.js';
@@ -46,6 +51,7 @@ export function registerLead(ctx: CliContext): void {
     .action(({ file }: { file: string }) =>
       withJournalAsync(async journal => {
         const parsed = parseExecutionProposal(readJsonFile(file));
+        assertProposalRationale(parsed);
         const current = journal.getGoal(parsed.goalId);
         if (!current) throw new Error(`Goal does not exist: ${parsed.goalId}`);
         const leadState = assertLeadTerminal(current, process.env.ORCA_TERMINAL_HANDLE, 'lead propose');
@@ -88,6 +94,10 @@ export function registerLead(ctx: CliContext): void {
           throw new Error(
             `Current proposal required: ${id} has no proposal yet (run apos lead propose --file <execution.json> first)`,
           );
+        assertProposalRationale(
+          state.proposal,
+          `. This saved proposal predates that field: add a "rationale" string to your execution JSON, re-run apos lead propose --file <execution.json>, then apos lead commit ${id}`,
+        );
         assertMultiWpPlannable(state.proposal);
         if (flags.terminal && flags.terminal !== leadState.ref.terminal)
           throw new Error(
@@ -112,7 +122,7 @@ export function registerLead(ctx: CliContext): void {
             kind: 'multi-wp',
             goalId: id,
             packages: Object.keys(state.packages ?? {}),
-            splitRationale: state.proposal.splitRationale,
+            splitRationale: proposalRationale(state.proposal),
             estimatedCost: state.proposal.estimatedCost,
           };
           journal.append(newEvent(id, 'human-notified', notice));

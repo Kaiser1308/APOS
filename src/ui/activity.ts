@@ -1,63 +1,24 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { GoalEvent } from '../domain/transitions.js';
 import { worktreePath } from '../runtime/orca/parse.js';
+import { findAntigravity } from './activity-antigravity.js';
+import {
+  MAX_ITEMS,
+  asText,
+  completeOnly,
+  item,
+  lines,
+  norm,
+  obj,
+  readScan,
+  type Activity,
+  type Agent,
+} from './activity-shared.js';
 
-/**
- * What an agent did, read from its own transcript (Codex rollout or Claude Code session). The agents' reasoning is
- * encrypted or empty in both formats, so only what they wrote, ran and got back is shown, never inferred thoughts.
- */
-export type ActivityKind = 'say' | 'plan' | 'command' | 'file-change' | 'result' | 'error';
-export type Activity = { at: string; kind: ActivityKind; text: string; truncated: boolean };
-export type Agent = 'codex' | 'claude';
-
-export const MAX_ITEM_CHARS = 4000;
-export const MAX_SCAN_BYTES = 8_000_000;
-export const MAX_ITEMS = 200;
-
-const SECRET_PATTERNS: [RegExp, string][] = [
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
-  [/\bsk-[A-Za-z0-9_-]{16,}/g, '[redacted key]'],
-  [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, '[redacted token]'],
-  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, '[redacted token]'],
-  [/\bAKIA[0-9A-Z]{16}\b/g, '[redacted key]'],
-  [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, '[redacted token]'],
-  [/\b(Bearer)\s+[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [redacted]'],
-  [/\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*)\s*[=:]\s*["']?[^\s"']{4,}/gi, '$1=[redacted]'],
-];
-/** Pattern-based: it hides common shapes of secrets and does not promise to hide every one. */
-export function redact(text: string): string {
-  return SECRET_PATTERNS.reduce((out, [pattern, to]) => out.replace(pattern, to), text);
-}
-
-function clip(text: string): { text: string; truncated: boolean } {
-  const safe = redact(text);
-  return safe.length > MAX_ITEM_CHARS
-    ? { text: `${safe.slice(0, MAX_ITEM_CHARS)}…`, truncated: true }
-    : { text: safe, truncated: false };
-}
-const item = (at: string, kind: ActivityKind, raw: string): Activity => ({ at, kind, ...clip(raw) });
-const obj = (value: unknown): Record<string, unknown> =>
-  value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-const asText = (value: unknown): string => {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value))
-    return value
-      .map(part => (typeof part === 'string' ? part : asText(obj(part).text ?? obj(part).content)))
-      .filter(Boolean)
-      .join('\n');
-  return value === undefined || value === null ? '' : JSON.stringify(value);
-};
-const lines = (raw: string): unknown[] =>
-  raw.split('\n').flatMap(line => {
-    if (!line) return [];
-    try {
-      return [JSON.parse(line)];
-    } catch {
-      return [];
-    }
-  });
+export { MAX_ITEMS, MAX_ITEM_CHARS, MAX_SCAN_BYTES, redact } from './activity-shared.js';
+export type { Activity, ActivityKind, Agent } from './activity-shared.js';
 
 /** Codex rollout lines to activity. Developer and user turns and encrypted reasoning are skipped. */
 export function parseCodex(raw: string): Activity[] {
@@ -138,32 +99,12 @@ export function parseClaude(raw: string): Activity[] {
   return out;
 }
 
-export type Roots = { codex: string; claude: string };
+export type Roots = { codex: string; claude: string; antigravity?: string };
 export const defaultRoots = (): Roots => ({
   codex: join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'sessions'),
   claude: join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects'),
+  antigravity: process.env.ANTIGRAVITY_HOME ?? join(homedir(), '.gemini', 'antigravity-cli'),
 });
-const norm = (path: string) => resolve(path).replace(/\\/g, '/').toLowerCase();
-
-/** Reads a file for a scan: all of it, or only its last MAX_SCAN_BYTES (cut at a line start) when it is larger. */
-function readScan(file: string): { head: string; body: string } {
-  const size = statSync(file).size;
-  const fd = openSync(file, 'r');
-  try {
-    const headLen = Math.min(size, 65_536),
-      head = Buffer.alloc(headLen);
-    readSync(fd, head, 0, headLen, 0);
-    if (size <= MAX_SCAN_BYTES) return { head: head.toString('utf8'), body: readFileSync(file, 'utf8') };
-    const tail = Buffer.alloc(MAX_SCAN_BYTES);
-    readSync(fd, tail, 0, MAX_SCAN_BYTES, size - MAX_SCAN_BYTES);
-    const text = tail.toString('utf8');
-    return { head: head.toString('utf8'), body: text.slice(text.indexOf('\n') + 1) };
-  } finally {
-    closeSync(fd);
-  }
-}
-/** A line is complete only when it ends in a newline; the agent may still be writing the last one. */
-const completeOnly = (raw: string) => (raw.endsWith('\n') ? raw : raw.slice(0, raw.lastIndexOf('\n') + 1));
 const jsonls = (dir: string) =>
   existsSync(dir)
     ? readdirSync(dir)
@@ -182,7 +123,13 @@ function cwdOf(head: string, key: 'session_meta' | 'cwd'): string | undefined {
 
 export type Transcript = { agent: Agent; file: string; items: Activity[] };
 /** Transcripts whose recorded cwd is the dispatch's worktree, cut to [since, until] (30 s of slack for clock drift). */
-export function findTranscripts(worktree: string, since: string, until: string, roots: Roots): Transcript[] {
+export function findTranscripts(
+  worktree: string,
+  since: string,
+  until: string,
+  roots: Roots,
+  dispatchId?: string,
+): Transcript[] {
   const target = norm(worktree),
     from = Date.parse(since) - 30_000,
     to = Date.parse(until) + 30_000;
@@ -216,6 +163,7 @@ export function findTranscripts(worktree: string, since: string, until: string, 
     const items = inWindow(parseClaude(completeOnly(scan.body)));
     if (items.length) found.push({ agent: 'claude', file, items });
   }
+  if (roots.antigravity) found.push(...findAntigravity(roots.antigravity, target, dispatchId, inWindow));
   return found;
 }
 
@@ -225,6 +173,7 @@ export type Dispatch = {
   owner: string;
   at: string;
   worktree?: string;
+  agent?: string;
 };
 /** Every dispatch the controller recorded for a Goal, with the worktree it ran in. The request names an id, never a path. */
 export function dispatchesOf(events: GoalEvent[]): Dispatch[] {
@@ -240,12 +189,14 @@ export function dispatchesOf(events: GoalEvent[]): Dispatch[] {
           : typeof source.worktree === 'string'
             ? source.worktree
             : undefined;
+      const agent = typeof obj(source.requested).agent === 'string' ? String(obj(source.requested).agent) : undefined;
       out.push({
         dispatchId: source.dispatchId,
         role,
         owner,
         at: event.at,
         worktree: id?.includes('::') ? worktreePath(id) : id && /[\\/]/.test(id) ? id : undefined,
+        ...(agent ? { agent } : {}),
       });
     };
     // The Lead's own dispatch; when it then becomes the Solo owner, execution-started repeats its id and is not listed twice.
@@ -257,6 +208,19 @@ export function dispatchesOf(events: GoalEvent[]): Dispatch[] {
     else if (event.type === 'review-dispatched')
       add('reviewer', typeof data.packageId === 'string' ? data.packageId : 'goal', data);
     else if (event.type === 'lead-woken') add('lead', 'goal', data);
+    else if (event.type === 'owner-handed-off') {
+      const target = obj(data.target);
+      const prior = out.find(entry => entry.dispatchId === data.from);
+      const role: Dispatch['role'] =
+        target.kind === 'package' ? 'worker' : target.kind === 'reviewer' ? 'reviewer' : (prior?.role ?? 'lead');
+      const owner =
+        target.kind === 'package' ? String(target.packageId ?? prior?.owner ?? 'goal') : (prior?.owner ?? 'goal');
+      add(role, owner, {
+        worktree: prior?.worktree,
+        requested: prior?.agent ? { agent: prior.agent } : undefined,
+        ...ref,
+      });
+    }
   }
   return out;
 }
@@ -294,8 +258,20 @@ export function readActivity(
     .filter(entry => entry.worktree === mine.worktree && entry.at > mine.at && entry.dispatchId !== mine.dispatchId)
     .map(entry => entry.at)
     .sort()[0];
-  const transcripts = findTranscripts(mine.worktree, mine.at, next ?? now.toISOString(), roots);
-  if (!transcripts.length) return none('No Codex or Claude Code transcript was found for this worktree and time.');
+  const transcripts = findTranscripts(mine.worktree, mine.at, next ?? now.toISOString(), roots, mine.dispatchId);
+  if (!transcripts.length) {
+    if (mine.agent && !['codex', 'claude', 'antigravity'].includes(mine.agent))
+      return none(
+        `Transcript reader for runtime "${mine.agent}" is not supported yet. Run \`orca orchestration worker-read --dispatch ${mine.dispatchId}\` to inspect its output.`,
+      );
+    const read = `Run \`orca orchestration worker-read --dispatch ${mine.dispatchId}\` to inspect its terminal output.`;
+    const label = { codex: 'Codex', claude: 'Claude Code', antigravity: 'Antigravity' }[mine.agent ?? ''];
+    return none(
+      label
+        ? `No ${label} transcript was found for this worktree and time. ${read}`
+        : `No transcript was found for this worktree and time (the dispatch did not record its runtime, so Codex, Claude Code and Antigravity were all checked). ${read}`,
+    );
+  }
   // A forked Codex session replays its parent's records with the same timestamps; show each record once.
   const seen = new Set<string>();
   const merged = transcripts

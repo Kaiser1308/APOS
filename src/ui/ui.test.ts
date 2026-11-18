@@ -21,6 +21,7 @@ import type { AddressInfo } from 'node:net';
 import { runCli } from '../cli.js';
 import { initProject } from '../app/init-project.js';
 import { buildInbox } from '../app/inbox.js';
+import { buildHumanInbox } from '../app/wait.js';
 import { ProjectJournal } from '../store/journal.js';
 import { ReadOnlyJournal } from '../store/readonly-journal.js';
 import { DELIVERY, approval, gateReport, proposal, sourceText, spec } from '../domain/fixtures.test-support.js';
@@ -30,6 +31,9 @@ import { buildStory } from './story.js';
 import { HOLDER, buildGoalDetail, buildSnapshot, findGateLog, tickRunning } from './read-model.js';
 import { PAGE } from './page.js';
 import { route, startUi } from './server.js';
+
+// These tests build scratch Git repos and spawn many git processes; a loaded parallel run on Windows measured 3-5x slower than alone, past the default.
+vi.setConfig({ testTimeout: 60_000 });
 
 const dirs: string[] = [];
 const servers: Server[] = [];
@@ -103,7 +107,7 @@ async function seeded() {
   return p;
 }
 
-it('shows what apos inbox shows, and adds the Human gates A and B that the CLI inbox lacks', async () => {
+it('shows what apos inbox shows, gates A and B included (#28)', async () => {
   const p = await seeded();
   const c = p.goal('GOAL-C');
   c.draft();
@@ -111,7 +115,8 @@ it('shows what apos inbox shows, and adds the Human gates A and B that the CLI i
   const lines: string[] = [];
   await runCli(['--repo', p.dir, 'inbox'], { home: p.home, write: line => lines.push(line) });
   const readOnly = new ReadOnlyJournal(p.home);
-  expect(buildInbox(readOnly).map(item => `${item.goalId}\t${item.kind}\t${item.detail}`)).toEqual(lines);
+  expect(buildHumanInbox(readOnly).map(item => `${item.goalId}\t${item.kind}\t${item.detail}`)).toEqual(lines);
+  expect(lines.some(line => line.includes('awaiting-approval'))).toBe(true);
   expect(lines.some(line => line.includes('needs-decision'))).toBe(true);
   expect(lines.some(line => line.includes('notice'))).toBe(true);
   const kinds = buildSnapshot(readOnly).inbox.map(item => `${item.goalId}:${item.kind}`);
@@ -409,6 +414,18 @@ it('tells the story of a Goal: what the Human gave, what the Lead decided, and w
   expect(before.lead).toMatchObject({ mode: 'solo-direct', approved: false, approach: 'reuse the <b>API</b>' });
   expect(before.lead!.modeLabel).toMatch(/1 owner/);
   expect(before.lead!.whySplit).toMatch(/không ghi lý do chia/);
+  expect(before.lead!.whySplit).toContain('not recorded');
+  g.add('proposal-revised', {
+    ...proposal,
+    version: 2,
+    goalId: 'GOAL-S',
+    approach: 'reuse the <b>API</b>',
+    splitRationale: undefined,
+    rationale: 'repo trống, các mảng phụ thuộc chặt vào model chung',
+  });
+  expect(buildStory(new ReadOnlyJournal(p.home), 'GOAL-S')!.lead!.whySplit).toBe(
+    'repo trống, các mảng phụ thuộc chặt vào model chung',
+  );
   g.add('proposal-approved');
   g.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   g.add('decision-logged', { note: 'cookie session, not JWT' });

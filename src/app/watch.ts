@@ -38,7 +38,7 @@ export async function exhaustedAgent(
   const agent = await dispatchAgent(runtime, input.dispatchId, input.requested);
   let message: string | undefined;
   try {
-    message = await runtime.agentQuota(input.terminal, agent);
+    message = await runtime.agentQuota(input.terminal, agent, input.dispatchId);
   } catch {
     return undefined;
   }
@@ -46,7 +46,7 @@ export async function exhaustedAgent(
 }
 
 export const exhaustedNote = (role: Role, agent: string | undefined, message: string, handoffHint: string) =>
-  `the ${role} agent${agent ? ` (${agent})` : ''} is out of quota: "${message}". Move its work to another agent on the same worktree: \`${handoffHint}\` (this also makes that agent the ${role} profile).`;
+  `the ${role} agent${agent ? ` (${agent})` : ''} has stopped on an error: "${message}". Move its work to another agent on the same worktree: \`${handoffHint}\` (this also makes that agent the ${role} profile; or omit \`--agent\` for a fresh session with the same agent).`;
 
 /**
  * Orca reports an agent that ran out of quota itself, as an escalation on the Run (seen live 2026-11-14: subject
@@ -217,7 +217,9 @@ export async function watchDispatch(
       message: exhausted.message,
       handoffHint: input.handoffHint,
     });
-    return [`${input.role} ${input.dispatchId} out of quota (${exhausted.agent ?? 'unknown agent'}); Human notified`];
+    return [
+      `${input.role} ${input.dispatchId} stopped on an error (${exhausted.agent ?? 'unknown agent'}); Human notified`,
+    ];
   }
   const threshold = input.idleNoticeMinutes === undefined ? OWNER_IDLE_MINUTES : input.idleNoticeMinutes;
   if (threshold === null || idleMinutes < threshold || seen('owner-idle')) return [];
@@ -225,7 +227,7 @@ export async function watchDispatch(
   record({
     kind: 'owner-idle',
     idleMinutes: minutes,
-    note: `the ${input.role}${input.packageId ? ` of ${input.packageId}` : ''} has been idle for ${minutes} min without reporting worker_done; it may have died (wrong model, auth, crash, quota). Check the terminal in Orca or \`orca orchestration worker-show --dispatch ${input.dispatchId}\`, then \`${input.handoffHint}\`, \`apos execution abandon-intent\` or \`apos outcome stop\`.`,
+    note: `the ${input.role}${input.packageId ? ` of ${input.packageId}` : ''} has been idle for ${minutes} min without reporting worker_done; it may have died (wrong model, auth, crash, quota). Check the terminal in Orca or \`orca orchestration worker-show --dispatch ${input.dispatchId}\`, then \`${input.handoffHint}\` (or omit \`--agent\` for a fresh session with the same agent), \`apos execution abandon-intent\` or \`apos outcome stop\`.`,
   });
   return [`${input.role} ${input.dispatchId} idle ${minutes} min; Human notified`];
 }

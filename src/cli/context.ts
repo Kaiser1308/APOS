@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { parseGoalSpec } from '../domain/contracts.js';
+import { assertGoalExclusionComplete, parseGoalSpec } from '../domain/contracts.js';
 import { sourceDigest } from '../domain/gate.js';
 import type { Role } from '../domain/runtime-refs.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
@@ -16,6 +16,7 @@ export type CliContext = {
   program: Command;
   options: CliOptions;
   write(line: string): void;
+  writeError(line: string): void;
   runtime: RuntimeAdapter & Partial<PackageRuntime>;
   packageRuntime(): PackageRuntime;
   repo(): string;
@@ -48,11 +49,13 @@ function goalWithSource(file: string, sourcePath: string, origin: string) {
     ...raw,
     source: given ?? { path: sourcePath, sha256: digest, capturedAt: new Date().toISOString(), origin },
   });
+  assertGoalExclusionComplete(spec);
   return { spec, text };
 }
 
 export function createContext(program: Command, options: CliOptions): CliContext {
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
+  const writeError = options.writeError ?? ((line: string) => process.stderr.write(`${line}\n`));
   const repo = () => resolve(program.opts<{ repo: string }>().repo);
   // Role profiles come from <controller home>/runtime.json, read when a dispatch needs them.
   const runtime =
@@ -155,6 +158,7 @@ export function createContext(program: Command, options: CliOptions): CliContext
     program,
     options,
     write,
+    writeError,
     runtime,
     packageRuntime,
     repo,

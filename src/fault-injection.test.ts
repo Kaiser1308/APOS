@@ -61,7 +61,8 @@ describe('brief with $ and quotes', () => {
   });
 });
 
-describe('target branch head moved after verification', () => {
+// Drives the whole Goal flow plus a merge and gate rerun: ~6s alone but measured 20s+ in a loaded parallel run.
+describe('target branch head moved after verification', { timeout: 90_000 }, () => {
   it('merges the gated commit, reruns the gate on the merge, and keeps the Goal open when that gate is red', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'apos-fault-'));
     dirs.push(dir);

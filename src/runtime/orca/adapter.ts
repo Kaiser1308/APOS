@@ -327,17 +327,34 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
     );
   }
 
-  private screen(terminal: string): string[] {
-    const tail = object(this.execute(['terminal', 'read', '--terminal', terminal]).terminal).tail;
-    return Array.isArray(tail) ? tail.map(String) : [];
+  private screen(terminal: string, dispatchId?: string): string[] {
+    try {
+      const tail = object(this.execute(['terminal', 'read', '--terminal', terminal]).terminal).tail;
+      if (Array.isArray(tail) && tail.length) return tail.map(String);
+    } catch (error) {
+      if (!dispatchId) throw error;
+    }
+    if (!dispatchId) return [];
+    const read = this.execute(['orchestration', 'worker-read', '--dispatch', dispatchId, '--source', 'auto']);
+    if (Array.isArray(read.lines)) return read.lines.map(String);
+    if (Array.isArray(object(read.terminal).tail)) return (object(read.terminal).tail as unknown[]).map(String);
+    const raw =
+      typeof read.output === 'string'
+        ? read.output
+        : typeof read.content === 'string'
+          ? read.content
+          : typeof object(read.worker).output === 'string'
+            ? String(object(read.worker).output)
+            : '';
+    return raw ? raw.split(/\r?\n/) : [];
   }
 
   async composerPending(terminal: string, agent?: string): Promise<boolean> {
     return unsentBrief(agent, this.screen(terminal));
   }
 
-  async agentQuota(terminal: string, agent?: string): Promise<string | undefined> {
-    return quotaMessage(agent, this.screen(terminal));
+  async agentQuota(terminal: string, agent?: string, dispatchId?: string): Promise<string | undefined> {
+    return quotaMessage(agent, this.screen(terminal, dispatchId));
   }
 
   async nudge(terminal: string): Promise<void> {

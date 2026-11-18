@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,6 +8,9 @@ import { spec, proposal, gateReport, approval } from '../domain/fixtures.test-su
 import { initProject } from './init-project.js';
 import { MergeService } from './merge.js';
 import type { GoalEventType } from '../domain/transitions.js';
+
+// These tests build scratch Git repos and spawn many git processes; a loaded parallel run on Windows measured 3-5x slower than alone, past the default.
+vi.setConfig({ testTimeout: 60_000 });
 
 const dirs: string[] = [];
 afterEach(() => {

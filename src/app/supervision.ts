@@ -1,5 +1,6 @@
 import { newEvent } from './events.js';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { GoalEventType, GoalState } from '../domain/transitions.js';
 import { worktreePath } from '../runtime/orca/parse.js';
@@ -135,6 +136,105 @@ export function describe(gate: GateReport): string {
     .join('; ');
 }
 
+type Commit = { hash: string; at: string; subject: string; filesChanged: number };
+const MAX_OBSERVED_COMMITS = 20;
+
+/** Whether `commit` is still an ancestor of HEAD (false after a rewrite, or when the commit is unknown). */
+function isAncestor(git: (...args: string[]) => string, commit: string): boolean {
+  try {
+    git('merge-base', '--is-ancestor', commit, 'HEAD');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Observes a running owner's worktree read-only (`git --no-optional-locks`): commits since `baseCommit` and whether
+ * uncommitted changes exist. Appends `owner-progress-observed` only when the observed state changed since the last one.
+ */
+export function observeOwnerProgress(
+  store: GoalRepository,
+  now: () => number,
+  input: { goalId: string; dispatchId: string; packageId?: string },
+): string[] {
+  const state = store.getGoal(input.goalId);
+  const ref = input.packageId ? state?.packages?.[input.packageId]?.runtimeRef : state?.runtimeRef;
+  const tree = worktreePath(ref?.worktreeId);
+  const base = ref?.baseCommit;
+  if (!tree || !base || !existsSync(tree)) return [];
+  const git = (...args: string[]) =>
+    execFileSync('git', ['--no-optional-locks', '-C', tree, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  try {
+    const head = git('rev-parse', 'HEAD').trim();
+    const dirtyFiles = git('status', '--porcelain').split(/\r?\n/).filter(Boolean).length;
+    const dirty = dirtyFiles > 0;
+    if (head === base && !dirty) return [];
+    const prev = [...store.events(input.goalId)]
+      .reverse()
+      .find(
+        item =>
+          item.type === 'owner-progress-observed' &&
+          ((item.data as { packageId?: string } | null)?.packageId ?? undefined) === input.packageId,
+      );
+    const prevData = prev?.data as
+      | {
+          head?: string;
+          dirty?: boolean;
+          dirtyFiles?: number;
+          commits?: Commit[];
+          latest?: Commit;
+          commitCount?: number;
+        }
+      | undefined;
+    // Unchanged head and dirty state costs no further git process.
+    if (prevData?.head === head && Boolean(prevData.dirty) === dirty && (prevData.dirtyFiles ?? 0) === dirtyFiles)
+      return [];
+    let commits: Commit[] = [];
+    let commitCount = prevData?.commitCount;
+    if (prevData?.head !== head) {
+      // Inspect only commits made since the last observed head (the whole range after a rewrite or on the first look).
+      const since = prevData?.head && isAncestor(git, prevData.head) ? prevData.head : base;
+      // One git process lists the new commits with their files; the marker keeps subjects and file names apart.
+      const out = git('log', '--reverse', '--name-only', '--format=%x01%H%x09%cI%x09%s', `${since}..HEAD`);
+      commits = out
+        .split('\u0001')
+        .filter(Boolean)
+        .map(block => {
+          const [header = '', ...files] = block.split(/\r?\n/);
+          const [hash = '', at = '', subject = ''] = header.split('\t');
+          return { hash, at, subject, filesChanged: files.filter(Boolean).length };
+        });
+      commitCount = Number(git('rev-list', '--count', `${base}..HEAD`).trim());
+    }
+    const latest = commits.at(-1) ?? prevData?.latest ?? prevData?.commits?.at(-1);
+    store.append(
+      newEvent(
+        input.goalId,
+        'owner-progress-observed',
+        {
+          dispatchId: input.dispatchId,
+          ...(input.packageId ? { packageId: input.packageId } : {}),
+          head,
+          // Only the commits new since the last observation, newest MAX_OBSERVED_COMMITS at most; commitCount is the total.
+          commits: commits.slice(-MAX_OBSERVED_COMMITS),
+          commitCount,
+          ...(latest ? { latest } : {}),
+          dirty,
+          dirtyFiles,
+        },
+        new Date(now()).toISOString(),
+      ),
+    );
+    return ['observed owner progress'];
+  } catch {
+    return [];
+  }
+}
+
 /** Watches an unsettled dispatch, then nudges it when its brief sits unsent: the two checks every wake runs together. */
 export async function watchAndUnstick(
   store: GoalRepository,
@@ -144,6 +244,13 @@ export async function watchAndUnstick(
   since: string | undefined,
 ): Promise<string[]> {
   return [
+    ...(watch.role !== 'reviewer'
+      ? observeOwnerProgress(store, now, {
+          goalId: watch.goalId,
+          dispatchId: watch.dispatchId,
+          packageId: watch.packageId,
+        })
+      : []),
     ...(await watchDispatch(store, runtime, now, watch)),
     ...(await unstickDispatch(store, runtime, now, {
       goalId: watch.goalId,

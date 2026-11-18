@@ -55,6 +55,7 @@ export class VerificationService {
   }
 
   recordOutcome(goalId: GoalId, decision: 'close' | 'revise' | 'stop'): void {
+    // Orphaned deferred requirements are not journaled: the inbox recomputes them from the Goal specs on every read.
     const type = { close: 'outcome-accepted', revise: 'outcome-revised', stop: 'outcome-stopped' } as const;
     this.record(goalId, type[decision]);
   }

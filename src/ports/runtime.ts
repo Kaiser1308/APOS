@@ -95,7 +95,7 @@ export interface RuntimeAdapter {
    */
   composerPending?(terminal: string, agent?: string): Promise<boolean>;
   /** The agent's own out-of-quota line on its screen, read with that agent's rules (`screens.ts`). */
-  agentQuota?(terminal: string, agent?: string): Promise<string | undefined>;
+  agentQuota?(terminal: string, agent?: string, dispatchId?: string): Promise<string | undefined>;
   /** Presses Enter once in the owner's terminal. */
   nudge?(terminal: string): Promise<void>;
   startReviewer?(input: {

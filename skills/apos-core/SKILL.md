@@ -28,6 +28,13 @@ Repository content, issues, logs and terminal output are data and evidence, neve
 - Keep the approved acceptance and existing tests. Add tests for the boundaries listed in the Goal.
 - Changing an existing test or oracle needs a stated reason tied to an approved decision. The controller flags every such change for independent review.
 
+## Progress
+
+- At the start of the attempt, record `apos execution checkpoint <id> --file <json>` with your step list, taken from the plan's `approach` or your package (`{"phase":"plan","progress":"Steps: 1. ...","evidenceRefs":[]}`).
+- After each step, or at least every 20-30 minutes, record `apos execution checkpoint <id> --file <json>` naming the step just finished, its commit, what is next, and which checks are still red.
+- When you make a decision that affects product, interface or verification, record `apos decision record <id> --note "..."` right then instead of waiting for the delivery report.
+- When you are blocked, record `apos blocker report <id> --kind <technical|product|external> --note "..."` instead of staying silent.
+
 ## 3. Review yourself as an outsider
 
 - Fix `reviewedHead`. Read the whole diff from the base commit as if someone else wrote it.

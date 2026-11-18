@@ -18,6 +18,7 @@ export type StoryOwner = {
   attempts: number;
   outcome?: string;
   dependencies: string[];
+  latestCheckpoint?: { phase: string; progress: string; at: string };
   entries: StoryEntry[];
   dispatches: { dispatchId: string; role: string; at: string }[];
 };
@@ -66,6 +67,15 @@ function entryOf(event: GoalEvent): { owner: string; entry: StoryEntry } | undef
       return { owner, entry: { ...base, kind: 'decision', text: str(data.note) } };
     case 'checkpointed':
       return { owner, entry: { ...base, kind: 'report', text: `${str(data.phase)}: ${str(data.progress)}` } };
+    case 'owner-progress-observed': {
+      const commits = Array.isArray(data.commits) ? (data.commits as Record<string, unknown>[]) : [];
+      const latest = (data.latest as Record<string, unknown> | undefined) ?? commits.at(-1);
+      const total = typeof data.commitCount === 'number' ? data.commitCount : commits.length;
+      const text = latest
+        ? `worktree: ${total} commit(s), latest ${str(latest.hash).slice(0, 7)} "${str(latest.subject)}" (${str(latest.filesChanged)} file(s))${data.dirty ? ` + ${str(data.dirtyFiles)} uncommitted` : ''}`
+        : `worktree: ${str(data.dirtyFiles)} uncommitted file(s)`;
+      return { owner, entry: { ...base, kind: 'report', text } };
+    }
     case 'evidence-submitted':
     case 'package-evidence-submitted':
       return {
@@ -132,7 +142,12 @@ export function buildStory(repo: ReadOnlyJournal, id: string): Story | undefined
   for (const event of repo.events(id)) {
     const hit = entryOf(event);
     if (!hit) continue;
-    (owners.get(hit.owner) ?? owners.get('goal')!).entries.push(hit.entry);
+    const target = owners.get(hit.owner) ?? owners.get('goal')!;
+    target.entries.push(hit.entry);
+    if (event.type === 'checkpointed') {
+      const data = obj(event.data);
+      target.latestCheckpoint = { phase: str(data.phase), progress: str(data.progress), at: event.at };
+    }
   }
   for (const d of dispatchesOf(repo.events(id)))
     (owners.get(d.owner) ?? owners.get('goal')!).dispatches.push({ dispatchId: d.dispatchId, role: d.role, at: d.at });
@@ -161,10 +176,11 @@ export function buildStory(repo: ReadOnlyJournal, id: string): Story | undefined
       approved: state.proposalApprovedVersion === proposal.version,
       approach: proposal.approach,
       whySplit:
+        proposal.rationale ??
         proposal.splitRationale ??
         (proposal.mode === 'multi-wp'
-          ? ''
-          : 'Lead không ghi lý do chia (chỉ bắt buộc với Multi-WP): chọn làm với một owner.'),
+          ? 'not recorded'
+          : 'not recorded (Lead không ghi lý do chia: chọn làm với một owner)'),
       risks: proposal.risks,
       sharedPaths: proposal.sharedPaths,
       acceptanceMapping: proposal.acceptanceMapping.map(item => ({

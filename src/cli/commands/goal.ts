@@ -1,14 +1,30 @@
 import type { Command } from 'commander';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { newEvent } from '../../app/events.js';
+import { buildInbox } from '../../app/inbox.js';
+import {
+  controllerActive,
+  itemCursorId,
+  parseDurationMs,
+  parseTargetStatuses,
+  readOnlyRepo,
+  watchEvents,
+} from '../../app/wait.js';
 import { parseAppetite } from '../../domain/contracts.js';
+import { UserError } from '../../domain/errors.js';
+import { sourceDigest } from '../../domain/gate.js';
+import { buildPlan } from '../../domain/plan.js';
 import { LeadService } from '../../app/lead.js';
 import { assertExecutionSettled } from '../../app/replan.js';
 import { GoalRegistryService } from '../../app/registry.js';
 import { describeProfiles } from '../../runtime/brief.js';
+import { controllerHome } from '../../store/event-log.js';
 import type { CliContext } from '../context.js';
 
 export function registerGoal(ctx: CliContext): void {
-  const { program, write, runtime, repo, home, withJournal, withJournalAsync, assertHuman, goalWithSource } = ctx;
+  const { program, options, write, runtime, repo, home, withJournal, withJournalAsync, assertHuman, goalWithSource } =
+    ctx;
   const goal = program.command('goal');
   goal
     .command('create')
@@ -84,7 +100,7 @@ export function registerGoal(ctx: CliContext): void {
           const key = journal.getGoal(id)?.leadIntent;
           write(
             key
-              ? `Lead dispatch outcome unknown for ${id}: ${reason}. Do not retry yet: check \`orca orchestration task-list\`, then \`apos execution abandon-intent ${id} --key ${key} --reason ...\` if Orca created nothing, then \`apos lead start ${id}\`.`
+              ? `Lead dispatch outcome unknown for ${id}: ${reason}. Do not retry yet: check \`orca orchestration task-list --run <run_id>\` (find \`<run_id>\` with \`orca orchestration run-list\`), then \`apos execution abandon-intent ${id} --key ${key} --reason ...\` if Orca created nothing, then \`apos lead start ${id}\`.`
               : `Lead not dispatched for ${id}: ${reason}. Retry with \`apos lead start ${id}\`.`,
           );
         }
@@ -104,6 +120,72 @@ export function registerGoal(ctx: CliContext): void {
         await assertExecutionSettled(current, runtime, { includeLead: true });
         journal.appendWithSource(newEvent(revised.id, 'goal-revised', revised), text);
         write(`Revised ${revised.id} v${revised.version}; Human approval required`);
+      }),
+    );
+  goal
+    .command('wait')
+    .argument('<id>')
+    .requiredOption('--until <states>', 'comma-separated target Goal statuses')
+    .option('--timeout <dur>', 'max time to wait (e.g. 30s, 5m)', '5m')
+    .action(async (id: string, flags: { until: string; timeout?: string }) => {
+      if (!existsSync(join(repo(), '.apos', 'project.yaml'))) throw new Error('Run apos init first');
+      const homeDir = options.home ?? controllerHome(repo());
+      const targets = parseTargetStatuses(flags.until);
+      const timeoutMs = parseDurationMs(flags.timeout);
+      const initialRepo = readOnlyRepo(homeDir);
+      if (!initialRepo.getGoal(id)) throw new UserError(`Goal does not exist: ${id}`);
+      const seenNotices = new Set(
+        buildInbox(initialRepo)
+          .filter(item => item.goalId === id && item.kind === 'notice')
+          .map(itemCursorId),
+      );
+      const check = () => {
+        const currentRepo = readOnlyRepo(homeDir);
+        const state = currentRepo.getGoal(id);
+        if (!state) return undefined;
+        const notice = buildInbox(currentRepo).find(
+          item => item.goalId === id && item.kind === 'notice' && !seenNotices.has(itemCursorId(item)),
+        );
+        if (targets.has(state.status) || notice) return { status: state.status, notice };
+        return undefined;
+      };
+      let hit = check();
+      if (!hit) {
+        if (!controllerActive(homeDir))
+          write(
+            'warning: no active controller watch detected (no tick in the last 2 min); run `apos controller watch` so Goals can advance.',
+          );
+        hit = await watchEvents(homeDir, timeoutMs, check);
+      }
+      if (!hit) {
+        const state = readOnlyRepo(homeDir).getGoal(id);
+        write(`timeout after ${flags.timeout ?? '5m'}: ${id}:${state?.status ?? 'unknown'}`);
+        process.exitCode = 2;
+        return;
+      }
+      process.exitCode = 0;
+      write(`${id}\t${hit.status}${hit.notice ? `\tnotice\t${hit.notice.detail}` : ''}`);
+    });
+  program
+    .command('plan')
+    .description('show Goal plan and requirement coverage across the brief')
+    .option('--source <path>', 'filter by source brief file')
+    .option('--json', 'emit machine-readable JSON')
+    .action((flags: { source?: string; json?: boolean }) =>
+      withJournal(journal => {
+        const sha = flags.source ? sourceDigest(readFileSync(flags.source, 'utf8')) : undefined;
+        const plan = buildPlan(journal.listGoals(), sha);
+        if (flags.json) {
+          write(JSON.stringify(plan));
+          return;
+        }
+        if (!plan.goals.length && !plan.requirements.length) {
+          write('No Goals planned yet.');
+          return;
+        }
+        for (const item of plan.goals)
+          write(`goal\t${item.id}\t${item.status}${item.sketch ? ' (sketch)' : ''}\t${item.outcome}`);
+        for (const req of plan.requirements) write(`req\t${req.id}\t${req.status}\t${req.goalId ?? '-'}\t${req.text}`);
       }),
     );
 }

@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,6 +7,9 @@ import { runCli } from '../cli.js';
 import { spec, sourceText } from '../domain/fixtures.test-support.js';
 import { OrcaRefused } from '../runtime/orca/exec.js';
 import type { RuntimeAdapter } from '../ports/runtime.js';
+
+// These tests build scratch Git repos and spawn many git processes; a loaded parallel run on Windows measured 3-5x slower than alone, past the default.
+vi.setConfig({ testTimeout: 60_000 });
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -67,7 +70,8 @@ it('does not tell the Human to retry when the dispatch outcome is unknown: the i
   const output = await selectWithFailure(
     new Error('Orca orchestration run failed: state=failed stage=turn_start_unobserved'),
   );
-  expect(output).toContain('orca orchestration task-list');
+  expect(output).toContain('orca orchestration task-list --run <run_id>');
+  expect(output).toContain('orca orchestration run-list');
   expect(output).toContain(`apos execution abandon-intent ${spec.id} --key `);
   // `lead start` is still the step after abandoning, but it must not be offered as the immediate retry.
   expect(output).not.toMatch(/Retry with `apos lead start/);

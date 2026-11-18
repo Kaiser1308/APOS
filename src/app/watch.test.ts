@@ -99,7 +99,7 @@ describe('watchDispatch', () => {
     expect(await watchDispatch(store, runtime, () => T0, input(dir))).toEqual([]);
     idle.minutes = 3;
     expect(await watchDispatch(store, runtime, () => T0, input(dir))).toEqual([
-      'worker ctx_1 out of quota (claude); Human notified',
+      'worker ctx_1 stopped on an error (claude); Human notified',
     ]);
     expect(agents).toEqual(['claude']);
     expect(await watchDispatch(store, runtime, () => T0, input(dir))).toEqual([]);
@@ -133,6 +133,7 @@ describe('watchDispatch', () => {
       role: 'worker',
       idleMinutes: 16,
     });
+    expect(String(notices('owner-idle')[0].note)).toContain('omit `--agent`');
     expect(await watchDispatch(store, runtime, () => T0, input(dir))).toEqual([]);
   });
 });
@@ -159,7 +160,7 @@ describe('wired into every running dispatch', () => {
     const actions = await new SoloSupervisor(store, fakeRuntime(ref, { minutes: 3 }, { quota: QUOTA }), {
       now: () => T0 + 60_000,
     }).step(spec.id, dir);
-    expect(actions).toContain('lead ctx_1 out of quota (claude); Human notified');
+    expect(actions).toContain('lead ctx_1 stopped on an error (claude); Human notified');
     expect(String(notices('agent-exhausted')[0].note)).toContain(`apos handoff ${spec.id} --agent`);
   });
 
@@ -211,7 +212,7 @@ describe('wired into every running dispatch', () => {
     const actions = await new MultiSupervisor(store, fakeRuntime(ref, { minutes: 3 }, { quota: QUOTA }), {
       now: () => T0 + 60_000,
     }).step(spec.id, dir);
-    expect(actions).toContain('worker ctx_wp out of quota (claude); Human notified');
+    expect(actions).toContain('worker ctx_wp stopped on an error (claude); Human notified');
     expect(notices('agent-exhausted')[0]).toMatchObject({ packageId: 'WP-01', role: 'worker' });
     expect(String(notices('agent-exhausted')[0].note)).toContain('--package WP-01');
   });
@@ -239,7 +240,7 @@ describe('wired into every running dispatch', () => {
       fakeRuntime(ref, { minutes: 3 }, { quota: QUOTA }),
       () => T0 + 60_000,
     ).reconcile(spec.id);
-    expect(actions).toContain('lead ctx_lead out of quota (claude); Human notified');
+    expect(actions).toContain('lead ctx_lead stopped on an error (claude); Human notified');
     expect(notices('agent-exhausted')[0]).toMatchObject({ role: 'lead', agent: 'claude' });
     expect(notices('lead-idle')).toHaveLength(0);
   });
@@ -336,5 +337,100 @@ describe("quotaEscalation matches only Orca's own report", () => {
         body: 'Error: Codex hit its usage limit.\nDetails from the agent: You’ve hit your usage limit. Try again at 10:02 PM.',
       }),
     ).toBe('You’ve hit your usage limit. Try again at 10:02 PM.');
+  });
+});
+
+describe('owner worktree progress observation (#27)', () => {
+  it('records owner-progress-observed only when commits or dirty state change, without writing to the worktree', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { writeFileSync } = await import('node:fs');
+    const { buildStory } = await import('../ui/story.js');
+    const { dir, store, add } = open();
+    const wtDir = join(dir, 'owner-wt');
+    execFileSync('git', ['init', '-q', wtDir]);
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', wtDir, '-c', 'user.name=O', '-c', 'user.email=o@local', ...args], {
+        encoding: 'utf8',
+      }).trim();
+    writeFileSync(join(wtDir, 'index.js'), 'export const v = 0;\n');
+    git('add', 'index.js');
+    git('commit', '-qm', 'base');
+    const baseCommit = git('rev-parse', 'HEAD');
+
+    add('goal-drafted', spec);
+    add('goal-approved', approval);
+    add('goal-selected');
+    add('proposal-drafted', { ...proposal, baseCommit });
+    add('proposal-approved');
+    const ref: RuntimeRef = {
+      runId: 'r',
+      taskId: 't',
+      dispatchId: 'ctx_1',
+      owner: 'lead',
+      repoPath: dir,
+      terminal: 'term_1',
+      worktreeId: `repo::${wtDir}`,
+      baseCommit,
+      requested: { agent: 'antigravity' },
+    };
+    add('dispatch-intended', 'k');
+    add('execution-started', ref);
+
+    const sup = new SoloSupervisor(store, fakeRuntime(ref, { minutes: 1 }, {}), { now: () => T0 + 60_000 });
+    // No new commits and clean worktree -> no event
+    await sup.step(spec.id, dir);
+    expect(store.events(spec.id).filter(e => e.type === 'owner-progress-observed')).toHaveLength(0);
+
+    // Owner makes a commit
+    writeFileSync(join(wtDir, 'index.js'), 'export const v = 1;\n');
+    git('add', 'index.js');
+    git('commit', '-qm', 'step 1: merge engine');
+    const head1 = git('rev-parse', 'HEAD');
+
+    await sup.step(spec.id, dir);
+    const observed1 = store.events(spec.id).filter(e => e.type === 'owner-progress-observed');
+    expect(observed1).toHaveLength(1);
+    expect(observed1[0].data).toMatchObject({
+      dispatchId: 'ctx_1',
+      head: head1,
+      dirty: false,
+      commits: [expect.objectContaining({ hash: head1, subject: 'step 1: merge engine', filesChanged: 1 })],
+    });
+    expect(git('status', '--porcelain')).toBe('');
+
+    // Unchanged worktree on next tick -> no duplicate event
+    await sup.step(spec.id, dir);
+    expect(store.events(spec.id).filter(e => e.type === 'owner-progress-observed')).toHaveLength(1);
+
+    // Uncommitted change -> records new observation once
+    writeFileSync(join(wtDir, 'next.js'), 'export const next = true;\n');
+    await sup.step(spec.id, dir);
+    expect(store.events(spec.id).filter(e => e.type === 'owner-progress-observed')).toHaveLength(2);
+    expect(store.events(spec.id).filter(e => e.type === 'owner-progress-observed')[1].data).toMatchObject({
+      head: head1,
+      dirty: true,
+      dirtyFiles: 1,
+      commits: [],
+      commitCount: 1,
+      latest: expect.objectContaining({ hash: head1 }),
+    });
+
+    // A second commit records only that commit (not the first again), with the running total
+    git('add', 'next.js');
+    git('commit', '-qm', 'step 2: sync');
+    const head2 = git('rev-parse', 'HEAD');
+    await sup.step(spec.id, dir);
+    const observed3 = store.events(spec.id).filter(e => e.type === 'owner-progress-observed')[2];
+    expect(observed3.data).toMatchObject({
+      head: head2,
+      dirty: false,
+      commitCount: 2,
+      commits: [expect.objectContaining({ hash: head2, subject: 'step 2: sync', filesChanged: 1 })],
+    });
+    expect((observed3.data as { commits: unknown[] }).commits).toHaveLength(1);
+
+    // Story view includes the worktree progress so the Owner card is not empty
+    const story = buildStory(store as never, spec.id)!;
+    expect(story.owners[0].entries.some(e => e.text.includes('step 2: sync'))).toBe(true);
   });
 });

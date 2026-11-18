@@ -10,4 +10,6 @@ export type CliOptions = {
   telemetry?: TelemetryProbe;
   home?: string;
   write?: (line: string) => void;
+  /** Diagnostics (warnings) that must not pollute stdout; defaults to stderr. */
+  writeError?: (line: string) => void;
 };

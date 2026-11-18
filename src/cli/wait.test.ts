@@ -123,11 +123,37 @@ describe('apos inbox --wait and apos goal wait (#28)', { timeout: 60_000 }, () =
     opened.close();
 
     const out: string[] = [];
+    const err: string[] = [];
     await runCli(['--repo', dir, 'inbox', '--wait', '--timeout', '120ms'], {
       home,
       write: line => out.push(line),
+      writeError: line => err.push(line),
     });
-    expect(out[0]).toMatch(/warning:.*controller watch/i);
+    expect(err[0]).toMatch(/warning:.*controller watch/i);
+    expect(out.some(line => /warning:/i.test(line))).toBe(false);
+    expect(process.exitCode).toBe(2);
+  });
+
+  it('keeps stdout pure JSON with --json when no controller runs and the wait times out', async () => {
+    const { dir, home, opened, add } = await setupProject(false);
+    add('goal-approved', approval);
+    add('goal-selected');
+    add('proposal-drafted', proposal);
+    add('proposal-approved');
+    add('execution-started', { runId: 'r', taskId: 't', dispatchId: 'ctx_1', owner: 'lead', repoPath: dir });
+    opened.close();
+
+    const out: string[] = [];
+    const err: string[] = [];
+    await runCli(['--repo', dir, 'inbox', '--wait', '--json', '--timeout', '120ms'], {
+      home,
+      write: line => out.push(line),
+      writeError: line => err.push(line),
+    });
+    expect(err.some(line => /warning:.*controller watch/i.test(line))).toBe(true);
+    const parsed = JSON.parse(out.join('\n')) as { timeout: boolean; items: unknown[] };
+    expect(parsed.timeout).toBe(true);
+    expect(parsed.items).toEqual([]);
     expect(process.exitCode).toBe(2);
   });
 

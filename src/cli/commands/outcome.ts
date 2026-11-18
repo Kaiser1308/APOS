@@ -22,8 +22,19 @@ import type { Role } from '../../domain/runtime-refs.js';
 import type { CliContext } from '../context.js';
 
 export function registerOutcome(ctx: CliContext): void {
-  const { program, options, write, runtime, repo, home, withJournal, withJournalAsync, assertHuman, applyProfile } =
-    ctx;
+  const {
+    program,
+    options,
+    write,
+    writeError,
+    runtime,
+    repo,
+    home,
+    withJournal,
+    withJournalAsync,
+    assertHuman,
+    applyProfile,
+  } = ctx;
   program
     .command('handoff')
     .argument('<goalId>')
@@ -135,7 +146,7 @@ export function registerOutcome(ctx: CliContext): void {
       let hit = check();
       if (!hit && flags.wait) {
         if (!controllerActive(homeDir))
-          write(
+          writeError(
             'warning: no active controller watch detected (no tick in the last 2 min); run `apos controller watch` so Goals can advance.',
           );
         hit = await watchEvents(homeDir, timeoutMs, check);

@@ -34,6 +34,38 @@ export type OrphanRequirement = {
   targetGoalId: string;
 };
 
+type ReqEntry = { goal: GoalState; req: GoalSpec['requirements'][number] };
+
+const deferTarget = (entry: ReqEntry): string | undefined =>
+  entry.req.disposition === 'excluded' && entry.req.exclusion?.kind === 'deferred' ? entry.req.exclusion.to : undefined;
+
+/**
+ * Goals come back in ID order, not chronology, so the last entry means nothing. Follow the deferral chain
+ * instead: start at an entry no other entry defers to, and walk deferrals to the Goal that holds the final
+ * word (an out-of-scope exclusion there wins over the deferral that led to it). Cycles stop at the first repeat.
+ */
+function resolveDisposition(entries: ReqEntry[]): { end: ReqEntry; lastDefer?: ReqEntry } {
+  const targets = new Set<string>();
+  for (const e of entries) {
+    const to = deferTarget(e);
+    if (to && to !== e.goal.spec.id) targets.add(to);
+  }
+  const heads = entries.filter(e => !targets.has(e.goal.spec.id));
+  let current = (heads.length ? heads : entries).at(-1)!;
+  let lastDefer: ReqEntry | undefined;
+  const seen = new Set<string>();
+  while (!seen.has(current.goal.spec.id)) {
+    seen.add(current.goal.spec.id);
+    const to = deferTarget(current);
+    if (!to) break;
+    lastDefer = current;
+    const next = entries.find(e => e.goal.spec.id === to);
+    if (!next) break;
+    current = next;
+  }
+  return { end: current, lastDefer };
+}
+
 export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummary {
   const byId = new Map<string, GoalState>(goals.map(item => [item.spec.id, item]));
   const relevant = sourceSha256 ? goals.filter(item => item.spec.source?.sha256 === sourceSha256) : goals;
@@ -110,7 +142,7 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
       continue;
     }
 
-    const latest = item.entries.at(-1)!;
+    const { end: latest, lastDefer } = resolveDisposition(item.entries);
     if (latest.req.disposition === 'excluded' && latest.req.exclusion?.kind === 'out-of-scope') {
       requirements.push({
         id: item.id,
@@ -124,9 +156,7 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
       continue;
     }
 
-    const deferredEntry = [...item.entries]
-      .reverse()
-      .find(e => e.req.disposition === 'excluded' && e.req.exclusion?.kind === 'deferred');
+    const deferredEntry = lastDefer;
     if (deferredEntry && deferredEntry.req.exclusion?.kind === 'deferred') {
       const targetId = deferredEntry.req.exclusion.to;
       const target = byId.get(targetId);

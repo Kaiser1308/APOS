@@ -16,6 +16,7 @@ export type CliContext = {
   program: Command;
   options: CliOptions;
   write(line: string): void;
+  writeError(line: string): void;
   runtime: RuntimeAdapter & Partial<PackageRuntime>;
   packageRuntime(): PackageRuntime;
   repo(): string;
@@ -54,6 +55,7 @@ function goalWithSource(file: string, sourcePath: string, origin: string) {
 
 export function createContext(program: Command, options: CliOptions): CliContext {
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
+  const writeError = options.writeError ?? ((line: string) => process.stderr.write(`${line}\n`));
   const repo = () => resolve(program.opts<{ repo: string }>().repo);
   // Role profiles come from <controller home>/runtime.json, read when a dispatch needs them.
   const runtime =
@@ -156,6 +158,7 @@ export function createContext(program: Command, options: CliOptions): CliContext
     program,
     options,
     write,
+    writeError,
     runtime,
     packageRuntime,
     repo,

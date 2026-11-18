@@ -23,6 +23,40 @@ const deferTo = (to: string) =>
     exclusionReason: 'later',
   }) as const;
 
+const oos = {
+  ...accept,
+  disposition: 'excluded',
+  exclusion: { kind: 'out-of-scope' },
+  exclusionReason: 'not needed',
+} as const;
+
+describe('buildPlan deferral chain does not depend on Goal ID order', () => {
+  it('honours an out-of-scope exclusion in the Goal deferred to, even when its ID sorts first', () => {
+    const goals = [goal('GOAL-A', SHA_A, 'closed', [oos]), goal('GOAL-Z', SHA_A, 'closed', [deferTo('GOAL-A')])];
+    const [row] = buildPlan(goals).requirements;
+    expect(row?.status).toBe('out-of-scope');
+    expect(row?.goalId).toBe('GOAL-A');
+    expect(orphanRequirements(goals)).toEqual([]);
+  });
+
+  it('gives the same answer in the reverse ID order', () => {
+    const goals = [goal('GOAL-A', SHA_A, 'closed', [deferTo('GOAL-Z')]), goal('GOAL-Z', SHA_A, 'closed', [oos])];
+    const [row] = buildPlan(goals).requirements;
+    expect(row?.status).toBe('out-of-scope');
+    expect(orphanRequirements(goals)).toEqual([]);
+  });
+
+  it('terminates on a deferral cycle', () => {
+    const goals = [
+      goal('GOAL-A', SHA_A, 'closed', [deferTo('GOAL-Z')]),
+      goal('GOAL-Z', SHA_A, 'closed', [deferTo('GOAL-A')]),
+    ];
+    const plan = buildPlan(goals);
+    expect(plan.requirements).toHaveLength(1);
+    expect(plan.requirements[0]?.status).toBe('orphan');
+  });
+});
+
 describe('buildPlan with two sources sharing a requirement id', () => {
   const goals = [
     goal('GOAL-A1', SHA_A, 'closed', [accept]),

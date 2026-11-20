@@ -8,6 +8,8 @@ import { PackageService } from './package-service.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { ReviewService } from './review.js';
 import type { PackageRuntime } from '../ports/runtime.js';
+import { applyEvent } from '../domain/transitions.js';
+import { GateService } from './gate-service.js';
 
 const a: WorkPackageSpec = {
   id: 'WP-01',
@@ -62,6 +64,7 @@ class FakeRuntime implements PackageRuntime {
   inspectState: 'completed' | 'failed' | 'live' | 'unverifiable' = 'completed';
   recovered = new Map<string, Awaited<ReturnType<PackageRuntime['startPackage']>>>();
   deps = new Map<string, string[] | undefined>();
+  resumedDeps = new Map<string, string[] | undefined>();
   async startPackage(input: { package: WorkPackageSpec; repoPath: string; dependencyCommits?: string[] }) {
     this.starts.push(input.package.id);
     this.deps.set(input.package.id, input.dependencyCommits);
@@ -71,6 +74,7 @@ class FakeRuntime implements PackageRuntime {
       dispatchId: `ctx_${input.package.id}`,
       owner: 'worker' as const,
       repoPath: input.repoPath,
+      baseCommit: 'b'.repeat(40),
     };
   }
   async recoverPackage(key: string) {
@@ -79,8 +83,13 @@ class FakeRuntime implements PackageRuntime {
   async inspectPackage() {
     return this.inspectState;
   }
-  async resumePackage(input: { package: WorkPackageSpec; prior: Awaited<ReturnType<PackageRuntime['startPackage']>> }) {
+  async resumePackage(input: {
+    package: WorkPackageSpec;
+    prior: Awaited<ReturnType<PackageRuntime['startPackage']>>;
+    dependencyCommits?: string[];
+  }) {
     this.resumes.push(input.package.id);
+    this.resumedDeps.set(input.package.id, input.dependencyCommits);
     return { ...input.prior, dispatchId: `ctx-resumed-${input.package.id}-${this.resumes.length}` };
   }
 }
@@ -193,6 +202,51 @@ describe('package scheduling', () => {
         .filter(event => ['package-plan-added', 'package-removed'].includes(event.type))
         .map(event => (event.data as { reason: string }).reason),
     ).toEqual(['Split remaining work', 'Replace failed work']);
+    store.close();
+  });
+  it('refuses to change the plan while a Goal review start or reviewer is pending', () => {
+    const { store } = fixture();
+    const service = new PackageService(store, new FakeRuntime());
+    service.add(spec.id, a);
+    service.add(spec.id, b);
+    approve(store);
+    const state = store.getGoal(spec.id)!;
+    const pending = {
+      ...state,
+      status: 'executing' as const,
+      leadApprovalRequired: true,
+      reviewIntent: { key: 'review-key', commit: 'c'.repeat(40), at: '2026-11-07T00:00:00.000Z' },
+    };
+    const event = (type: 'package-plan-added' | 'package-removed' | 'package-revised', data: unknown) => ({
+      id: `review-${type}`,
+      goalId: spec.id,
+      type,
+      data,
+      at: '2026-11-07T00:00:00.000Z',
+    });
+    expect(() =>
+      applyEvent(pending, event('package-plan-added', { spec: { ...b, id: 'WP-03' }, reason: 'Add' })),
+    ).toThrow(/review.*pending/i);
+    expect(() => applyEvent(pending, event('package-removed', { packageId: b.id, reason: 'Remove' }))).toThrow(
+      /review.*pending/i,
+    );
+    expect(() =>
+      applyEvent(pending, event('package-revised', { spec: { ...b, version: 2 }, reason: 'Revise' })),
+    ).toThrow(/review.*pending/i);
+    const running = {
+      ...pending,
+      reviewIntent: undefined,
+      reviewDispatch: { dispatchId: 'reviewer', runId: 'run', key: 'key', commit: 'c'.repeat(40) },
+    };
+    expect(() =>
+      applyEvent(running, event('package-plan-added', { spec: { ...b, id: 'WP-03' }, reason: 'Add' })),
+    ).toThrow(/review.*pending/i);
+    expect(() => applyEvent(running, event('package-removed', { packageId: b.id, reason: 'Remove' }))).toThrow(
+      /review.*pending/i,
+    );
+    expect(() =>
+      applyEvent(running, event('package-revised', { spec: { ...b, version: 2 }, reason: 'Revise' })),
+    ).toThrow(/review.*pending/i);
     store.close();
   });
   it('stops new work at wall time until the Human raises the appetite', async () => {
@@ -325,6 +379,37 @@ describe('package scheduling', () => {
     await service.dispatchReady(spec.id, dir);
     expect(runtime.deps.get('WP-01')).toEqual([]);
     expect(runtime.deps.get('WP-02')).toEqual(['abc123']);
+    store.close();
+  });
+  it('rejects a package head that lacks its verified dependency', async () => {
+    const { store, dir } = fixture();
+    const service = new PackageService(store, new FakeRuntime());
+    service.add(spec.id, a);
+    service.add(spec.id, { ...b, acceptance: [{ ...b.acceptance[0], checkIds: ['CHK-1'] }] });
+    approve(store);
+    await service.dispatchReady(spec.id, dir);
+    service.submitEvidence(spec.id, {
+      packageId: a.id,
+      packageVersion: 1,
+      owner: a.owner,
+      acceptanceId: 'WP-AC-1',
+      result: 'pass',
+      command: 'test',
+      artifactRef: 'log',
+      commitRef: 'a'.repeat(40),
+    });
+    await service.verify(spec.id, a.id);
+    service.approveDispatch(spec.id, b.id, 'Dependency reviewed');
+    await service.dispatchReady(spec.id, dir);
+    const gate = new GateService(store, {
+      artifactRoot: dir,
+      inspector: { exists: () => true, files: () => [], contains: (_repo, ancestor) => ancestor === 'b'.repeat(40) },
+      workspaces: { checkout: () => ({ path: dir, dispose: () => undefined }) },
+      executor: { shell: 'test', run: () => ({ exitCode: 0, timedOut: false, output: '' }) },
+    });
+    const report = gate.runPackage(spec.id, b.id, dir, 'c'.repeat(40));
+    expect(report.result).toBe('red');
+    expect(report.checks).toContainEqual(expect.objectContaining({ checkId: 'APOS-DEPENDENCIES', status: 'fail' }));
     store.close();
   });
   it('requires current-owner passing evidence for every local criterion', async () => {
@@ -503,6 +588,20 @@ describe('package scheduling', () => {
     expect(runtime.resumes).toEqual(['WP-01']);
     expect(store.getGoal(spec.id)?.packages?.[a.id]?.status).toBe('executing');
     await expect(service.resumeStale(spec.id, b.id)).rejects.toThrow(/dependencies/i);
+    service.submitEvidence(spec.id, {
+      packageId: a.id,
+      packageVersion: 2,
+      owner: a.owner,
+      acceptanceId: 'WP-AC-1',
+      result: 'pass',
+      command: 'test',
+      artifactRef: 'log:a2',
+      commitRef: 'new-dependency',
+    });
+    await service.verify(spec.id, a.id);
+    service.approveDispatch(spec.id, b.id, 'Updated dependency reviewed');
+    await service.resumeStale(spec.id, b.id);
+    expect(runtime.resumedDeps.get(b.id)).toEqual(['new-dependency']);
     store.close();
   });
   it('allows package scope changes but protects Goal acceptance mapping and owner', () => {

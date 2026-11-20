@@ -197,6 +197,20 @@ export class GateService {
           check.expect === 'no-new-failures' ? this.runMany(check, repoPath, base, 'base', artifacts) : [];
         return this.evaluate(check, repoPath, head, baseRuns, artifacts);
       });
+    const missingDependencies = item.spec.dependencies.filter(dep => {
+      const dependency = state.packages?.[dep];
+      const commit = dependency?.gate?.deliveryCommit ?? dependency?.evidence.at(-1)?.commitRef;
+      return dependency?.status !== 'verified' || !commit || !this.inspector.contains(repoPath, commit, head);
+    });
+    if (missingDependencies.length)
+      checks.push({
+        checkId: 'APOS-DEPENDENCIES',
+        status: 'fail',
+        reason: `delivery does not contain verified dependency commits: ${missingDependencies.join(', ')}`,
+        base: [],
+        delivery: [],
+        newFailures: [],
+      });
     const changedFiles = this.inspector.files(repoPath, head, base);
     const guard = protectedCheck(goalId, changedFiles);
     if (guard) checks.push(guard);

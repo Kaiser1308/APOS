@@ -97,6 +97,8 @@ it('starts a package Worker in a dedicated Orca worktree', async () => {
   expect(start).toContain('a'.repeat(40));
   expect(start.join(' ')).toContain('.apos/goals/GOAL-001/evidence/WP-01-v1-a1.md');
   expect(start.join(' ')).toContain('apos-core: dddddddddddddddd');
+  expect(start[start.indexOf('--spec') + 1]).toContain('current package contract');
+  expect(start[start.indexOf('--spec') + 1]).toContain('checkIn(token)@v1');
   expect(start).toEqual(expect.arrayContaining(['--agent', 'codex', '--model', 'gpt-6.1-terra']));
   expect(ref.owner).toBe('worker');
 });
@@ -260,6 +262,8 @@ it('resumes a revised package in its original terminal and worktree', async () =
   const start = calls.find(args => args[1] === 'worker-start')!;
   expect(start).toContain('term_1');
   expect(start).toContain('id:repo_1::C:/worktree');
+  expect(start[start.indexOf('--spec') + 1]).toContain('checkIn(token, device)@v1');
+  expect(start[start.indexOf('--spec') + 1]).toContain('current package contract');
   expect(ref).toMatchObject({ owner: 'worker', dispatchId: 'ctx_2', worktreeId: 'repo_1::C:/worktree' });
 });
 
@@ -767,6 +771,7 @@ describe('resumes and wakes after the role profile changed', () => {
     expect(start()).not.toContain('--terminal');
     expect(start()).toEqual(expect.arrayContaining(['--worktree', 'id:repo::C:/p', '--agent', 'antigravity']));
     expect(start()[start().indexOf('--spec') + 1]).toContain('.apos/goals/GOAL-X/evidence/WP-01-v1-a2.md');
+    expect(start()[start().indexOf('--spec') + 1]).toContain('current package contract');
     expect(next).toMatchObject({ owner: 'worker', dispatchId: 'ctx_2', requested: { agent: 'antigravity' } });
   });
 

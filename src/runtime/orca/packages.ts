@@ -47,6 +47,7 @@ export async function startPackage(
     owner: item.owner,
     outcome: item.outcome,
     attempt: 1,
+    contract: ctx.spill(JSON.stringify(item), `${input.idempotencyKey}-contract`),
     digest: path => ctx.fileDigest(input.repoPath, baseCommit, path),
   });
   const requested = ctx.profile('worker');
@@ -91,6 +92,7 @@ export async function resumePackage(
     idempotencyKey: string;
     finding?: string;
     attempt?: number;
+    dependencyCommits?: string[];
   },
 ): Promise<PackageRuntimeRef> {
   const { prior, package: item } = input;
@@ -112,9 +114,17 @@ export async function resumePackage(
       packageVersion: item.version,
       owner: item.owner,
       outcome: item.outcome,
-      extra: input.finding
-        ? `The controller ran the package checks itself on the last commit. Its finding: ${input.finding}`
-        : undefined,
+      packageContract: item,
+      extra: [
+        ...(input.finding
+          ? [`The controller ran the package checks itself on the last commit. Its finding: ${input.finding}`]
+          : []),
+        ...(input.dependencyCommits?.length
+          ? [
+              `Integrate these verified dependency commits before working: ${input.dependencyCommits.join(', ')}. Their commits must be ancestors of your delivery.`,
+            ]
+          : []),
+      ].join(' '),
     });
     return { ...ref, owner: 'worker' };
   }
@@ -127,7 +137,12 @@ export async function resumePackage(
           `The controller ran the package checks itself on your last commit. Its finding: ${ctx.spill(input.finding, input.idempotencyKey)}`,
         ]
       : []),
-    `Read .apos/goals/${item.goalId}/packages/${item.id}.md, recheck all local acceptance under .apos/skills/_core/execute.md, and commit a new delivery report at ${packageReportPath(item.goalId, item.id, item.version, input.attempt ?? 2)} with the same activation line.`,
+    ...(input.dependencyCommits?.length
+      ? [
+          `Integrate these verified dependency commits before working: ${input.dependencyCommits.join(', ')}. Their commits must be ancestors of your delivery.`,
+        ]
+      : []),
+    `The current package contract from the controller supersedes any missing or older package document: ${ctx.spill(JSON.stringify(item), `${input.idempotencyKey}-contract`)}. Recheck all local acceptance under .apos/skills/_core/execute.md, and commit a new delivery report at ${packageReportPath(item.goalId, item.id, item.version, input.attempt ?? 2)} with the same activation line.`,
     'Follow the injected Orca preamble and report worker_done exactly once.',
     `${repoMarker(prior.repoPath)} APOS dispatch key: ${input.idempotencyKey}.${prior.baseCommit ? ` APOS base commit: ${prior.baseCommit}.` : ''}`,
   ].join(' ');

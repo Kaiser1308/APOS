@@ -287,6 +287,12 @@ export class HandoffService {
             `${target.packageId}'s Worker reported failed with a delivery report: the Lead decides (revise or unblock the package), not a handoff`,
           );
       }
+      const dependencyCommits = item.spec.dependencies
+        .map(dep => {
+          const dependency = state.packages?.[dep];
+          return dependency?.gate?.deliveryCommit ?? dependency?.evidence.at(-1)?.commitRef;
+        })
+        .filter((commit): commit is string => Boolean(commit));
       const input: HandoffInput = {
         ...common,
         kind: 'worker',
@@ -301,6 +307,10 @@ export class HandoffService {
         packageVersion: item.spec.version,
         owner: item.spec.owner,
         outcome: item.spec.outcome,
+        packageContract: item.spec,
+        ...(dependencyCommits.length
+          ? { extra: `Integrate these verified dependency commits before delivery: ${dependencyCommits.join(', ')}.` }
+          : {}),
       };
       return {
         from: ref.dispatchId,

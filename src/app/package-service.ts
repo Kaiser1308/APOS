@@ -144,6 +144,12 @@ export class PackageService {
     if (!['completed', 'failed'].includes((await this.runtime.inspectPackage?.(prior)) ?? 'unverifiable'))
       throw new Error('Prior Worker dispatch must be settled');
     if (!this.runtime.resumePackage) throw new Error('Runtime cannot resume package owner');
+    const dependencyCommits = item.spec.dependencies.map(dep => {
+      const dependency = state!.packages![dep];
+      const commit = dependency.gate?.deliveryCommit ?? dependency.evidence.at(-1)?.commitRef;
+      if (!commit) throw new Error(`Verified dependency ${dep} has no commit`);
+      return commit;
+    });
     const key = randomUUID();
     this.record(goalId, 'package-resume-intended', { packageId, key });
     let ref: PackageRuntimeRef;
@@ -154,6 +160,7 @@ export class PackageService {
         idempotencyKey: key,
         finding: item.finding,
         attempt: item.attempts + 1,
+        dependencyCommits,
       });
     } catch (error) {
       // A refusal is definitive (nothing was created), so the package returns to stale instead of waiting on an intent that cannot resolve.

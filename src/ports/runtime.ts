@@ -45,6 +45,7 @@ export type HandoffInput = {
   packageVersion?: number;
   owner?: string;
   outcome?: string;
+  packageContract?: WorkPackageSpec;
   extra?: string;
   budget?: Budget;
 };
@@ -129,6 +130,7 @@ export interface PackageRuntime {
     idempotencyKey: string;
     finding?: string;
     attempt?: number;
+    dependencyCommits?: string[];
   }): Promise<PackageRuntimeRef>;
   recoverPackage?(key: string, runId?: string): Promise<PackageRuntimeRef | undefined>;
 }

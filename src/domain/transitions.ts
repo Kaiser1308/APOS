@@ -478,6 +478,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'package-added':
     case 'package-plan-added': {
+      if (event.type === 'package-plan-added')
+        requireThat(
+          !state.reviewIntent && !state.reviewDispatch,
+          'Goal review pending; settle it before changing packages',
+        );
       requireThat(
         (event.type === 'package-added'
           ? state.status === 'planned'
@@ -511,6 +516,10 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       };
     }
     case 'package-removed': {
+      requireThat(
+        !state.reviewIntent && !state.reviewDispatch,
+        'Goal review pending; settle it before changing packages',
+      );
       const data = event.data as { packageId?: string; reason?: unknown };
       const item = state.packages?.[data?.packageId ?? ''];
       requireThat(
@@ -546,6 +555,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       };
     }
     case 'package-revised': {
+      if (state.leadApprovalRequired !== undefined)
+        requireThat(
+          !state.reviewIntent && !state.reviewDispatch,
+          'Goal review pending; settle it before changing packages',
+        );
       requireThat(
         state.proposal?.mode === 'multi-wp' && state.proposalApprovedVersion === state.proposal.version,
         'Approved Multi-WP proposal required',
@@ -603,6 +617,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           ...(state.leadApprovalRequired !== undefined
             ? {
                 dispatchApproved: undefined,
+                gate: undefined,
                 ...(packageId === spec.id ? { attempts: 0, findings: [], leadDecisionRequired: false } : {}),
               }
             : {}),

@@ -10,7 +10,14 @@ export async function handoff(ctx: OrcaContext, input: HandoffInput): Promise<Ru
   const requested = ctx.profile(input.role);
   const spec = handoffBrief({
     ...input,
-    extra: input.extra ? ctx.spill(input.extra, input.idempotencyKey) : undefined,
+    extra: input.packageContract
+      ? ctx.spill(
+          `The current package contract from the controller: ${JSON.stringify(input.packageContract)}${input.extra ? `; ${input.extra}` : ''}`,
+          input.idempotencyKey,
+        )
+      : input.extra
+        ? ctx.spill(input.extra, input.idempotencyKey)
+        : undefined,
     digest: path => ctx.fileDigest(input.repoPath, input.baseCommit, path),
   });
   const started = ctx.execute([

@@ -174,13 +174,22 @@ export function repairBrief(input: {
 }
 
 export function packageBrief(
-  input: BriefBase & { packageId: string; version: number; owner: string; outcome: string; attempt: number },
+  input: BriefBase & {
+    packageId: string;
+    version: number;
+    owner: string;
+    outcome: string;
+    attempt: number;
+    contract?: string;
+  },
 ): string {
   return [
     `${input.goalId}, ${input.packageId}: deliver ${input.outcome}.`,
     WORKSPACE,
     ...skillLines(input, 'worker'),
-    `Contract: .apos/goals/${input.goalId}/goal.md, source.md, execution.md and packages/${input.packageId}.md (v${input.version}). Ownership: ${input.owner} owns this Work Package end to end.`,
+    input.contract
+      ? `Read .apos/goals/${input.goalId}/goal.md and source.md. The current package contract from the controller supersedes any missing or older package document: ${input.contract}. Ownership: ${input.owner} owns this Work Package end to end.`
+      : `Contract: .apos/goals/${input.goalId}/goal.md, source.md, execution.md and packages/${input.packageId}.md (v${input.version}). Ownership: ${input.owner} owns this Work Package end to end.`,
     `Commit your delivery report at ${packageReportPath(input.goalId, input.packageId, input.version, input.attempt)}.`,
     'Follow the injected Orca preamble; report worker_done exactly once with succeeded or failed, then idle. Do not merge.',
     `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}. APOS base commit: ${input.baseCommit}.`,
@@ -258,7 +267,7 @@ export function handoffBrief(
       `You are the Lead of this Multi-WP Goal; its packages run in their own worktrees. Read .apos/goals/${goal}/lead-log.md, a generated reading copy of the event log; do not commit it. See where they stand with ${apos} package list ${goal}, handle what is pending under the lead skill (answer within the approved Goal, revise packages or integrate), then report worker_done once and end your turn; APOS wakes you here when there is work.`,
     ],
     worker: [
-      `Contract: .apos/goals/${goal}/goal.md, source.md, execution.md and packages/${input.packageId}.md (v${input.packageVersion}). Ownership: ${input.owner} owns this Work Package end to end; deliver ${input.outcome}.`,
+      `Read .apos/goals/${goal}/goal.md and source.md. Use the current package contract from the controller note below in preference to any missing or older package document (v${input.packageVersion}). Ownership: ${input.owner} owns this Work Package end to end; deliver ${input.outcome}.`,
       `Commit your delivery report at ${packageReportPath(goal, input.packageId ?? '', input.packageVersion ?? 1, input.attempt)}.`,
     ],
   };

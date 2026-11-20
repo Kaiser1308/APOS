@@ -153,6 +153,7 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
     idempotencyKey: string;
     finding?: string;
     attempt?: number;
+    dependencyCommits?: string[];
   }): Promise<PackageRuntimeRef> {
     return resumePackage(this.context, input);
   }

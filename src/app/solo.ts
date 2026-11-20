@@ -60,6 +60,8 @@ export class SoloService {
     const lead = state.lead;
     if (!lead) throw new InvariantError(`${goalId} has a bot Lead but no Lead worktree for its Solo owner`);
     if (!this.runtime.handoff) throw new UserError('Configured runtime cannot start a Solo owner');
+    const proposal = state.proposal;
+    if (!proposal) throw new InvariantError(`${goalId} is ready without a proposal`);
     if (state.dispatchIntent) {
       const recovered = await this.runtime.recover?.(state.dispatchIntent, lead.ref.runId);
       if (!recovered) throw new UserError('Solo owner dispatch outcome unknown; reconcile Orca before retrying');
@@ -83,7 +85,17 @@ export class SoloService {
         idempotencyKey: key,
         attempt: 1,
         budget: this.budget(state, 1),
-        extra: `This Goal's Lead is the Orca bot ${state.leadBot!.name}; it planned and it checks, and you are the only one who writes the code.`,
+        // The Lead worktree predates the plan and execution.md lives in the managed checkout: carry the plan itself.
+        extra: `This Goal's Lead is the Orca bot ${state.leadBot!.name}; it planned and it checks, and you are the only one who writes the code. Your worktree may not hold .apos/goals/${goalId}/execution.md; the accepted plan is: ${JSON.stringify(
+          {
+            approach: proposal.approach,
+            rationale: proposal.rationale ?? proposal.splitRationale,
+            acceptanceMapping: proposal.acceptanceMapping,
+            verificationStrategy: proposal.verificationStrategy,
+            sharedPaths: proposal.sharedPaths,
+            risks: proposal.risks,
+          },
+        )}`,
       });
     } catch (error) {
       if (error instanceof OrcaRefused)

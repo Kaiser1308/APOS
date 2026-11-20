@@ -1,10 +1,12 @@
+import { InvariantError } from './errors.js';
 import type { GoalEvent, GoalState } from './transitions.js';
 
 /** The Orca bot holding a Goal's Lead role, recorded by `lead-transferred`; `by` and `at` say who moved it and when. */
 export type LeadBot = { id: string; name: string; by: string; at: string };
 
+/** The app builds these events only after checking the same rules, so a violation here is a defect. */
 function check(ok: unknown, message: string): asserts ok {
-  if (!ok) throw new Error(message);
+  if (!ok) throw new InvariantError(message);
 }
 
 /**

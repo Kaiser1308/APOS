@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { applyEvent, type GoalEvent, type GoalState } from './transitions.js';
 import { spec, proposal, approval } from './fixtures.test-support.js';
 import { EventLog, verifyChain } from '../store/event-log.js';
+import { InvariantError } from './errors.js';
 
 let counter = 0;
 const event = (type: GoalEvent['type'], data?: unknown): GoalEvent => ({
@@ -45,6 +46,9 @@ describe('moving a Lead to an Orca bot', () => {
     const base = replay(planning());
     expect(() => applyEvent(base, event('lead-transferred', { key: 'k1', from: 'ctx_1', by: 'anh', bot }))).toThrow(
       /pending transfer to a bot/,
+    );
+    expect(() => applyEvent(base, event('lead-transferred', { key: 'k1', from: 'ctx_1', by: 'anh', bot }))).toThrow(
+      InvariantError,
     );
     const pending = applyEvent(base, event('handoff-intended', { key: 'k1', target, from: 'ctx_1' }));
     expect(() => applyEvent(pending, event('lead-transferred', { key: 'k1', from: 'ctx_1', by: ' ', bot }))).toThrow(

@@ -196,6 +196,9 @@ describe('a bot Lead on a Solo Goal never writes code', () => {
     expect(handoffs).toHaveLength(1);
     expect(handoffs[0]).toMatchObject({ kind: 'solo-owner', attempt: 1 });
     expect(handoffs[0].extra).toMatch(/Lead is the Orca bot Lead APOS/);
+    // The Lead worktree predates the plan: the owner gets the accepted plan in its brief.
+    expect(handoffs[0].extra).toContain('"approach":"reuse API"');
+    expect(handoffs[0].extra).toContain('"verificationStrategy":"integration test"');
     expect(state().goal).toMatchObject({ status: 'executing', runtimeRef: { dispatchId: 'ctx_owner' } });
     await invoke('controller', 'tick');
     await invoke('controller', 'tick');

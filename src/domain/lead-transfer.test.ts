@@ -67,6 +67,13 @@ describe('moving a Lead to an Orca bot', () => {
     expect(() =>
       applyEvent(pending, event('owner-handed-off', { key: 'k1', target, from: 'ctx_1', ref: { dispatchId: 'x' } })),
     ).toThrow(/settles with lead-transferred/);
+    expect(() =>
+      applyEvent(pending, event('owner-handed-off', { key: 'k1', target, from: 'ctx_1', ref: { dispatchId: 'x' } })),
+    ).toThrow(InvariantError);
+    // An unknown target kind is an event APOS never builds.
+    expect(() =>
+      applyEvent(base, event('handoff-intended', { key: 'k2', target: { kind: 'ghost' }, from: 'ctx_1' })),
+    ).toThrow(InvariantError);
   });
 
   it('refuses a Solo plan being delivered by its Lead: that Lead is writing the code', () => {
@@ -94,11 +101,23 @@ describe('moving a Lead to an Orca bot', () => {
     expect(() => applyEvent(owned, event('execution-started', { ...leadRef, dispatchId: 'ctx_2' }))).toThrow(
       /dispatch intent/,
     );
+    expect(() => applyEvent(owned, event('execution-started', { ...leadRef, dispatchId: 'ctx_2' }))).toThrow(
+      InvariantError,
+    );
     let state = applyEvent(owned, event('dispatch-intended', 'd1'));
     state = applyEvent(state, event('execution-started', { ...leadRef, dispatchId: 'ctx_2', owner: 'lead' }));
     expect(state).toMatchObject({ status: 'executing', runtimeRef: { dispatchId: 'ctx_2' }, leadBot: bot });
     expect(state.lead?.current).toBe('ctx_1');
+    // While the bot holds the Lead, a Lead handoff may only replace the Solo owner, never the stopped Lead.
+    const atLead = applyEvent(state, event('handoff-intended', { key: 'h0', target: { kind: 'lead' }, from: 'ctx_1' }));
+    expect(() =>
+      applyEvent(
+        atLead,
+        event('owner-handed-off', { key: 'h0', target: { kind: 'lead' }, from: 'ctx_1', ref: { dispatchId: 'x' } }),
+      ),
+    ).toThrow(InvariantError);
     state = applyEvent(state, event('handoff-intended', { key: 'h1', target: { kind: 'lead' }, from: 'ctx_2' }));
+
     state = applyEvent(
       state,
       event('owner-handed-off', {

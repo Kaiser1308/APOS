@@ -19,6 +19,7 @@ import {
 import type { PackageRuntimeRef, RuntimeProfile, RuntimeRef } from './runtime-refs.js';
 import { ownerIdentities, parseReview, type ReviewRecord } from './reviews.js';
 import { applyLeadTransfer, type LeadBot } from './lead-transfer.js';
+import { InvariantError } from './errors.js';
 import { applyIntegrationGateRequest } from './integration-gate.js';
 
 /** Replay does not validate: old logs must replay as they are. Narrows event data and nothing else. */
@@ -230,6 +231,10 @@ export type Finding = {
 
 function requireThat(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
+}
+/** For guards added or changed since errors were classified: the controller builds these events, so a breach is a defect. */
+function invariant(ok: unknown, message: string): asserts ok {
+  if (!ok) throw new InvariantError(message);
 }
 export const attemptLimit = (state: GoalState): number => state.appetite?.maxAttempts ?? 3;
 
@@ -857,14 +862,16 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       );
       // Solo: the owner is the Lead that planned, never a second session; a bot Lead never codes, so its owner is a
       // separate dispatch the controller started under a dispatch intent.
-      requireThat(
-        state.leadBot
-          ? Boolean(state.dispatchIntent && (event.data as { dispatchId?: string } | undefined)?.dispatchId)
-          : !state.lead || (event.data as { dispatchId?: string } | undefined)?.dispatchId === state.lead.current,
-        state.leadBot
-          ? 'The Solo owner of a bot Lead needs a dispatch intent and its dispatch'
-          : 'Solo owner must be the current Lead dispatch',
-      );
+      if (state.leadBot)
+        invariant(
+          state.dispatchIntent && (event.data as { dispatchId?: string } | undefined)?.dispatchId,
+          'The Solo owner of a bot Lead needs a dispatch intent and its dispatch',
+        );
+      else
+        requireThat(
+          !state.lead || (event.data as { dispatchId?: string } | undefined)?.dispatchId === state.lead.current,
+          'Solo owner must be the current Lead dispatch',
+        );
       return {
         ...state,
         status: 'executing',
@@ -1233,7 +1240,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         ['selected', 'planned', 'ready', 'executing', 'blocked'].includes(state.status),
         'Handoff needs a Goal whose owner is running',
       );
-      requireThat(
+      invariant(
         data?.key && data.from && data.target && ['lead', 'package', 'reviewer', 'bot'].includes(data.target.kind),
         'Handoff needs key, target and the dispatch it replaces',
       );
@@ -1267,14 +1274,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         'Handoff needs the new dispatch and the one it replaces',
       );
       const target = state.handoffIntent.target;
-      requireThat(target.kind !== 'bot', 'A transfer to a bot settles with lead-transferred');
+      invariant(target.kind !== 'bot', 'A transfer to a bot settles with lead-transferred');
       let next: GoalState = { ...state, handoffIntent: undefined };
       if (target.kind === 'lead' && state.leadBot) {
         // A bot holds the Lead: only the Solo owner it does not code itself can be handed to a fresh agent.
-        requireThat(
-          state.runtimeRef?.dispatchId === data.from,
-          'A bot holds this Lead; return it before a Lead handoff',
-        );
+        invariant(state.runtimeRef?.dispatchId === data.from, 'A bot holds this Lead; return it before a Lead handoff');
         next = { ...next, runtimeRef: { ...state.runtimeRef, ...asRef<RuntimeRef>(data.ref) } };
       } else if (target.kind === 'lead') {
         requireThat(state.lead, 'Lead handoff needs an APOS-dispatched Lead');

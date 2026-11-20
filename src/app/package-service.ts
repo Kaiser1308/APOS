@@ -15,6 +15,7 @@ import type { GoalRepository } from '../ports/goal-repository.js';
 import type { PackageRuntime } from '../ports/runtime.js';
 import type { PackageRuntimeRef } from '../domain/runtime-refs.js';
 import { multiWallTimeExpired } from './multi-budget.js';
+import { InvariantError, UserError } from '../domain/errors.js';
 
 export class PackageService {
   constructor(
@@ -130,12 +131,12 @@ export class PackageService {
     const state = this.store.getGoal(goalId);
     const item = state?.packages?.[packageId];
     if (item?.status !== 'stale' || !item.runtimeRef) throw new Error('Stale package with prior owner required');
-    if (this.outOfTime(goalId)) throw new Error('Multi-WP wall time exhausted; Human decision required');
-    if (item.leadDecisionRequired) throw new Error('Lead decision required before retry');
+    if (this.outOfTime(goalId)) throw new UserError('Multi-WP wall time exhausted; Human decision required');
+    if (item.leadDecisionRequired) throw new UserError('Lead decision required before retry');
     if (!item.spec.dependencies.every(dep => state?.packages?.[dep]?.status === 'verified'))
       throw new Error('Package dependencies are not verified');
     if (item.spec.dependencies.length && state?.leadApprovalRequired !== false && !item.dispatchApproved)
-      throw new Error('Lead approval required before dependent package resume');
+      throw new UserError('Lead approval required before dependent package resume');
     if (state && item.attempts >= attemptLimit(state)) {
       this.record(goalId, 'package-retry-exhausted', { packageId });
       throw new Error('Package retry budget exhausted; Lead decision required');
@@ -147,7 +148,7 @@ export class PackageService {
     const dependencyCommits = item.spec.dependencies.map(dep => {
       const dependency = state!.packages![dep];
       const commit = dependency.gate?.deliveryCommit ?? dependency.evidence.at(-1)?.commitRef;
-      if (!commit) throw new Error(`Verified dependency ${dep} has no commit`);
+      if (!commit) throw new InvariantError(`Verified dependency ${dep} has no commit`);
       return commit;
     });
     const key = randomUUID();

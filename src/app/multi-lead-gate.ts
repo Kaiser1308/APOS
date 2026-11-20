@@ -26,7 +26,7 @@ export function coordinationNotices(state: GoalState): string[] {
       events.push(`package ${item.spec.id} v${item.spec.version} attempt ${item.attempts} verified at ${commit}`);
     if (item.leadDecisionRequired)
       events.push(
-        `package ${item.spec.id} v${item.spec.version} needs Lead decision: ${item.finding ?? 'retry budget exhausted'}`,
+        `package ${item.spec.id} v${item.spec.version} attempt ${item.attempts} needs Lead decision: ${item.finding ?? 'retry budget exhausted'}`,
       );
     if (
       state.leadApprovalRequired !== false &&

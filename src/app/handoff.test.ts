@@ -8,6 +8,7 @@ import type { GoalEventType } from '../domain/transitions.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { DEFAULT_PROFILES } from '../runtime/brief.js';
 import { HandoffService } from './handoff.js';
+import { UserError } from '../domain/errors.js';
 import type { HandoffInput, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { RuntimeProfiles } from '../domain/runtime-refs.js';
 
@@ -186,9 +187,13 @@ describe('HandoffService', () => {
       },
     });
     const { runtime, calls } = fakeRuntime();
-    await expect(
-      new HandoffService(store, runtime, () => claude).handoff(spec.id, { kind: 'package', packageId: 'WP-01' }, dir),
-    ).rejects.toThrow(/wall time exhausted/);
+    const refused = new HandoffService(store, runtime, () => claude).handoff(
+      spec.id,
+      { kind: 'package', packageId: 'WP-01' },
+      dir,
+    );
+    await expect(refused).rejects.toThrow(/wall time exhausted/);
+    await expect(refused).rejects.toBeInstanceOf(UserError);
     expect(calls).toEqual([]);
     expect(store.events(spec.id).some(event => event.type === 'multi-time-exhausted')).toBe(true);
   });

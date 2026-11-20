@@ -10,6 +10,8 @@ import { ReviewService } from './review.js';
 import type { PackageRuntime } from '../ports/runtime.js';
 import { applyEvent } from '../domain/transitions.js';
 import { attemptKey } from '../domain/gate.js';
+import { UserError } from '../domain/errors.js';
+import { coordinationNotices } from './multi-lead-gate.js';
 import { GateService } from './gate-service.js';
 
 const a: WorkPackageSpec = {
@@ -402,10 +404,36 @@ describe('package scheduling', () => {
       }
       expect(store.getGoal(spec.id)?.packages?.[a.id].leadDecisionRequired).toBe(true);
       expect(store.events(spec.id).some(event => event.type === 'human-notified')).toBe(false);
+      await expect(service.resumeStale(spec.id, a.id)).rejects.toBeInstanceOf(UserError);
       await expect(service.resumeStale(spec.id, a.id)).rejects.toThrow(/Lead decision/);
+      const firstNotice = coordinationNotices(store.getGoal(spec.id)!).filter(item => item.includes('needs Lead'));
       service.decideFailure(spec.id, a.id, 'retry', 'A different repair is available');
       await service.resumeStale(spec.id, a.id);
       expect(store.events(spec.id).some(event => event.type === 'package-failure-decided')).toBe(true);
+      // The authorized retry fails the same way: its decision request must not repeat a notice the Lead was already woken for.
+      const retried = store.getGoal(spec.id)!.packages![a.id];
+      store.append({
+        id: 'settled-retry',
+        goalId: spec.id,
+        type: 'worker-settled',
+        data: { dispatchId: retried.runtimeRef!.dispatchId, outcome: 'completed' },
+        at: '2026-11-07T00:03:00.000Z',
+      });
+      store.append({
+        id: 'gate-retry',
+        goalId: spec.id,
+        type: 'package-gate-recorded',
+        data: {
+          packageId: a.id,
+          report: { ...gateReport(undefined, 'unverifiable'), attemptKey: `WP-01@1:${retried.attempts}` },
+          signature: 'same',
+        },
+        at: '2026-11-07T00:04:00.000Z',
+      });
+      expect(store.getGoal(spec.id)?.packages?.[a.id].leadDecisionRequired).toBe(true);
+      const secondNotice = coordinationNotices(store.getGoal(spec.id)!).filter(item => item.includes('needs Lead'));
+      expect(secondNotice).toHaveLength(1);
+      expect(firstNotice).not.toContain(secondNotice[0]);
       store.close();
     }
   });

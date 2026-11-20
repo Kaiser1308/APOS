@@ -141,8 +141,7 @@ export class MultiSupervisor {
       ...(await gateSettledLead(this.store, this.runtime, this.gate, goalId, repoPath, this.options.inspector)),
     );
     const outOfTime = multiWallTimeExpired(this.store, goalId, this.now);
-    if (!outOfTime || this.store.getGoal(goalId)?.reviewDispatch)
-      actions.push(...(await this.goalReview(goalId, repoPath, events)));
+    actions.push(...(await this.goalReview(goalId, repoPath, events)));
     state = this.store.getGoal(goalId)!;
     // Derived from the recorded review, not from the tick that read it: a wake Orca refuses is retried.
     const verdict =
@@ -184,7 +183,9 @@ export class MultiSupervisor {
     const gate = state.gate;
     const packages = Object.values(state.packages ?? {});
     if (state.reviewIntent) return this.recoverGoalReview(state, repoPath, actions);
+    // A reviewer recorded or intended before the wall limit may still finish; past it no new one starts.
     if (
+      multiWallTimeExpired(this.store, goalId, this.now) ||
       state.integration ||
       !gate ||
       gate.result !== 'green' ||
@@ -254,7 +255,8 @@ export class MultiSupervisor {
       actions.push(`recovered Goal reviewer ${found.dispatchId}`);
       return actions;
     }
-    if (this.now() - Date.parse(intent.at) < 3 * 60_000) return actions;
+    if (this.now() - Date.parse(intent.at) < 3 * 60_000 || multiWallTimeExpired(this.store, goalId, this.now))
+      return actions;
     const tries = this.store.events(goalId).filter(item => item.type === 'review-intended').length;
     if (tries >= 3) {
       this.record(goalId, 'blocked', {

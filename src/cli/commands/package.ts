@@ -3,12 +3,13 @@ import { parseWorkPackage } from '../../domain/packages.js';
 import { assertLeadTerminal } from '../../app/lead.js';
 import { newEvent } from '../../app/events.js';
 import type { CliContext } from '../context.js';
+import { UserError } from '../../domain/errors.js';
 
 export function registerPackage(ctx: CliContext): void {
   const { program, write, packageRuntime, repo, withJournal, withJournalAsync, readJsonFile, assertHuman } = ctx;
   const assertLead = (journal: Parameters<typeof assertHuman>[0], goalId: string, command: string) => {
     const state = journal.getGoal(goalId);
-    if (!state) throw new Error(`Goal not found: ${goalId}`);
+    if (!state) throw new UserError(`Goal not found: ${goalId}`);
     const handle = process.env.ORCA_TERMINAL_HANDLE;
     const foreignTerminal =
       handle &&
@@ -29,7 +30,7 @@ export function registerPackage(ctx: CliContext): void {
             return (data.ref?.terminal ?? data.terminal) === handle;
           }),
       );
-    if (foreignTerminal) throw new Error(`${command} is Lead only`);
+    if (foreignTerminal) throw new UserError(`${command} is Lead only`);
     assertLeadTerminal(state, handle, command);
   };
   const assertLeadOrHuman = (journal: Parameters<typeof assertHuman>[0], goalId: string, command: string) => {
@@ -64,7 +65,7 @@ export function registerPackage(ctx: CliContext): void {
         if (item?.runtimeRef && !journal.getGoal(goalId)?.settlements?.[item.runtimeRef.dispatchId]) {
           const outcome = await packageRuntime().inspectPackage?.(item.runtimeRef);
           if (outcome !== 'completed' && outcome !== 'failed')
-            throw new Error('Worker must be settled before package removal');
+            throw new UserError('Worker must be settled before package removal');
           journal.append(newEvent(goalId, 'worker-settled', { dispatchId: item.runtimeRef.dispatchId, outcome }));
         }
         new PackageService(journal, packageRuntime()).remove(goalId, packageId, reason);
@@ -95,7 +96,7 @@ export function registerPackage(ctx: CliContext): void {
     .action((goalId: string, enabled: string, { reason }: { reason: string }) =>
       withJournal(journal => {
         assertLead(journal, goalId, 'package approval-policy');
-        if (!['on', 'off'].includes(enabled)) throw new Error('Use on or off');
+        if (!['on', 'off'].includes(enabled)) throw new UserError('Use on or off');
         new PackageService(journal, packageRuntime()).setApprovalPolicy(goalId, enabled === 'on', reason);
         write(`Approval policy ${enabled}`);
       }),
@@ -110,7 +111,7 @@ export function registerPackage(ctx: CliContext): void {
       withJournal(journal => {
         assertLead(journal, goalId, 'package decide-failure');
         if (decision !== 'retry' && decision !== 'hold' && decision !== 'escalate')
-          throw new Error('Use retry, hold, or escalate');
+          throw new UserError('Use retry, hold, or escalate');
         new PackageService(journal, packageRuntime()).decideFailure(goalId, packageId, decision, reason);
         write(`${decision}: ${packageId}`);
       }),

@@ -5,6 +5,7 @@ import type { GoalRepository } from '../ports/goal-repository.js';
 import type { RuntimeAdapter } from '../ports/runtime.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 import type { GoalState } from '../domain/transitions.js';
+import { manualWaitUnchanged } from './supervision.js';
 
 export function reviewRun(state: GoalState): string | undefined {
   return (
@@ -32,7 +33,10 @@ export async function gateSettledLead(
   const observation = await runtime.inspect(ref);
   if (observation.outcome !== 'completed') return [];
   const head = await runtime.deliveryHead?.(ref);
-  if (!head || state.gate?.deliveryCommit.toLowerCase() === head.toLowerCase()) return [];
+  if (!head) return [];
+  if (state.gate?.deliveryCommit.toLowerCase() === head.toLowerCase()) {
+    if (state.gate.result !== 'pending' || manualWaitUnchanged(store, state, head)) return [];
+  }
   let commits: string[];
   try {
     commits = new IntegrationService(store, inspector).prepare(goalId, repoPath).commits;

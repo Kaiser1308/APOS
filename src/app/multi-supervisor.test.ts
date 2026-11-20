@@ -31,8 +31,9 @@ const spec: GoalSpec = {
     { id: 'CHK-A', kind: 'command', command: 'node a.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} },
     { id: 'CHK-B', kind: 'command', command: 'node b.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} },
     { id: 'CHK-C', kind: 'command', command: 'node c.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} },
+    { id: 'CHK-M', kind: 'manual', procedure: 'Inspect result', expectedResult: 'Correct result' },
   ],
-  acceptance: [{ ...baseSpec.acceptance[0], checkIds: ['CHK-A', 'CHK-B', 'CHK-C'] }],
+  acceptance: [{ ...baseSpec.acceptance[0], checkIds: ['CHK-A', 'CHK-B', 'CHK-C', 'CHK-M'] }],
 };
 const a: WorkPackageSpec = {
   id: 'WP-01',
@@ -283,10 +284,25 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   git(leadTree, 'checkout', '-q', '--detach', heads[2]);
   const integrationCommit = git(leadTree, 'rev-parse', 'HEAD');
   await invoke('controller', 'tick');
+  expect(state().gate?.result).toBe('pending');
+  await invoke(
+    'gate',
+    'confirm',
+    spec.id,
+    'CHK-M',
+    '--commit',
+    integrationCommit,
+    '--by',
+    'human',
+    '--note',
+    'checked',
+  );
+  await invoke('controller', 'tick');
   expect(state().gate?.checks.map(check => [check.checkId, check.status, check.reason])).toEqual([
     ['CHK-A', 'pass', expect.anything()],
     ['CHK-B', 'pass', expect.anything()],
     ['CHK-C', 'pass', expect.anything()],
+    ['CHK-M', 'pass', expect.anything()],
   ]);
   expect(state().gate?.result).toBe('green');
   expect(state().gate?.baseCommit).toBe(leadBase);
@@ -327,6 +343,8 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   git(leadTree, 'add', 'repair.txt');
   git(leadTree, '-c', 'user.name=L', '-c', 'user.email=l@local.invalid', 'commit', '-qm', 'review fix');
   const repaired = git(leadTree, 'rev-parse', 'HEAD');
+  await invoke('controller', 'tick');
+  await invoke('gate', 'confirm', spec.id, 'CHK-M', '--commit', repaired, '--by', 'human', '--note', 'checked repair');
   for (let i = 0; i < 5; i++) await invoke('controller', 'tick'); // first pass wake is refused and retried
   expect(reviewerStarts).toHaveLength(2);
   expect(state().reviews.at(-1)).toMatchObject({

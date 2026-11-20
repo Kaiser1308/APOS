@@ -244,8 +244,8 @@ it('runs an approved two-package Goal through dependency release, integration an
   await invoke('goal', 'select', spec.id);
   await asLead('term_lead', async () => {
     await invoke('lead', 'propose', '--file', input('proposal.json', { ...proposal, mode: 'multi-wp' }));
-    await invoke('package', 'add', '--file', input('wp-a.json', a));
-    await invoke('package', 'add', '--file', input('wp-b.json', b));
+    await invoke('package', 'add', '--file', input('wp-a.json', a), '--reason', 'First stage');
+    await invoke('package', 'add', '--file', input('wp-b.json', b), '--reason', 'Second stage');
     expect(starts).toEqual([]);
     await invoke('lead', 'commit', spec.id);
   });
@@ -272,6 +272,8 @@ it('runs an approved two-package Goal through dependency release, integration an
     }),
   );
   await invoke('package', 'verify', spec.id, a.id);
+  await asLead('term_lead', () => invoke('package', 'approve', spec.id, b.id, '--reason', 'Reviewed first stage'));
+  await invoke('package', 'dispatch', spec.id);
   await invoke('package', 'ready', spec.id);
   expect(output.at(-1)).toBe('[]');
   expect(starts).toEqual(['WP-01', 'WP-02']);

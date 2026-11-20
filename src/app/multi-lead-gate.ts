@@ -16,6 +16,30 @@ export function reviewRun(state: GoalState): string | undefined {
   );
 }
 
+export function coordinationNotices(state: GoalState): string[] {
+  const events: string[] = [];
+  for (const item of Object.values(state.packages ?? {})) {
+    if (item.status === 'blocked' && item.blocker?.note.startsWith('Worker reported failed'))
+      events.push(`package ${item.spec.id} v${item.spec.version} attempt ${item.attempts} failed`);
+    const commit = item.gate?.deliveryCommit ?? item.evidence.at(-1)?.commitRef;
+    if (item.status === 'verified' && commit)
+      events.push(`package ${item.spec.id} v${item.spec.version} attempt ${item.attempts} verified at ${commit}`);
+    if (item.leadDecisionRequired)
+      events.push(
+        `package ${item.spec.id} v${item.spec.version} attempt ${item.attempts} needs Lead decision: ${item.finding ?? 'retry budget exhausted'}`,
+      );
+    if (
+      state.leadApprovalRequired !== false &&
+      (item.status === 'specified' || item.status === 'stale') &&
+      item.dispatchApproved === undefined &&
+      item.spec.dependencies.length &&
+      item.spec.dependencies.every(dep => state.packages?.[dep]?.status === 'verified')
+    )
+      events.push(`package ${item.spec.id} v${item.spec.version} awaits Lead dispatch approval`);
+  }
+  return events;
+}
+
 /** Gate only a settled Lead turn whose head contains every verified package. */
 export async function gateSettledLead(
   store: GoalRepository,

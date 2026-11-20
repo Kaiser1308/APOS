@@ -19,7 +19,9 @@ import { GitCommitInspector, IntegrationService } from './integration.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { SupervisorOptions } from './solo-supervisor.js';
-import { gateSettledLead, reviewRun } from './multi-lead-gate.js';
+import { coordinationNotices, gateSettledLead, reviewRun } from './multi-lead-gate.js';
+import { writeLeadLog } from './lead-log.js';
+import { multiWallTimeExpired } from './multi-budget.js';
 
 /**
  * The controller's loop for a Multi-WP Goal: gate each settled package on its own head, send red
@@ -131,19 +133,14 @@ export class MultiSupervisor {
       const latest = this.store.getGoal(goalId)!.packages![item.spec.id];
       const signature = latest.findings?.at(-1);
       const repeats = (latest.findings ?? []).filter(value => value === signature).length;
-      if (gate.result === 'unverifiable' || repeats >= 3) {
-        this.record(goalId, 'human-notified', {
-          kind: 'needs-decision',
-          goalId,
-          packageId: item.spec.id,
-          note: gate.result === 'unverifiable' ? 'package gate unverifiable' : 'same package failure after two repairs',
-        });
-        events.push(`package ${tag} needs a decision: ${latest.finding}`);
+      if (gate.result === 'unverifiable' || repeats >= 3 || latest.leadDecisionRequired) {
+        events.push(`package ${tag} needs Lead decision: ${latest.finding}`);
       } else events.push(`package ${tag} red, returned to its owner: ${latest.finding}`);
     }
     actions.push(
       ...(await gateSettledLead(this.store, this.runtime, this.gate, goalId, repoPath, this.options.inspector)),
     );
+    const outOfTime = multiWallTimeExpired(this.store, goalId, this.now);
     actions.push(...(await this.goalReview(goalId, repoPath, events)));
     state = this.store.getGoal(goalId)!;
     // Derived from the recorded review, not from the tick that read it: a wake Orca refuses is retried.
@@ -163,11 +160,12 @@ export class MultiSupervisor {
           : `Goal review requested changes on ${verdict.commitRef}: ${verdict.note}`,
       );
     const packages = Object.values(state.packages ?? {});
+    events.push(...coordinationNotices(state));
     if (packages.length && packages.every(item => item.status === 'verified') && !state.integration)
       events.push('all packages verified: ready to integrate');
     if (state.gate && state.gate.result !== 'green')
       events.push(`integration gate ${state.gate.result} on ${state.gate.deliveryCommit}`);
-    actions.push(...(await this.wakeLead(goalId, repoPath, events)));
+    if (!outOfTime) actions.push(...(await this.wakeLead(goalId, repoPath, events)));
     return actions;
   }
 
@@ -185,7 +183,9 @@ export class MultiSupervisor {
     const gate = state.gate;
     const packages = Object.values(state.packages ?? {});
     if (state.reviewIntent) return this.recoverGoalReview(state, repoPath, actions);
+    // A reviewer recorded or intended before the wall limit may still finish; past it no new one starts.
     if (
+      multiWallTimeExpired(this.store, goalId, this.now) ||
       state.integration ||
       !gate ||
       gate.result !== 'green' ||
@@ -255,7 +255,8 @@ export class MultiSupervisor {
       actions.push(`recovered Goal reviewer ${found.dispatchId}`);
       return actions;
     }
-    if (this.now() - Date.parse(intent.at) < 3 * 60_000) return actions;
+    if (this.now() - Date.parse(intent.at) < 3 * 60_000 || multiWallTimeExpired(this.store, goalId, this.now))
+      return actions;
     const tries = this.store.events(goalId).filter(item => item.type === 'review-intended').length;
     if (tries >= 3) {
       this.record(goalId, 'blocked', {
@@ -395,6 +396,7 @@ export class MultiSupervisor {
     // One key per Lead turn: a wake whose response was lost is recovered by it instead of starting a second fresh Lead.
     let woken: Awaited<ReturnType<NonNullable<RuntimeAdapter['wakeLead']>>>;
     try {
+      writeLeadLog(this.store, goalId, state.lead?.ref.worktreeId);
       woken = await this.runtime.wakeLead({
         repoPath,
         goalId,

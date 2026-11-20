@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -8,11 +9,89 @@ import { composeBase } from './git.js';
 import { OrcaRuntime } from './adapter.js';
 import { extractStartedRef, interpretWorkerShow, parseOrcaResult } from './parse.js';
 import { DEFAULT_PROFILES } from '../brief.js';
+import type { WorkPackageSpec } from '../../domain/packages.js';
 
 describe('Orca adapter result', () => {
   it('rejects an unknown or failed response rather than claiming a dispatch', () => {
     expect(() => parseOrcaResult('{"ok":false,"result":{}}')).toThrow();
     expect(() => parseOrcaResult('not json')).toThrow();
+  });
+});
+
+describe('a package the Lead added after plan approval', () => {
+  // The last milestone commit predates the addition, so packages/WP-03.md does not exist at the base.
+  const late: WorkPackageSpec = {
+    id: 'WP-03',
+    goalId: 'GOAL-001',
+    goalVersion: 1,
+    version: 1,
+    owner: 'worker-c',
+    outcome: 'Late audit export',
+    scope: ['src/audit-export-late'],
+    exclusions: ['billing'],
+    dependencies: [],
+    interfaces: ['exportAudit(range)@v1'],
+    acceptance: [{ id: 'WP-AC-9', text: 'exports the audit trail as CSV', goalAcceptanceId: 'AC-1' }],
+    integration: 'Lead verifies the export',
+  };
+  const fixture = (notes?: string) => {
+    const calls: string[][] = [];
+    const digested: string[] = [];
+    const runtime = new OrcaRuntime(
+      args => {
+        calls.push(args);
+        if (args[0] === 'repo') return { repo: { id: 'repo_1' } };
+        if (args[1] === 'run-list') return { runs: [] };
+        if (args[1] === 'run-create') return { run: { id: 'run_1' } };
+        return { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', effects: [] };
+      },
+      () => 'a'.repeat(40),
+      DEFAULT_PROFILES,
+      (_repo, _commit, path) => {
+        if (path.includes('/packages/')) throw new Error(`missing at base: ${path}`);
+        digested.push(path);
+        return 'd'.repeat(64);
+      },
+      notes ? () => notes : undefined,
+    );
+    const brief = () => {
+      const start = calls.find(args => args[1] === 'worker-start')!;
+      return start[start.indexOf('--spec') + 1];
+    };
+    return { runtime, brief, digested };
+  };
+  const expectContract = (text: string) => {
+    expect(text).toContain('src/audit-export-late');
+    expect(text).toContain('exports the audit trail as CSV');
+    expect(text).toContain('exportAudit(range)@v1');
+  };
+
+  it('carries its scope, acceptance and interfaces in the Worker brief', async () => {
+    const { runtime, brief, digested } = fixture();
+    await runtime.startPackage({ repoPath: 'C:/project', idempotencyKey: 'key-late', package: late });
+    expect(brief()).toContain('current package contract');
+    expectContract(brief());
+    expect(digested.some(path => path.includes('WP-03'))).toBe(false);
+  });
+
+  it('spills a long contract to a controller note the brief pins by sha256', async () => {
+    const notes = mkdtempSync(join(tmpdir(), 'apos-notes-'));
+    try {
+      const { runtime, brief } = fixture(notes);
+      await runtime.startPackage({
+        repoPath: 'C:/project',
+        idempotencyKey: 'key-late',
+        package: { ...late, integration: `${late.integration}. ${'Lead checks the CSV columns. '.repeat(10)}` },
+      });
+      const note = join(notes, 'key-late-contract.md');
+      const contract = readFileSync(note, 'utf8');
+      expectContract(contract);
+      expect(brief()).toContain('current package contract');
+      expect(brief()).toContain(note);
+      expect(brief()).toContain(createHash('sha256').update(contract, 'utf8').digest('hex'));
+    } finally {
+      rmSync(notes, { recursive: true, force: true });
+    }
   });
 });
 
@@ -97,6 +176,8 @@ it('starts a package Worker in a dedicated Orca worktree', async () => {
   expect(start).toContain('a'.repeat(40));
   expect(start.join(' ')).toContain('.apos/goals/GOAL-001/evidence/WP-01-v1-a1.md');
   expect(start.join(' ')).toContain('apos-core: dddddddddddddddd');
+  expect(start[start.indexOf('--spec') + 1]).toContain('current package contract');
+  expect(start[start.indexOf('--spec') + 1]).toContain('checkIn(token)@v1');
   expect(start).toEqual(expect.arrayContaining(['--agent', 'codex', '--model', 'gpt-6.1-terra']));
   expect(ref.owner).toBe('worker');
 });
@@ -260,6 +341,8 @@ it('resumes a revised package in its original terminal and worktree', async () =
   const start = calls.find(args => args[1] === 'worker-start')!;
   expect(start).toContain('term_1');
   expect(start).toContain('id:repo_1::C:/worktree');
+  expect(start[start.indexOf('--spec') + 1]).toContain('checkIn(token, device)@v1');
+  expect(start[start.indexOf('--spec') + 1]).toContain('current package contract');
   expect(ref).toMatchObject({ owner: 'worker', dispatchId: 'ctx_2', worktreeId: 'repo_1::C:/worktree' });
 });
 
@@ -767,6 +850,7 @@ describe('resumes and wakes after the role profile changed', () => {
     expect(start()).not.toContain('--terminal');
     expect(start()).toEqual(expect.arrayContaining(['--worktree', 'id:repo::C:/p', '--agent', 'antigravity']));
     expect(start()[start().indexOf('--spec') + 1]).toContain('.apos/goals/GOAL-X/evidence/WP-01-v1-a2.md');
+    expect(start()[start().indexOf('--spec') + 1]).toContain('current package contract');
     expect(next).toMatchObject({ owner: 'worker', dispatchId: 'ctx_2', requested: { agent: 'antigravity' } });
   });
 

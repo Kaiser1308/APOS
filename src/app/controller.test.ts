@@ -90,6 +90,7 @@ it('releases dependency-ready Workers after a restart without duplicate dispatch
     commitRef: 'abc',
   });
   await packages.verify(spec.id, a.id);
+  packages.approveDispatch(spec.id, b.id, 'Reviewed dependency');
   expect((await controller.tick(dir))[0].dispatched).toEqual(['WP-02']);
   expect(starts).toEqual(['WP-01', 'WP-02']);
   store.close();

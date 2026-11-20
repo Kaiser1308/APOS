@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
@@ -8,6 +8,7 @@ import type { GoalEventType } from '../domain/transitions.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { DEFAULT_PROFILES } from '../runtime/brief.js';
 import { HandoffService } from './handoff.js';
+import { UserError } from '../domain/errors.js';
 import type { HandoffInput, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { RuntimeProfiles } from '../domain/runtime-refs.js';
 
@@ -109,6 +110,93 @@ function soloExecuting(add: (type: GoalEventType, data?: unknown) => void, dir: 
 const claude: RuntimeProfiles = { ...DEFAULT_PROFILES, lead: { agent: 'claude' } };
 
 describe('HandoffService', () => {
+  it('prepares the event-derived coordination log before starting a fresh Multi-WP Lead', async () => {
+    const { dir, store, add } = open();
+    add('goal-drafted', spec);
+    add('goal-approved', approval);
+    add('goal-selected');
+    add('lead-dispatch-intended', 'lead-key');
+    add('lead-started', {
+      runId: 'run_1',
+      taskId: 't1',
+      dispatchId: 'ctx_1',
+      owner: 'lead',
+      repoPath: dir,
+      terminal: 'term_1',
+      worktreeId: `repo::${dir}`,
+      baseCommit: BASE,
+    });
+    add('proposal-drafted', { ...proposal, mode: 'multi-wp' });
+    add('package-added', { ...pkg, version: 1 });
+    add('package-added', {
+      ...pkg,
+      id: 'WP-02',
+      version: 1,
+      owner: 'worker-b',
+      acceptance: [{ id: 'WP-AC-2', text: 'history' }],
+    });
+    add('proposal-approved');
+    add('package-approval-policy-initialized', { enabled: true, reason: 'default' });
+    add('package-approval-policy-set', { enabled: false, reason: 'Interfaces already reviewed' });
+    add('package-dispatch-intended', { packageId: 'WP-01', key: 'key' });
+    add('package-started', {
+      packageId: 'WP-01',
+      ref: { runId: 'run_p', taskId: 'p', dispatchId: 'p1', owner: 'worker', repoPath: dir },
+    });
+    const { runtime, handoffs } = fakeRuntime();
+    await new HandoffService(store, runtime, () => claude).handoff(spec.id, { kind: 'lead' }, dir);
+    expect(handoffs[0].kind).toBe('lead-multi');
+    expect(readFileSync(join(dir, '.apos', 'goals', spec.id, 'lead-log.md'), 'utf8')).toContain(
+      'Interfaces already reviewed',
+    );
+  });
+
+  it('does not stop a running package for handoff after the Multi-WP wall limit', async () => {
+    const { dir, store, add } = open();
+    add('goal-drafted', spec);
+    add('goal-approved', approval);
+    add('goal-selected');
+    store.append({
+      id: 'old-intent',
+      goalId: spec.id,
+      type: 'lead-dispatch-intended',
+      data: 'old',
+      at: '2020-01-01T00:00:00.000Z',
+    });
+    add('proposal-drafted', { ...proposal, mode: 'multi-wp' });
+    add('package-added', { ...pkg, version: 1 });
+    add('package-added', {
+      ...pkg,
+      id: 'WP-02',
+      version: 1,
+      owner: 'worker-b',
+      acceptance: [{ id: 'WP-AC-2', text: 'history' }],
+    });
+    add('proposal-approved');
+    add('package-dispatch-intended', { packageId: 'WP-01', key: 'key' });
+    add('package-started', {
+      packageId: 'WP-01',
+      ref: {
+        runId: 'run_p',
+        taskId: 'p',
+        dispatchId: 'p1',
+        owner: 'worker',
+        repoPath: dir,
+        worktreeId: `repo::${dir}`,
+        baseCommit: BASE,
+      },
+    });
+    const { runtime, calls } = fakeRuntime();
+    const refused = new HandoffService(store, runtime, () => claude).handoff(
+      spec.id,
+      { kind: 'package', packageId: 'WP-01' },
+      dir,
+    );
+    await expect(refused).rejects.toThrow(/wall time exhausted/);
+    await expect(refused).rejects.toBeInstanceOf(UserError);
+    expect(calls).toEqual([]);
+    expect(store.events(spec.id).some(event => event.type === 'multi-time-exhausted')).toBe(true);
+  });
   it('stops the stuck owner and starts the role profile on the same worktree, without spending an attempt', async () => {
     const { dir, store, add } = open();
     soloExecuting(add, dir);

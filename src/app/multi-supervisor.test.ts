@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from '../cli.js';
@@ -226,9 +226,9 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   process.env.ORCA_TERMINAL_HANDLE = 'term-lead'; // the Lead APOS dispatched at selection plans and commits
   try {
     await invoke('lead', 'propose', '--file', input('plan.json', { ...proposal, mode: 'multi-wp' }));
-    await invoke('package', 'add', '--file', input('a.json', a));
-    await invoke('package', 'add', '--file', input('b.json', b));
-    await invoke('package', 'add', '--file', input('c.json', c));
+    await invoke('package', 'add', '--file', input('a.json', a), '--reason', 'First stage');
+    await invoke('package', 'add', '--file', input('b.json', b), '--reason', 'Second stage');
+    await invoke('package', 'add', '--file', input('c.json', c), '--reason', 'Third stage');
     await invoke('lead', 'commit', spec.id);
   } finally {
     delete process.env.ORCA_TERMINAL_HANDLE;
@@ -249,6 +249,10 @@ it('gates each package on its own head, returns a red one to its owner, and wake
       /Lead|Human/,
     );
     await expect(invoke('package', 'verify', spec.id, 'WP-01')).rejects.toThrow(/Lead|Human/);
+    await expect(invoke('package', 'approve', spec.id, 'WP-02', '--reason', 'self approve')).rejects.toThrow(/Lead/);
+    await expect(
+      invoke('package', 'add', '--file', input('unauthorized.json', c), '--reason', 'self add'),
+    ).rejects.toThrow(/Lead/);
   } finally {
     delete process.env.ORCA_TERMINAL_HANDLE;
   }
@@ -269,10 +273,31 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   expect(wakes.at(-1)!.join('\n')).toMatch(/WP-01 v1 attempt 1 red, returned to its owner/);
   await invoke('controller', 'tick'); // resumes WP-01 in its own worktree
   expect(attempts['WP-01']).toBe(2);
-  for (let i = 0; i < 6; i++) await invoke('controller', 'tick');
+  for (let i = 0; i < 3; i++) await invoke('controller', 'tick');
   expect(state().packages!['WP-01'].status).toBe('verified');
+  expect(state().packages!['WP-02'].status).toBe('specified');
+  process.env.ORCA_TERMINAL_HANDLE = 'term-lead';
+  await invoke('package', 'hold', spec.id, 'WP-02', '--reason', 'Need another look');
+  delete process.env.ORCA_TERMINAL_HANDLE;
+  await invoke('controller', 'tick');
+  expect(state().packages!['WP-02'].status).toBe('specified');
+  process.env.ORCA_TERMINAL_HANDLE = 'term-lead';
+  await invoke('package', 'approve', spec.id, 'WP-02', '--reason', 'Reviewed prerequisite');
+  delete process.env.ORCA_TERMINAL_HANDLE;
+  for (let i = 0; i < 3; i++) await invoke('controller', 'tick');
   expect(state().packages!['WP-02'].status).toBe('verified');
+  process.env.ORCA_TERMINAL_HANDLE = 'term-lead';
+  await invoke('package', 'approve', spec.id, 'WP-03', '--reason', 'Reviewed second package');
+  delete process.env.ORCA_TERMINAL_HANDLE;
+  for (let i = 0; i < 3; i++) await invoke('controller', 'tick');
   expect(state().packages!['WP-03'].status).toBe('verified');
+  const log = readFileSync(join(leadTree, '.apos', 'goals', spec.id, 'lead-log.md'), 'utf8');
+  expect(log).toContain('Reviewed prerequisite');
+  expect(log).toContain('Need another look');
+  expect(log).toContain('Reviewed second package');
+  const reopened = ProjectJournal.open(dir);
+  expect(reopened.journal.events(spec.id).filter(event => event.type === 'package-dispatch-approved')).toHaveLength(2);
+  reopened.close();
   const all = wakes.flat();
   expect(all).toEqual(expect.arrayContaining(['all packages verified: ready to integrate']));
   expect(all.filter(item => item === 'all packages verified: ready to integrate')).toHaveLength(1);

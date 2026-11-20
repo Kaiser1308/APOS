@@ -142,7 +142,7 @@ export function leadBrief(input: BriefBase & { goalVersion: number; budget?: Bud
     `${input.goalId}: APOS Lead for Goal v${input.goalVersion}, attempt 1.`,
     WORKSPACE,
     ...skillLines(input, 'lead'),
-    `Contract: .apos/goals/${input.goalId}/goal.md and source.md at base commit ${input.baseCommit}. Decide Solo or Multi-WP under the lead skill.`,
+    `Contract: .apos/goals/${input.goalId}/goal.md and source.md at base commit ${input.baseCommit}. Decide Solo or Multi-WP under the lead skill; for a Goal too large for one session, coordinate dependent packages in order and own the final outcome.`,
     `Run APOS from this terminal only: ${apos} lead propose --file <execution.json> (leave baseCommit out or set it to ${input.baseCommit}), then ${apos} lead commit ${input.goalId}.`,
     `Solo: once lead commit is accepted you are the owner. Keep going in this same turn: deliver in this worktree and commit your delivery report at ${soloReportPath(input.goalId, 1)}; the controller runs every Goal check itself on your final commit.`,
     'Multi-WP: once lead commit has dispatched the packages, report worker_done and end your turn; APOS wakes you here when there is work.',
@@ -246,7 +246,7 @@ export function handoffBrief(
   const goal = input.goalId;
   const body: Record<HandoffKind, string[]> = {
     'lead-plan': [
-      `Contract: .apos/goals/${goal}/goal.md and source.md at base commit ${input.baseCommit}. No plan of yours is accepted yet: decide Solo or Multi-WP under the lead skill.`,
+      `Contract: .apos/goals/${goal}/goal.md and source.md at base commit ${input.baseCommit}. No plan of yours is accepted yet: decide Solo or Multi-WP under the lead skill; for a Goal too large for one session, coordinate dependent packages in order and own the final outcome.`,
       `Run APOS from this terminal only: ${apos} lead propose --file <execution.json> (leave baseCommit out or set it to ${input.baseCommit}), then ${apos} lead commit ${goal}.`,
       `Solo: once lead commit is accepted you are the owner. Keep going in this same turn and commit your delivery report at ${soloReportPath(goal, input.attempt)}.`,
       'Multi-WP: once lead commit has dispatched the packages, report worker_done and end your turn; APOS wakes you here when there is work.',

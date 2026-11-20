@@ -409,7 +409,7 @@ APOS has run live on real Orca with Codex (`gpt-6.1-terra`): a clean Solo Goal, 
 Known limits:
 
 - **Spend is not enforced.** `maxSpendUsd` and `overrunPolicy` are recorded, but there is no price table and an overrun only notifies. The controller never stops a running owner on its own; it only declines to resume it. Only the Human's `apos handoff` stops one.
-- **Multi-WP has run live only on a toy Goal**, not yet where packages truly depend on each other or where the review asks for changes.
+- **Multi-WP has run live on a dependent-package trial** (commit `9c7385d`). A dependent chain has not been rerun after subsequent fixes, and a Multi-WP review requesting changes has not been verified live.
 - **The quality pilot did not beat the baseline.** On the SQLFMT task APOS ended with 28/32 target tests against the single-agent baseline's 32/32, and the controller blocked the Goal rather than verify it. The current aim is a smooth controller, not accuracy.
 - **Upgrading from a version before `rationale`.** A proposal saved without `rationale` (or `splitRationale`) is refused by `lead commit`. Add a `rationale` string to the execution JSON, re-run `apos lead propose --file <execution.json>` from the Lead terminal, then `apos lead commit <id>`.
 - **Upgrading from a version before the Lead dispatch.** A Goal selected, planned or accepted under the old flow has no APOS Lead: `lead commit` refuses it and `apos inbox` asks you to run `apos lead start <id>`; the new Lead proposes and commits again. Goals already executing are unaffected. Do not roll back below this version once a log holds `lead-*` events: older builds cannot replay event types they do not know (this build ignores unknown ones).

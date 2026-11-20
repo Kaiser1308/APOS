@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { botLeadBrief } from '../bot-brief.js';
 import { callerBot, findBot, mailBot, wakeBot } from './bots.js';
 import { OrcaRefused } from './exec.js';
 
@@ -61,5 +65,29 @@ describe('Orca bots', () => {
     expect(body).toMatch(/\(1\) a\n\(2\) b/);
     mailBot(execute, bot, 'status', 'ended', 'stop');
     expect(calls[1].slice(4, 6)).toEqual(['--type', 'status']);
+  });
+
+  it('names only Lead files that exist, the controller home, and no worker_done (seen live in a bot chat)', () => {
+    const tree = mkdtempSync(join(tmpdir(), 'apos-bot-brief-'));
+    try {
+      const input = {
+        repoPath: 'C:/repo',
+        goalId: 'GOAL-001',
+        bot: { id: 'b', name: 'B' },
+        events: ['x'],
+        mode: 'plan' as const,
+        leadWorktree: tree,
+      };
+      expect(botLeadBrief(input)).not.toContain('.apos/goals/GOAL-001/lead-log.md');
+      expect(botLeadBrief(input)).not.toContain('.apos/goals/GOAL-001/execution.md');
+      mkdirSync(join(tree, '.apos', 'goals', 'GOAL-001'), { recursive: true });
+      writeFileSync(join(tree, '.apos', 'goals', 'GOAL-001', 'lead-log.md'), '# log');
+      const brief = botLeadBrief(input);
+      expect(brief).toContain('.apos/goals/GOAL-001/lead-log.md');
+      expect(brief).toContain(`APOS_HOME=${process.env.APOS_HOME}`);
+      expect(brief).toMatch(/You have no worker_done/);
+    } finally {
+      rmSync(tree, { recursive: true, force: true });
+    }
   });
 });

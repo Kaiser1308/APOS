@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { BotWakeInput } from '../ports/runtime.js';
 import { aposCommand, oneLine, roleSkill } from './brief.js';
 
@@ -23,9 +25,20 @@ export const HUMAN_ONLY = [
 export function botLeadBrief(input: BotWakeInput): string {
   const apos = aposCommand(input.repoPath);
   const goal = input.goalId;
+  // Only files that exist: before a plan there is no execution.md, before a decision no lead-log.md (seen live).
+  const present = (tree: string) =>
+    [`.apos/goals/${goal}/execution.md`, `.apos/goals/${goal}/lead-log.md`].filter(path =>
+      existsSync(join(tree, path)),
+    );
   const where = input.leadWorktree
-    ? `The Lead worktree is ${input.leadWorktree}: read ${roleSkill('lead')}, .apos/goals/${goal}/execution.md and .apos/goals/${goal}/lead-log.md (a generated reading copy of the event log) there.`
+    ? `The Lead worktree is ${input.leadWorktree}: read ${[roleSkill('lead'), ...present(input.leadWorktree)].join(', ')} there (lead-log.md is a generated reading copy of the event log).`
     : `Read ${roleSkill('lead')} and .apos/goals/${goal}/ in the managed repo.`;
+  // The bot's chat does not inherit the controller's environment: name the controller home when it is not the default.
+  const home = process.env.APOS_HOME
+    ? [
+        `Set the environment variable APOS_HOME=${process.env.APOS_HOME} for every APOS command (PowerShell: $env:APOS_HOME='${process.env.APOS_HOME}').`,
+      ]
+    : [];
   const mode =
     input.mode === 'multi'
       ? [
@@ -42,9 +55,11 @@ export function botLeadBrief(input: BotWakeInput): string {
           ];
   return [
     `${goal}: you are the APOS Lead of this Goal, as an Orca bot. You never write, commit or merge code yourself; every decision goes through an APOS command, run as ${apos} <command>, so it is recorded in the event log.`,
+    ...home,
     where,
     ...mode,
     `These are Human decisions and APOS refuses them from your chat: ${HUMAN_ONLY.join(', ')}. When one is needed, say so to your owner.`,
+    'You have no worker_done: when this batch is handled, stop; reply to this mail only if your owner must decide something.',
     'Events:',
     ...input.events.map((item, index) => `(${index + 1}) ${oneLine(item)}`),
   ].join('\n');

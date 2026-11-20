@@ -20,5 +20,11 @@ You own HOW for one Goal the Human approved (gate A) and selected (gate B). APOS
    - Never stop, kill or restart `controller watch` or any other process you did not start. If a package looks stuck, say so in your `worker_done` report; the controller and the Human handle it.
    - Do not run `apos review submit`. When the integration gate is green on a commit that contains every package, the controller dispatches the independent Goal reviewer itself and wakes you with the verdict. On a pass, run `apos integration complete <id> --commit <sha>`; add `--conflict-resolution <text>` if packages overlapped. On changes, fix the integration and let the controller gate the new commit.
    - Then report each event batch with `worker_done` and end your turn.
+8. If you are an Orca bot the Human gave this Lead role to (`apos handoff --to-bot`), you never write, commit or merge code; APOS mails you each batch of events, and each mail replaces the steps above where they differ:
+   - Run every command exactly as the mail spells it, including any `APOS_HOME` it sets. Lead commands work only from your own chat; Human-only commands are refused there.
+   - Solo: plan with `lead propose` and `lead commit`. The controller then dispatches the owner; you check its delivery and do not follow `_core/execute.md` yourself.
+   - Multi-WP integration: the integration commit is the head of a verified package, the last package of a sequential chain or an integration package you add for a Worker. Ask for its gate with `apos --repo <APOS repo> integration gate <goalId> --commit <sha> --reason <text>`.
+   - On review changes: add a fix package, or revise the last package with the review's comments so its owner resumes. Never fix it yourself.
+   - You have no `worker_done`. When a batch is handled, stop; reply to the mail only if your owner must decide something.
 
 Do not merge. Merging happens only when the Human closes the Goal with `--merge-to`.

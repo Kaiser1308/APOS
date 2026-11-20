@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { multiWallTimeExpired } from './multi-budget.js';
+import { worktreePath } from '../runtime/orca/parse.js';
 import { newEvent } from './events.js';
 import { HandoffService } from './handoff.js';
 import { transferNotice, wakeBot } from './bot-lead.js';
@@ -49,6 +52,11 @@ export class LeadTransferService {
       // A transfer whose CLI died after its intent: finish it for the bot it named.
       ({ key, from } = pending);
       bot = { id: pending.target.botId, name: pending.target.botName };
+      const wanted = nameOrId.trim().toLowerCase();
+      if (wanted !== bot.id.toLowerCase() && wanted !== bot.name.toLowerCase())
+        throw new UserError(
+          `The transfer of ${goalId}'s Lead to bot ${bot.name} (${bot.id}) is pending; finish it with --to-bot ${bot.id}, or drop it with \`apos execution abandon-intent ${goalId} --key ${key} --reason ...\``,
+        );
     } else {
       this.assertTransferable(state);
       const found = this.runtime.findBot(nameOrId);
@@ -86,8 +94,27 @@ export class LeadTransferService {
     if (!state) throw new UserError(`Goal does not exist: ${goalId}`);
     const bot = state.leadBot;
     if (!bot) throw new UserError(`No bot holds the Lead of ${goalId}`);
-    if (state.dispatchIntent || state.resumeIntent)
-      throw new UserError(`A dispatch of ${goalId} is pending; wait until the controller settles it`);
+    // Everything the handoff that follows would refuse is refused first: the bot is never told to stop while no APOS
+    // Lead can take over.
+    const busy = [state.dispatchIntent, state.resumeIntent, state.leadIntent, state.reviewIntent, state.handoffIntent];
+    if (busy.some(Boolean))
+      throw new UserError(
+        `A dispatch of ${goalId} is pending; wait until the controller settles it, then return the Lead`,
+      );
+    const soloRunning =
+      state.proposal?.mode.startsWith('solo') && ['executing', 'blocked', 'verified'].includes(state.status);
+    if (!soloRunning) {
+      if (!state.lead) throw new UserError(`${goalId} has no Lead worktree for a fresh APOS Lead`);
+      if (!['selected', 'planned', 'ready', 'executing', 'blocked'].includes(state.status))
+        throw new UserError(`${goalId} is ${state.status}: there is no running Lead role to return`);
+      if (multiWallTimeExpired(this.store, goalId))
+        throw new UserError('Multi-WP wall time exhausted; Human decision required before a fresh APOS Lead');
+      const tree = worktreePath(state.lead.ref.worktreeId);
+      if (state.proposal?.mode === 'multi-wp' && (!tree || !existsSync(tree)))
+        throw new UserError(
+          `The Lead worktree of ${goalId} is unavailable (${tree ?? 'unknown'}); a fresh Lead needs it`,
+        );
+    }
     this.record(goalId, 'lead-returned', { by, botId: bot.id });
     await this.runtime
       .tellBot?.(
@@ -96,8 +123,7 @@ export class LeadTransferService {
         `${by} gave the Lead role of ${goalId} back to an APOS-dispatched Lead. Stop acting on ${goalId}; APOS no longer accepts your Lead commands for it.`,
       )
       .catch(() => undefined);
-    const after = this.store.getGoal(goalId)!;
-    if (after.proposal?.mode.startsWith('solo') && ['executing', 'blocked', 'verified'].includes(after.status))
+    if (soloRunning)
       // A running Solo plan has its controller-dispatched owner; there is no Lead dispatch to restart.
       return { note: `the Solo owner keeps delivering ${goalId}; the Human decides what the Lead would have` };
     const started = await new HandoffService(this.store, this.runtime, this.profiles).handoff(

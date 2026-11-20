@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { runCli } from './cli.js';
 import { spec as baseSpec, proposal, sourceText } from './domain/fixtures.test-support.js';
 import { ProjectJournal } from './store/journal.js';
+import { newEvent } from './app/events.js';
 import type { GoalSpec } from './domain/contracts.js';
 import type { WorkPackageSpec } from './domain/packages.js';
 import type { BotIdentity, BotWakeInput, HandoffInput, PackageRuntime, RuntimeAdapter } from './ports/runtime.js';
@@ -86,6 +87,7 @@ async function setup() {
   const mails: BotWakeInput[] = [];
   const told: string[] = [];
   const stops: string[] = [];
+  const inspected: string[] = [];
   let stopResult: 'stopped' | 'unknown' = 'stopped';
   let caller: BotIdentity | undefined;
   let callerError: Error | undefined;
@@ -106,6 +108,7 @@ async function setup() {
       throw new Error('Solo must not resume');
     },
     async inspect(ref) {
+      inspected.push(ref.dispatchId);
       return { state: 'live', ref };
     },
     async stopWorker(dispatchId) {
@@ -242,6 +245,7 @@ async function setup() {
     mails,
     told,
     stops,
+    inspected,
     setStop: (value: 'stopped' | 'unknown') => (stopResult = value),
     setCallerError: (error: Error | undefined) => (callerError = error),
   };
@@ -416,6 +420,54 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
     ]);
     await expect(t.asBot(() => t.invoke('outcome', 'close', spec.id))).rejects.toThrow(/Human decision/);
   }, 60_000);
+
+  it('wakes the bot from controller tick through Orca, never inspecting, waking or gating the stopped Lead', async () => {
+    const t = await setup();
+    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    const commitA = t.commit('scanner.ts', 'export const scan = true;', 'scanner');
+    await t.asBot(async () => {
+      await t.invoke('package', 'evidence', spec.id, '--file', t.evidence(a, 'WP-AC-1', commitA));
+      await t.invoke('package', 'verify', spec.id, 'WP-01');
+    });
+    t.inspected.length = 0;
+    const before = t.mails.length;
+    await t.invoke('controller', 'tick');
+    const mail = t.mails.slice(before).find(item => item.mode === 'multi');
+    expect(mail?.events.join(' | ')).toMatch(/package WP-02 v1 awaits Lead dispatch approval/);
+    expect(t.inspected).not.toContain('lead-1');
+    const { events } = t.journal();
+    expect(events.some(item => item.type === 'gate-recorded')).toBe(false);
+    const woken = events.filter(item => item.type === 'lead-woken').at(-1)?.data as { bot?: string; events?: string[] };
+    expect(woken.bot).toBe(BOT.id);
+    expect(existsSync(join(t.leadTree, '.apos', 'goals', spec.id, 'lead-log.md'))).toBe(true);
+    // Nothing new: the next tick sends no second mail.
+    const sent = t.mails.length;
+    await t.invoke('controller', 'tick');
+    expect(t.mails.length).toBe(sent);
+  });
+
+  it('refuses to give the Lead back while a reviewer start is pending, before telling the bot anything', async () => {
+    const t = await setup();
+    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    const commitA = t.commit('scanner.ts', 'export const scan = true;', 'scanner');
+    const commitB = t.commit('feature.js', 'process.exit(0);', 'history');
+    await t.asBot(async () => {
+      await t.invoke('package', 'evidence', spec.id, '--file', t.evidence(a, 'WP-AC-1', commitA));
+      await t.invoke('package', 'verify', spec.id, 'WP-01');
+      await t.invoke('package', 'approve', spec.id, 'WP-02', '--reason', 'WP-01 checked');
+      await t.invoke('package', 'dispatch', spec.id);
+      await t.invoke('package', 'evidence', spec.id, '--file', t.evidence(b, 'WP-AC-2', commitB));
+      await t.invoke('package', 'verify', spec.id, 'WP-02');
+      await t.invoke('integration', 'gate', spec.id, '--commit', commitB, '--reason', 'end of the chain');
+    });
+    const opened = ProjectJournal.open(t.dir);
+    opened.journal.append(newEvent(spec.id, 'review-intended', { key: 'rk', commit: commitB }));
+    opened.close();
+    await expect(t.invoke('handoff', spec.id, '--to-apos', '--by', 'anh')).rejects.toThrow(/pending/);
+    expect(t.journal().events.some(item => item.type === 'lead-returned')).toBe(false);
+    expect(t.journal().goal.leadBot).toMatchObject({ id: BOT.id });
+    expect(t.told).toEqual([]);
+  });
 
   it('gives the Lead back to a fresh APOS Lead on a Human command, recorded as an event', async () => {
     const t = await setup();

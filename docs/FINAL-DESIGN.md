@@ -27,7 +27,7 @@ Không lớp nào bảo đảm tuyệt đối. Cách làm là xếp nhiều lớ
 ## 1. Nguyên tắc
 
 0. **Hai tầng quyết định.** *Cái gì* (chọn Goal, thứ tự, outcome, acceptance, loại trừ, appetite) thuộc PM + anh. *Thế nào* (Solo hay Multi-WP, cắt WP, interface, cách làm) thuộc Lead. Lead không tự đổi *cái gì*: gặp hợp đồng sai/thiếu/mâu thuẫn thì đẩy ngược lên PM + anh.
-1. **Một kết quả, một owner giữ ngữ cảnh.** Mặc định Solo. Multi-WP chỉ dùng khi có ít nhất hai kết quả độc lập, interface rõ, vùng sửa ít giao nhau, và proposal giải thích được lợi ích so với Solo. Không tách API/UI/test thành các owner riêng chỉ vì dễ chia.
+1. **Một kết quả, một owner giữ ngữ cảnh.** Mặc định Solo khi một session đủ hoàn thành Goal. Khi Goal quá lớn cho một session, Lead chia thành các WP có interface rõ, điều phối worker theo thứ tự phụ thuộc và chịu trách nhiệm kết quả cuối đạt Goal. Không tách API/UI/test thành các owner riêng chỉ vì dễ chia.
 2. **Nguồn yêu cầu đi cùng sản phẩm.** Snapshot nguyên văn bất biến + hash; mỗi yêu cầu được trích có ID và được map tới acceptance hoặc quyết định loại trừ mà anh đã duyệt. Gate kiểm đủ các ID đã trích; PM/anh/Reviewer phải đối chiếu snapshot để phát hiện ý chưa được trích. Hash không chứng minh đã hiểu đủ nguồn.
 3. **Lời agent không phải bằng chứng.** Orca xác nhận attempt đã settle; controller chạy check; Reviewer đọc phần rủi ro; anh quyết kết quả và quyền merge.
 4. **Không đổi cam kết ngầm.** Đổi outcome, scope, acceptance, nguồn hoặc appetite thì phải có Goal version mới và anh duyệt lại. Đổi cách làm hoặc WP trong phạm vi cũ thì Lead quyết, ghi ảnh hưởng, và evidence liên quan thành stale.
@@ -48,9 +48,9 @@ Không lớp nào bảo đảm tuyệt đối. Cách làm là xếp nhiều lớ
 **ExecutionProposal**
 - gắn `goalId`, `goalVersion`, `sourceSha256`;
 - `mode`, cách làm, vùng code, rủi ro, map acceptance → check, base SHA, nhánh tích hợp, profile runtime/model, kế hoạch review/gate, chi phí dự kiến;
-- Multi-WP thêm: so sánh với Solo, lý do tách, vùng giao nhau, chi phí tích hợp, phụ thuộc, cách kiểm tích hợp;
+- Multi-WP thêm: vì sao một session không đủ, thứ tự WP, mỗi WP nhận gì từ WP trước, vùng giao nhau, chi phí và cách kiểm tích hợp;
 - Lead soạn và tự quyết proposal; anh không duyệt. Trước dispatch, controller đối chiếu `goalId`, `goalVersion`, `sourceSha256` với Goal đã duyệt và xác nhận proposal/WP không đổi outcome, scope, exclusions, acceptance, checks hoặc appetite; không còn yêu cầu mồ côi, check không xác định, ambiguity hay câu hỏi sản phẩm đang mở. Mọi acceptance của Goal phải được phủ bởi check ở WP hoặc bước tích hợp; chỉ dispatch WP `ready`. Với Multi-WP, kiểm có ít nhất hai WP, phụ thuộc không vòng và interface có version. Tổng chi phí dự kiến gồm WP, tích hợp và review phải nằm trong appetite còn lại; không đạt thì chuyển `needs-decision`, không dispatch.
-- `mode = multi-wp` thì controller gửi anh một thông báo (lý do tách, số WP, chi phí dự kiến so với Solo) rồi dispatch luôn, không chờ. Appetite đã duyệt vẫn là cầu dao.
+- `mode = multi-wp` thì controller gửi anh một thông báo (lý do tách, số WP, chi phí dự kiến so với appetite) rồi dispatch luôn, không chờ. Appetite đã duyệt vẫn là cầu dao.
 
 **WorkPackageSpec**
 - `id/version`, Goal version, source hash, owner, outcome, scope/exclusions;
@@ -120,7 +120,7 @@ Trạng thái Goal: `built` → `verified` (gate máy đạt) → `accepted` (an
 4. Event log bền vững, index tái dựng được, commit theo mốc; test migration và crash-recovery.
 5. Smoke Solo thật cộng toàn bộ ca tiêm lỗi; sửa tới khi gate an toàn đạt.
 6. Pilot Solo ghép cặp với `pm-onlyone`; thêm mẫu khi đủ quota.
-7. Chỉ sau đó mới làm: đánh thức Lead, Multi-WP, kiểm tích hợp; thử Multi-WP trên **cùng một Goal tách được** so với Solo. Ba Goal Solo song song là phép đo scheduling riêng.
+7. Thử đánh thức Lead, Multi-WP và kiểm tích hợp trên một Goal quá lớn cho một session, với các WP phụ thuộc tuần tự; đo kết quả, số lần anh can thiệp và chi phí so với appetite. Ba Goal Solo song song là phép đo scheduling riêng.
 8. Dashboard, tự xếp backlog, tối ưu model: chỉ làm khi số đo cho thấy cần.
 
 ## 8. Phép thử và ngưỡng
@@ -137,16 +137,16 @@ Trạng thái Goal: `built` → `verified` (gate máy đạt) → `accepted` (an
 
 Ngưỡng: **0 false verification, 0 duplicate dispatch, 0 unauthorized merge**.
 
-**Chất lượng (ghép cặp).**
+**Chất lượng Solo (ghép cặp).**
 - Cùng seed, nguồn, model code, giới hạn tài nguyên, verifier ẩn; đảo thứ tự trong từng cặp; chấm trên head đã tích hợp, tính cả các lần dừng sớm.
 - Ghi reward, f2p/p2p, chi phí thực, token theo vai, wall time, thời gian anh tham gia.
 - Pilot 3 cặp theo quota; 10 cặp là mốc đọc dữ liệu đầu tiên, không phải chứng nhận thống kê.
 
 Đích:
 - **Solo:** tỉ lệ đạt không kém `pm-onlyone` quá 5 điểm; chi phí, token và thời gian ≤ 1,10×.
-- **Multi-WP**, so với Solo trên cùng loại Goal: tỉ lệ đạt tăng ≥ 20 điểm, cận dưới khoảng tin cậy 95% của chênh lệch > 0, chi phí và thời gian ≤ 1,25×.
+- **Multi-WP:** với Goal quá lớn cho một session, ghi Goal có tới `verified` không, số lần anh phải can thiệp và chi phí thực so với appetite đã duyệt. Ghi cả các lần dừng sớm và lý do.
 
-Chưa đủ mẫu thì giữ Solo làm mặc định và ghi kết luận "chưa xác nhận".
+Chưa đủ mẫu thì ghi kết luận "chưa xác nhận"; Solo vẫn là mặc định khi một session đủ cho Goal.
 
 ## 9. So với APOS hiện tại: việc cần sửa
 

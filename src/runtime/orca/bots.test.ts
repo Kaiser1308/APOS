@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { botLeadBrief } from '../bot-brief.js';
 import { callerBot, findBot, mailBot, wakeBot } from './bots.js';
 import { OrcaRefused } from './exec.js';
+import { UserError } from '../../domain/errors.js';
 
 // Shapes seen live on Orca 1.4.265: `orca bot list --json` and `orca bot chats --json` run from a bot's chat.
 const list = {
@@ -46,6 +47,9 @@ describe('Orca bots', () => {
     expect(() =>
       callerBot((args: string[]) => (args[1] === 'chats' ? { bot: 'Ghost' } : list), { ORCA_AGENT_SESSION_ID: 'x' }),
     ).toThrow(/no such bot/);
+    expect(() =>
+      callerBot((args: string[]) => (args[1] === 'chats' ? { bot: 'Ghost' } : list), { ORCA_AGENT_SESSION_ID: 'x' }),
+    ).toThrow(UserError);
   });
 
   it('mails a bot by id: a handoff job for a wake, a status for information', () => {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { BotIdentity, BotWakeInput } from '../../ports/runtime.js';
 import { botLeadBrief } from '../bot-brief.js';
+import { UserError } from '../../domain/errors.js';
 import { OrcaRefused } from './exec.js';
 import { object } from './parse.js';
 
@@ -48,7 +49,11 @@ export function callerBot(
     throw error;
   }
   const bot = findBot(execute, name);
-  if (!bot) throw new Error(`Orca names this session's bot ${name}, but \`orca bot list\` has no such bot`);
+  // Orca's two answers disagree (a bot renamed or removed between the calls): the Human checks Orca, then retries.
+  if (!bot)
+    throw new UserError(
+      `Orca names this session's bot ${name}, but \`orca bot list\` has no such bot; check \`orca bot list\` and retry`,
+    );
   return bot;
 }
 

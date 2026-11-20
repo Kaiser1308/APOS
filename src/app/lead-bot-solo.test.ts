@@ -7,6 +7,11 @@ import { runCli } from '../cli.js';
 import { spec as baseSpec, proposal, sourceText } from '../domain/fixtures.test-support.js';
 import { CORE_SKILL, activationLine, committedFileDigest, soloReportPath } from '../runtime/brief.js';
 import { ProjectJournal } from '../store/journal.js';
+import { SqliteStore } from '../store/sqlite.js';
+import { SoloService } from './solo.js';
+import { UserError } from '../domain/errors.js';
+import { approval } from '../domain/fixtures.test-support.js';
+import type { GoalEventType } from '../domain/transitions.js';
 import type { GoalSpec } from '../domain/contracts.js';
 import type { BotIdentity, BotWakeInput, HandoffInput, RuntimeAdapter } from '../ports/runtime.js';
 import type { RuntimeRef } from '../domain/runtime-refs.js';
@@ -210,4 +215,47 @@ describe('a bot Lead on a Solo Goal never writes code', () => {
       events.filter(item => item.type === 'lead-woken' && (item.data as { bot?: string }).bot === BOT.id).length,
     ).toBe(mails.length);
   }, 90_000);
+});
+
+describe('the Solo owner of a bot Lead, when it cannot be started', () => {
+  it('reports a runtime with no handoff as a UserError, before recording any dispatch intent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'apos-bot-solo-err-'));
+    dirs.push(dir);
+    const store = SqliteStore.open(join(dir, 'state.sqlite'));
+    try {
+      let n = 0;
+      const add = (type: GoalEventType, data?: unknown) =>
+        store.append({ id: `BS-${++n}`, goalId: spec.id, type, data, at: '2026-11-20T00:00:00.000Z' });
+      add('goal-drafted', spec);
+      add('goal-approved', approval);
+      add('goal-selected');
+      add('lead-dispatch-intended', 'lk');
+      add('lead-started', {
+        runId: 'run_1',
+        taskId: 't',
+        dispatchId: 'ctx_lead',
+        repoPath: dir,
+        terminal: 'term_lead',
+        worktreeId: `repo::${dir}`,
+        baseCommit: 'b'.repeat(40),
+      });
+      add('handoff-intended', {
+        key: 'k',
+        target: { kind: 'bot', botId: BOT.id, botName: BOT.name },
+        from: 'ctx_lead',
+      });
+      add('lead-transferred', { key: 'k', from: 'ctx_lead', by: 'anh', bot: BOT });
+      add('proposal-drafted', proposal);
+      add('proposal-approved');
+      const runtime: RuntimeAdapter = {
+        startLead: () => Promise.reject(new Error('unused')),
+        resumeSolo: () => Promise.reject(new Error('unused')),
+        inspect: ref => Promise.resolve({ state: 'live', ref }),
+      };
+      await expect(new SoloService(store, runtime).adopt(spec.id)).rejects.toBeInstanceOf(UserError);
+      expect(store.events(spec.id).some(item => item.type === 'dispatch-intended')).toBe(false);
+    } finally {
+      store.close();
+    }
+  });
 });

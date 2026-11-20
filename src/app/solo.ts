@@ -7,6 +7,7 @@ import { clockStart, currentLeadRef } from './lead.js';
 import type { Budget, RuntimeRef } from '../domain/runtime-refs.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { RuntimeAdapter } from '../ports/runtime.js';
+import { InvariantError, UserError } from '../domain/errors.js';
 
 export class SoloService {
   constructor(
@@ -57,11 +58,11 @@ export class SoloService {
   private async dispatchOwner(state: GoalState): Promise<RuntimeRef> {
     const goalId = state.spec.id;
     const lead = state.lead;
-    if (!lead) throw new Error(`${goalId} has no Lead worktree for its Solo owner`);
-    if (!this.runtime.handoff) throw new Error('Configured runtime cannot start a Solo owner');
+    if (!lead) throw new InvariantError(`${goalId} has a bot Lead but no Lead worktree for its Solo owner`);
+    if (!this.runtime.handoff) throw new UserError('Configured runtime cannot start a Solo owner');
     if (state.dispatchIntent) {
       const recovered = await this.runtime.recover?.(state.dispatchIntent, lead.ref.runId);
-      if (!recovered) throw new Error('Solo owner dispatch outcome unknown; reconcile Orca before retrying');
+      if (!recovered) throw new UserError('Solo owner dispatch outcome unknown; reconcile Orca before retrying');
       const ref = { ...recovered, owner: 'lead' as const, worktreeId: recovered.worktreeId ?? lead.ref.worktreeId };
       this.record(goalId, 'execution-started', { ...ref, baseCommit: ref.baseCommit ?? lead.ref.baseCommit });
       return ref;

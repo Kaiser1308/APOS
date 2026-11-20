@@ -23,7 +23,7 @@ import type {
 
 /** Blocks a handoff may clear: the ones the controller records when the very dispatch being replaced settles failed. */
 const FAILED_SETTLEMENT = [/^needs-decision: owner reported failed on attempt/, /^Worker reported failed on/];
-const causedByFailure = (note: unknown) =>
+export const causedByFailure = (note: unknown): boolean =>
   typeof note === 'string' && FAILED_SETTLEMENT.some(pattern => pattern.test(note));
 const committed = (repo: string, commit: string, path: string): boolean => {
   try {

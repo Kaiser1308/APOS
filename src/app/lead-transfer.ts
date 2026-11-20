@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { multiWallTimeExpired } from './multi-budget.js';
 import { worktreePath } from '../runtime/orca/parse.js';
 import { newEvent } from './events.js';
-import { HandoffService } from './handoff.js';
+import { HandoffService, causedByFailure } from './handoff.js';
 import { transferNotice, wakeBot } from './bot-lead.js';
 import { transferable } from '../domain/lead-transfer.js';
 import { UserError } from '../domain/errors.js';
@@ -107,6 +107,10 @@ export class LeadTransferService {
       if (!state.lead) throw new UserError(`${goalId} has no Lead worktree for a fresh APOS Lead`);
       if (!['selected', 'planned', 'ready', 'executing', 'blocked'].includes(state.status))
         throw new UserError(`${goalId} is ${state.status}: there is no running Lead role to return`);
+      if (state.status === 'blocked' && !causedByFailure(state.blocker?.note))
+        throw new UserError(
+          `${goalId} is blocked for another reason (${state.blocker?.note ?? 'unknown'}); resolve it before returning the Lead`,
+        );
       if (multiWallTimeExpired(this.store, goalId))
         throw new UserError('Multi-WP wall time exhausted; Human decision required before a fresh APOS Lead');
       const tree = worktreePath(state.lead.ref.worktreeId);

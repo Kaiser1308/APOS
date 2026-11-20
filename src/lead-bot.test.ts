@@ -469,6 +469,17 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
     expect(t.told).toEqual([]);
   });
 
+  it('refuses to give the Lead back while the Goal is blocked for a reason a fresh Lead cannot clear', async () => {
+    const t = await setup();
+    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    await t.invoke('blocker', 'report', spec.id, '--kind', 'external', '--note', 'Test service unavailable');
+    await expect(t.invoke('handoff', spec.id, '--to-apos', '--by', 'anh')).rejects.toThrow(
+      /blocked for another reason/,
+    );
+    expect(t.journal().events.some(item => item.type === 'lead-returned')).toBe(false);
+    expect(t.told).toEqual([]);
+  });
+
   it('gives the Lead back to a fresh APOS Lead on a Human command, recorded as an event', async () => {
     const t = await setup();
     await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');

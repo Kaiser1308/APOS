@@ -19,6 +19,7 @@ import {
 import type { PackageRuntimeRef, RuntimeProfile, RuntimeRef } from './runtime-refs.js';
 import { ownerIdentities, parseReview, type ReviewRecord } from './reviews.js';
 import { applyLeadTransfer, type LeadBot } from './lead-transfer.js';
+import { applyIntegrationGateRequest } from './integration-gate.js';
 
 /** Replay does not validate: old logs must replay as they are. Narrows event data and nothing else. */
 const asRef = <T>(value: unknown): T => value as T;
@@ -1322,17 +1323,8 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       if (data.unblock && state.status === 'blocked') next = { ...next, status: 'executing', blocker: undefined };
       return next;
     }
-    case 'integration-gate-requested': {
-      // The Lead's request alone; the controller's gate that follows is recorded as gate-recorded.
-      const data = event.data as { commit?: string; reason?: string; by?: string };
-      requireThat(
-        state.proposal?.mode === 'multi-wp' && state.status === 'executing' && !state.integration,
-        'Executing Multi-WP Goal not yet integrated required',
-      );
-      requireThat(/^[0-9a-fA-F]{40,64}$/.test(data?.commit ?? ''), 'Full integration commit required');
-      requireThat(data.reason?.trim() && data.by?.trim(), 'Integration gate request needs a reason and who asked');
-      return state;
-    }
+    case 'integration-gate-requested':
+      return applyIntegrationGateRequest(state, event);
     case 'lead-transferred':
     case 'lead-returned':
       return applyLeadTransfer(state, event);

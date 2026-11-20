@@ -4,6 +4,7 @@ import { GateService } from '../../app/gate-service.js';
 import { newEvent } from '../../app/events.js';
 import { assertBotIntegrationCommit } from '../../app/bot-lead.js';
 import { UserError } from '../../domain/errors.js';
+import { integrationGateProblem } from '../../domain/integration-gate.js';
 import type { CliContext } from '../context.js';
 
 export function registerIntegration(ctx: CliContext): void {
@@ -19,7 +20,8 @@ export function registerIntegration(ctx: CliContext): void {
       withJournal(journal => {
         assertLead(journal, goalId, 'integration gate');
         const state = journal.getGoal(goalId)!;
-        if (!reason.trim()) throw new UserError('--reason needs text');
+        const problem = integrationGateProblem(state, commit, reason);
+        if (problem) throw new UserError(problem);
         assertBotIntegrationCommit(state, commit);
         journal.append(
           newEvent(goalId, 'integration-gate-requested', {

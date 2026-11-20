@@ -352,6 +352,12 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
       await expect(t.invoke('integration', 'gate', spec.id, '--commit', t.harness, '--reason', 'mine')).rejects.toThrow(
         /never writes code/,
       );
+      await expect(
+        t.invoke('integration', 'gate', spec.id, '--commit', commitB.slice(0, 7), '--reason', 'short'),
+      ).rejects.toThrow(/not a full commit hash/);
+      await expect(
+        t.invoke('integration', 'gate', spec.id, '--commit', commitB.slice(0, 7), '--reason', 'short'),
+      ).rejects.toBeInstanceOf(UserError);
       await t.invoke('integration', 'gate', spec.id, '--commit', commitB, '--reason', 'WP-02 is the end of the chain');
     });
     expect(t.starts).toEqual(['WP-01', 'WP-02']);

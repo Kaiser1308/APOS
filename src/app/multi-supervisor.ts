@@ -20,6 +20,7 @@ import type { GoalRepository } from '../ports/goal-repository.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { SupervisorOptions } from './solo-supervisor.js';
 import { coordinationNotices, gateSettledLead, reviewRun } from './multi-lead-gate.js';
+import { wakeBot } from './bot-lead.js';
 import { writeLeadLog } from './lead-log.js';
 import { multiWallTimeExpired } from './multi-budget.js';
 
@@ -331,6 +332,8 @@ export class MultiSupervisor {
   /** One wake-up per batch of new events, only when the Lead's previous turn has settled. */
   private async wakeLead(goalId: string, repoPath: string, events: string[]): Promise<string[]> {
     const state = this.store.getGoal(goalId)!;
+    // A bot Lead is mailed through Orca; it has no Lead dispatch to wait on, unstick or replace.
+    if (state.leadBot) return wakeBot(this.store, this.runtime, goalId, repoPath, events);
     const fresh = [...new Set(events)].filter(item => !(state.wokenFor ?? []).includes(item));
     if (!fresh.length) return [];
     const lead = state.leadTerminal;

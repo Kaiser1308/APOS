@@ -1,38 +1,12 @@
 import { PackageService } from '../../app/package-service.js';
 import { parseWorkPackage } from '../../domain/packages.js';
-import { assertLeadTerminal } from '../../app/lead.js';
 import { newEvent } from '../../app/events.js';
 import type { CliContext } from '../context.js';
 import { UserError } from '../../domain/errors.js';
 
 export function registerPackage(ctx: CliContext): void {
-  const { program, write, packageRuntime, repo, withJournal, withJournalAsync, readJsonFile, assertHuman } = ctx;
-  const assertLead = (journal: Parameters<typeof assertHuman>[0], goalId: string, command: string) => {
-    const state = journal.getGoal(goalId);
-    if (!state) throw new UserError(`Goal not found: ${goalId}`);
-    const handle = process.env.ORCA_TERMINAL_HANDLE;
-    const foreignTerminal =
-      handle &&
-      handle !== state.lead?.ref.terminal &&
-      journal.listGoals().some(
-        goal =>
-          goal.lead?.ref.terminal === handle ||
-          goal.reviewDispatch?.terminal === handle ||
-          Object.values(goal.packages ?? {}).some(item => item.runtimeRef?.terminal === handle) ||
-          journal.events(goal.spec.id).some(event => {
-            if (
-              !['lead-started', 'package-started', 'package-resumed', 'owner-handed-off', 'review-dispatched'].includes(
-                event.type,
-              )
-            )
-              return false;
-            const data = event.data as { terminal?: string; ref?: { terminal?: string } };
-            return (data.ref?.terminal ?? data.terminal) === handle;
-          }),
-      );
-    if (foreignTerminal) throw new UserError(`${command} is Lead only`);
-    assertLeadTerminal(state, handle, command);
-  };
+  const { program, write, packageRuntime, repo, withJournal, withJournalAsync, readJsonFile, assertHuman, assertLead } =
+    ctx;
   const assertLeadOrHuman = (journal: Parameters<typeof assertHuman>[0], goalId: string, command: string) => {
     try {
       assertHuman(journal, command);

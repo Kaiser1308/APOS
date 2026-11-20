@@ -80,6 +80,18 @@ export class HandoffService {
   ): Promise<{ dispatchId: string; warning?: string }> {
     const state = this.store.getGoal(goalId);
     if (!state) throw new Error(`Goal does not exist: ${goalId}`);
+    if (state.handoffIntent?.target.kind === 'bot')
+      throw new UserError(
+        `The transfer of ${goalId}'s Lead to bot ${state.handoffIntent.target.botName} is pending; finish it with \`apos handoff ${goalId} --to-bot ${state.handoffIntent.target.botId}\``,
+      );
+    if (
+      target.kind === 'lead' &&
+      state.leadBot &&
+      !(state.proposal?.mode.startsWith('solo') && ['executing', 'blocked'].includes(state.status) && state.runtimeRef)
+    )
+      throw new UserError(
+        `The Lead of ${goalId} is bot ${state.leadBot.name}; run \`apos handoff ${goalId} --to-apos\` to give it to a fresh APOS Lead`,
+      );
     if ((target.kind === 'lead' || state.handoffIntent?.target.kind === 'lead') && state.proposal?.mode === 'multi-wp')
       writeLeadLog(this.store, goalId, state.lead?.ref.worktreeId);
     const pending = state.handoffIntent;

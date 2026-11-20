@@ -6,7 +6,7 @@ import { OrcaRefused } from '../runtime/orca/exec.js';
 import { worktreePath } from '../runtime/orca/parse.js';
 import { exhaustedAgent, exhaustedNote } from './watch.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
-import type { RuntimeAdapter } from '../ports/runtime.js';
+import type { BotIdentity, RuntimeAdapter } from '../ports/runtime.js';
 import type { RuntimeRef } from '../domain/runtime-refs.js';
 
 /** How long a Lead dispatch may stay unknown before the Human is asked to look in Orca. */
@@ -41,12 +41,22 @@ export function assertLeadTerminal(
   handle: string | undefined,
   command: string,
   cwd: string = process.cwd(),
+  caller?: () => BotIdentity | undefined,
 ): LeadState {
   const lead = state.lead;
   if (!lead)
     throw new Error(
       `${command}: no APOS-dispatched Lead for ${state.spec.id}. The Human runs \`apos lead start ${state.spec.id}\` (or \`goal select\`), and the Lead it starts runs this command.`,
     );
+  if (state.leadBot) {
+    // The bot alone: the stopped Lead's terminal and anything in its worktree no longer speak for the Lead.
+    const bot = caller?.();
+    if (bot?.id !== state.leadBot.id)
+      throw new Error(
+        `${command}: the Lead of ${state.spec.id} is bot ${state.leadBot.name}; run this from that bot's chat, not ${bot ? `bot ${bot.name}` : handle ? `terminal ${handle}` : 'a session outside its chat'}`,
+      );
+    return lead;
+  }
   // Two signals, either enough: Orca's terminal handle, or running inside the Lead's own worktree (the handle format an
   // agent sees in ORCA_TERMINAL_HANDLE is not yet confirmed live against the start receipt).
   const tree = worktreePath(lead.ref.worktreeId);

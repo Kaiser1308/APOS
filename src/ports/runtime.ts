@@ -27,6 +27,17 @@ export type OrcaMessage = {
   dispatch_id?: string;
   dispatchId?: string;
 };
+/** An Orca bot on this computer (`orca bot list`); one can hold a Multi-WP Lead role. */
+export type BotIdentity = { id: string; name: string; paused?: boolean };
+/** A mail to the bot holding a Goal's Lead: `mode` says which phase the Goal is in. */
+export type BotWakeInput = {
+  repoPath: string;
+  goalId: string;
+  bot: BotIdentity;
+  events: string[];
+  mode: 'plan' | 'solo' | 'multi';
+  leadWorktree?: string;
+};
 export type OrcaDelivery = { deliveryId?: string; messages: OrcaMessage[] };
 /** The Lead the controller dispatches when the Human selects a Goal; in Solo it is also the owner. */
 export type HandoffInput = {
@@ -114,6 +125,14 @@ export interface RuntimeAdapter {
   handoff?(input: HandoffInput): Promise<RuntimeRef>;
   /** With `requested` and `baseCommit`, a changed lead profile wakes a fresh agent on the Lead worktree and returns its terminal. */
   wakeLead?(input: WakeInput): Promise<{ dispatchId: string; terminal?: string; requested?: RuntimeProfile }>;
+  /** A bot on this computer by id or name. */
+  findBot?(nameOrId: string): BotIdentity | undefined;
+  /** The bot whose chat runs this process; undefined outside a bot chat; throws when Orca cannot tell. */
+  callerBot?(): BotIdentity | undefined;
+  /** Mails the bot holding a Lead its events (`orca orchestration send --to bot:<id> --type handoff`). */
+  wakeBot?(input: BotWakeInput): Promise<{ messageId?: string }>;
+  /** Information for a bot with nothing to do (`--type status`), such as its Lead role ending. */
+  tellBot?(bot: BotIdentity, subject: string, body: string): Promise<void>;
 }
 export interface PackageRuntime {
   /** `dependencyCommits`: the verified commits of the package's dependencies; its worktree must start from them. */

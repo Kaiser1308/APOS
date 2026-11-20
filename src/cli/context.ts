@@ -11,6 +11,9 @@ import { worktreePath } from '../runtime/orca/parse.js';
 import { controllerHome } from '../store/event-log.js';
 import { ProjectJournal } from '../store/journal.js';
 import { newEvent } from '../app/events.js';
+import { assertLeadTerminal } from '../app/lead.js';
+import { UserError } from '../domain/errors.js';
+import type { LeadState } from '../domain/transitions.js';
 import type { CliOptions } from './options.js';
 
 export type CliContext = {
@@ -25,6 +28,8 @@ export type CliContext = {
   withJournal<T>(fn: (journal: ProjectJournal) => T): T;
   withJournalAsync<T>(fn: (journal: ProjectJournal) => Promise<T>): Promise<T>;
   assertHuman(journal: ProjectJournal, command: string): void;
+  /** The Goal's Lead only: the terminal or worktree APOS dispatched it, or the chat of the bot it moved to. */
+  assertLead(journal: ProjectJournal, goalId: string, command: string): LeadState;
   goalWithSource(file: string, sourcePath: string, origin: string): ReturnType<typeof goalWithSource>;
   readJsonFile(file: string): unknown;
   rolesOf(value: string): Role[];
@@ -134,6 +139,52 @@ export function createContext(program: Command, options: CliOptions): CliContext
     ) {
       throw new Error(`${command} is a Human decision and cannot run from an APOS agent terminal or worktree`);
     }
+    // A bot holding a Lead is an agent too, wherever it runs: its session is told apart through Orca, not its cwd.
+    const leadBots = new Map(
+      journal
+        .listGoals()
+        .filter(state => state.leadBot)
+        .map(state => [state.leadBot!.id, state.spec.id] as const),
+    );
+    if (!leadBots.size || !runtime.callerBot) return;
+    let bot: ReturnType<NonNullable<typeof runtime.callerBot>>;
+    try {
+      bot = runtime.callerBot();
+    } catch (error) {
+      throw new Error(
+        `${command} is a Human decision, a bot holds a Lead here, and Orca could not say whether this session is that bot (${error instanceof Error ? error.message : String(error)}); run it from your own terminal`,
+      );
+    }
+    if (bot && leadBots.has(bot.id))
+      throw new Error(
+        `${command} is a Human decision and cannot run from bot ${bot.name}, which holds the Lead of ${leadBots.get(bot.id)}`,
+      );
+  };
+  const assertLead = (journal: ProjectJournal, goalId: string, command: string): LeadState => {
+    const state = journal.getGoal(goalId);
+    if (!state) throw new UserError(`Goal not found: ${goalId}`);
+    const handle = process.env.ORCA_TERMINAL_HANDLE;
+    const foreignTerminal =
+      handle &&
+      handle !== state.lead?.ref.terminal &&
+      journal.listGoals().some(
+        goal =>
+          goal.lead?.ref.terminal === handle ||
+          goal.reviewDispatch?.terminal === handle ||
+          Object.values(goal.packages ?? {}).some(item => item.runtimeRef?.terminal === handle) ||
+          journal.events(goal.spec.id).some(event => {
+            if (
+              !['lead-started', 'package-started', 'package-resumed', 'owner-handed-off', 'review-dispatched'].includes(
+                event.type,
+              )
+            )
+              return false;
+            const data = event.data as { terminal?: string; ref?: { terminal?: string } };
+            return (data.ref?.terminal ?? data.terminal) === handle;
+          }),
+      );
+    if (foreignTerminal) throw new UserError(`${command} is Lead only`);
+    return assertLeadTerminal(state, handle, command, process.cwd(), () => runtime.callerBot?.());
   };
   const home = () => options.home ?? controllerHome(repo());
   /** `all` or one role, as the profile and handoff commands take it. */
@@ -167,6 +218,7 @@ export function createContext(program: Command, options: CliOptions): CliContext
     withJournal,
     withJournalAsync,
     assertHuman,
+    assertLead,
     goalWithSource,
     readJsonFile,
     rolesOf,

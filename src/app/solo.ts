@@ -39,6 +39,7 @@ export class SoloService {
       throw new Error('Approved Solo proposal required');
     if (state.status === 'executing' && state.runtimeRef) return state.runtimeRef;
     if (state.status !== 'ready') throw new Error('Goal is not ready to dispatch');
+    if (state.leadBot) return this.dispatchOwner(state);
     if (!state.lead || state.lead.settled)
       throw new Error(
         `No running APOS-dispatched Lead owns ${goalId}: the Human runs \`apos lead start ${goalId}\` and that Lead proposes and commits again`,
@@ -46,6 +47,51 @@ export class SoloService {
     const ref = currentLeadRef(state.lead);
     this.record(goalId, 'execution-started', ref);
     return ref;
+  }
+
+  /**
+   * A bot Lead plans and checks but never writes code: its Solo plan gets one owner, started on the Lead's worktree
+   * (cut from the proposal's base commit) with the Solo owner brief. Intent first; a start whose outcome is unknown is
+   * recovered by its key on the next call, never started twice.
+   */
+  private async dispatchOwner(state: GoalState): Promise<RuntimeRef> {
+    const goalId = state.spec.id;
+    const lead = state.lead;
+    if (!lead) throw new Error(`${goalId} has no Lead worktree for its Solo owner`);
+    if (!this.runtime.handoff) throw new Error('Configured runtime cannot start a Solo owner');
+    if (state.dispatchIntent) {
+      const recovered = await this.runtime.recover?.(state.dispatchIntent, lead.ref.runId);
+      if (!recovered) throw new Error('Solo owner dispatch outcome unknown; reconcile Orca before retrying');
+      const ref = { ...recovered, owner: 'lead' as const, worktreeId: recovered.worktreeId ?? lead.ref.worktreeId };
+      this.record(goalId, 'execution-started', { ...ref, baseCommit: ref.baseCommit ?? lead.ref.baseCommit });
+      return ref;
+    }
+    const key = randomUUID();
+    this.record(goalId, 'dispatch-intended', key);
+    let ref: RuntimeRef;
+    try {
+      ref = await this.runtime.handoff({
+        kind: 'solo-owner',
+        role: 'lead',
+        repoPath: lead.ref.repoPath,
+        goalId,
+        goalVersion: state.spec.version,
+        runId: lead.ref.runId,
+        worktreeId: lead.ref.worktreeId,
+        baseCommit: lead.ref.baseCommit,
+        idempotencyKey: key,
+        attempt: 1,
+        budget: this.budget(state, 1),
+        extra: `This Goal's Lead is the Orca bot ${state.leadBot!.name}; it planned and it checks, and you are the only one who writes the code.`,
+      });
+    } catch (error) {
+      if (error instanceof OrcaRefused)
+        this.record(goalId, 'intent-abandoned', { key, reason: `Orca refused: ${error.code}` });
+      throw error;
+    }
+    const owner = { ...ref, owner: 'lead' as const };
+    this.record(goalId, 'execution-started', owner);
+    return owner;
   }
 
   async resume(goalId: string): Promise<RuntimeRef> {

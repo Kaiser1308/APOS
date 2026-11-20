@@ -74,7 +74,7 @@ export class LeadTransferService {
     }
     if (!(await this.stopped(state, from, repoPath))) {
       this.record(goalId, 'intent-abandoned', { key, reason: 'Orca could not confirm the Lead stopped' });
-      throw new Error(
+      throw new UserError(
         `Could not confirm the Lead stopped; check Orca (orca orchestration worker-show --dispatch ${from}) before retrying`,
       );
     }

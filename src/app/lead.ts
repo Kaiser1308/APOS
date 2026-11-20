@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { newEvent } from './events.js';
+import { UserError } from '../domain/errors.js';
 import type { GoalEventType, GoalState, LeadState } from '../domain/transitions.js';
 import { resolve, sep } from 'node:path';
 import { OrcaRefused } from '../runtime/orca/exec.js';
@@ -52,7 +53,7 @@ export function assertLeadTerminal(
     // The bot alone: the stopped Lead's terminal and anything in its worktree no longer speak for the Lead.
     const bot = caller?.();
     if (bot?.id !== state.leadBot.id)
-      throw new Error(
+      throw new UserError(
         `${command}: the Lead of ${state.spec.id} is bot ${state.leadBot.name}; run this from that bot's chat, not ${bot ? `bot ${bot.name}` : handle ? `terminal ${handle}` : 'a session outside its chat'}`,
       );
     return lead;

@@ -7,6 +7,7 @@ import { runCli } from './cli.js';
 import { spec as baseSpec, proposal, sourceText } from './domain/fixtures.test-support.js';
 import { ProjectJournal } from './store/journal.js';
 import { newEvent } from './app/events.js';
+import { UserError } from './domain/errors.js';
 import type { GoalSpec } from './domain/contracts.js';
 import type { WorkPackageSpec } from './domain/packages.js';
 import type { BotIdentity, BotWakeInput, HandoffInput, PackageRuntime, RuntimeAdapter } from './ports/runtime.js';
@@ -314,8 +315,13 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
         t.asBot(() => t.invoke(...args)),
         args.join(' '),
       ).rejects.toThrow(/is a Human decision and cannot run from bot Lead APOS/);
+    await expect(t.asBot(() => t.invoke('goal', 'select', spec.id))).rejects.toBeInstanceOf(UserError);
+    await expect(
+      t.asLead(() => t.invoke('package', 'approve', spec.id, 'WP-02', '--reason', 'old')),
+    ).rejects.toBeInstanceOf(UserError);
     t.setCallerError(new Error('Orca down'));
     await expect(t.invoke('goal', 'select', spec.id)).rejects.toThrow(/could not say whether this session is that bot/);
+    await expect(t.invoke('goal', 'select', spec.id)).rejects.toBeInstanceOf(UserError);
     t.setCallerError(undefined);
     expect(t.journal().goal.leadBot).toMatchObject({ id: BOT.id });
   });

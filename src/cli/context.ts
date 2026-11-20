@@ -151,12 +151,12 @@ export function createContext(program: Command, options: CliOptions): CliContext
     try {
       bot = runtime.callerBot();
     } catch (error) {
-      throw new Error(
+      throw new UserError(
         `${command} is a Human decision, a bot holds a Lead here, and Orca could not say whether this session is that bot (${error instanceof Error ? error.message : String(error)}); run it from your own terminal`,
       );
     }
     if (bot && leadBots.has(bot.id))
-      throw new Error(
+      throw new UserError(
         `${command} is a Human decision and cannot run from bot ${bot.name}, which holds the Lead of ${leadBots.get(bot.id)}`,
       );
   };

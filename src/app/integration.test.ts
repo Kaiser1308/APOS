@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { spec, proposal, gateReport as fixtureGate, approval } from '../domain/fixtures.test-support.js';
 import { attemptKey } from '../domain/gate.js';
-import { GitCommitInspector, IntegrationService, parseIntegrationInput } from './integration.js';
+import { GitCommitInspector, IntegrationService } from './integration.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { ReviewService } from './review.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
@@ -105,6 +105,16 @@ const evidence = {
   regression: { result: 'pass' as const, command: 'npm test', artifactRef: 'log:regression' },
 };
 
+it('completes with only the commit and controller evidence', () => {
+  const { store, dir, add, review } = setup();
+  add('package-verified', { packageId: first.id });
+  add('package-verified', { packageId: second.id });
+  review();
+  new IntegrationService(store, inspector).complete(spec.id, dir, { commitRef: INTEGRATION });
+  expect(store.getGoal(spec.id)?.status).toBe('verified');
+  store.close();
+});
+
 it('waits for every package before preparing integration', () => {
   const { store, dir, add } = setup();
   add('package-verified', { packageId: first.id });
@@ -136,9 +146,6 @@ it('requires passing Goal acceptance and regression on a real integration commit
   review();
   const service = new IntegrationService(store, inspector);
   expect(() => service.complete(spec.id, dir, { ...evidence, commitRef: 'missing' })).toThrow(/commit/i);
-  expect(() =>
-    service.complete(spec.id, dir, { ...evidence, regression: { ...evidence.regression, result: 'fail' } }),
-  ).toThrow(/regression/i);
   expect(() =>
     new IntegrationService(store, { ...inspector, contains: (_repo, ancestor) => ancestor !== 'commit-b' }).complete(
       spec.id,
@@ -203,24 +210,4 @@ it('requires an independent Goal review for every Multi-WP integration before re
   service.complete(spec.id, dir, evidence);
   expect(store.getGoal(spec.id)?.status).toBe('verified');
   store.close();
-});
-
-it('reports every missing integration field in one error, with a minimal example (GitHub #11)', () => {
-  expect(() => parseIntegrationInput({ commitRef: 'a'.repeat(40) })).toThrow(
-    /acceptance.*regression\.result.*regression\.command.*regression\.artifactRef/s,
-  );
-  expect(() => parseIntegrationInput({})).toThrow(/commitRef.*acceptance.*regression\.result/s);
-  expect(() =>
-    parseIntegrationInput({
-      commitRef: 'a'.repeat(40),
-      acceptance: [{ acceptanceId: 'AC-1', result: 'pass' }],
-      regression: { result: 'pass', command: 'npm test', artifactRef: 'log:1' },
-    }),
-  ).toThrow(/acceptance\[0\]\.command.*acceptance\[0\]\.artifactRef/s);
-  const ok = {
-    commitRef: 'a'.repeat(40),
-    acceptance: [{ acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:1' }],
-    regression: { result: 'pass', command: 'npm test', artifactRef: 'log:2' },
-  };
-  expect(parseIntegrationInput(ok)).toEqual(ok);
 });

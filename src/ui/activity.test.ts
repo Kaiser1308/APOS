@@ -1,3 +1,4 @@
+import { newEvent } from '../app/events.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -162,7 +163,7 @@ async function dispatched(worktreeId: (dir: string) => string | undefined = dir 
   dirs.push(home);
   execFileSync('git', ['init', '-q', dir]);
   await initProject(dir);
-  const opened = ProjectJournal.open(dir, home);
+  const opened = ProjectJournal.open(dir, home, newEvent);
   let n = 0;
   const add = (type: GoalEventType, data?: unknown) =>
     opened.journal.append({ id: `EV-${++n}`, goalId: 'GOAL-W', type, data, at: new Date().toISOString() });
@@ -318,7 +319,7 @@ it('includes dispatches created via apos handoff in story owners[].dispatches an
   dirs.push(home);
   execFileSync('git', ['init', '-q', dir]);
   await initProject(dir);
-  const opened = ProjectJournal.open(dir, home);
+  const opened = ProjectJournal.open(dir, home, newEvent);
   let n = 0;
   const baseAt = Date.parse('2026-11-18T03:00:00.000Z');
   const add = (type: GoalEventType, data?: unknown) =>

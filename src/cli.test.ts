@@ -316,17 +316,7 @@ it('runs an approved two-package Goal through dependency release, integration an
       note: 'Checked integrated flow',
     }),
   );
-  await invoke(
-    'integration',
-    'complete',
-    spec.id,
-    '--file',
-    input('integration.json', {
-      commitRef: integrationCommit,
-      acceptance: [{ acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:goal' }],
-      regression: { result: 'pass', command: 'npm test', artifactRef: 'log:regression' },
-    }),
-  );
+  await invoke('integration', 'complete', spec.id, '--commit', integrationCommit);
   await invoke('outcome', 'close', spec.id);
   await invoke('execution', 'status', spec.id);
   expect(output.at(-1)).toContain('closed');

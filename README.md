@@ -272,15 +272,7 @@ The controller then:
 - gates each settled package on its own head against its base: green verifies the package, red sends it back to the same owner with the finding;
 - wakes the Lead's terminal once per batch of new events (package results, owner questions, ready to integrate, a red integration gate), and only after the Lead's previous turn has settled.
 
-A minimal `integration.json` for `apos integration complete <goalId> --file integration.json` (every field is required; `conflictResolution` is needed only when packages touched the same files):
-
-```json
-{
-  "commitRef": "<integration commit sha>",
-  "acceptance": [{ "acceptanceId": "AC-1", "result": "pass", "command": "npm test", "artifactRef": "log:acceptance" }],
-  "regression": { "result": "pass", "command": "npm test", "artifactRef": "log:regression" }
-}
-```
+The Lead integrates each package commit as an ancestor. A sequential chain may use its last package head directly. After a passing Goal review, run `apos integration complete <goalId> --commit <sha>`; add `--conflict-resolution <text>` when packages changed the same files.
 
 Order: the Lead integrates and commits; the controller gates that commit and dispatches the Goal reviewer; on a pass the controller wakes the Lead, who runs `integration complete` (a call before the review passes is refused and names what is missing).
 
@@ -360,7 +352,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `lead propose --file <json>` | Submit an execution proposal. |
 | `lead commit <id>` | Lead only, from its own terminal. Controller checks the plan; Solo: the Lead becomes the owner; Multi-WP: dispatches packages. |
 | `package add --file <json>`, `package revise <goalId> --file <json> --reason <text>` | Multi-WP packages. |
-| `integration prepare <goalId>`, `integration complete <goalId> --file <json>`, `integration merge <goalId> --source <commit> --target <branch>` | Multi-WP integration: prepare, record the integration commit, merge. |
+| `integration prepare <goalId>`, `integration complete <goalId> --commit <sha>`, `integration merge <goalId> --source <commit> --target <branch>` | Multi-WP integration: prepare, record the integration commit, merge. |
 | `controller tick` | One controller pass: reconcile, gate, dispatch, wake. |
 | `controller watch [--interval-ms <n>]` | Continuous loop, inside an Orca terminal (1000 to 300000 ms; default 15000). |
 | `gate run <goalId> --commit <sha> [--base <sha>]` | Run the gate on a specific commit. |
@@ -408,6 +400,7 @@ APOS has run live on real Orca with Codex (`gpt-6.1-terra`): a clean Solo Goal, 
 
 Known limits:
 
+- **Event log compatibility.** Controller-published document milestones are recorded as `documents-published` events with commit and file hashes. Do not roll back to an older version after this event appears in a log; older logs without milestones keep the protected-file guard strict.
 - **Spend is not enforced.** `maxSpendUsd` and `overrunPolicy` are recorded, but there is no price table and an overrun only notifies. The controller never stops a running owner on its own; it only declines to resume it. Only the Human's `apos handoff` stops one.
 - **Multi-WP has run live on a dependent-package trial** (commit `9c7385d`). A dependent chain has not been rerun after subsequent fixes, and a Multi-WP review requesting changes has not been verified live.
 - **The quality pilot did not beat the baseline.** On the SQLFMT task APOS ended with 28/32 target tests against the single-agent baseline's 32/32, and the controller blocked the Goal rather than verify it. The current aim is a smooth controller, not accuracy.

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { ProjectJournal } from './journal.js';
 import { spec, proposal, sourceText, approval } from '../domain/fixtures.test-support.js';
 import { initProject } from '../app/init-project.js';
+import { newEvent } from '../app/events.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
@@ -22,7 +23,7 @@ async function project() {
   execFileSync('git', ['init', '-q', dir]);
   await initProject(dir);
   const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
-  const opened = ProjectJournal.open(dir, home);
+  const opened = ProjectJournal.open(dir, home, newEvent);
   let n = 0;
   const add = (type: GoalEventType, data?: unknown) =>
     opened.journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at });

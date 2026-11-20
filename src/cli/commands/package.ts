@@ -1,9 +1,26 @@
 import { PackageService } from '../../app/package-service.js';
 import { parseWorkPackage } from '../../domain/packages.js';
+import { assertLeadTerminal } from '../../app/lead.js';
 import type { CliContext } from '../context.js';
 
 export function registerPackage(ctx: CliContext): void {
-  const { program, write, packageRuntime, repo, withJournal, withJournalAsync, readJsonFile } = ctx;
+  const { program, write, packageRuntime, repo, withJournal, withJournalAsync, readJsonFile, assertHuman } = ctx;
+  const assertLeadOrHuman = (journal: Parameters<typeof assertHuman>[0], goalId: string, command: string) => {
+    try {
+      assertHuman(journal, command);
+    } catch {
+      const handle = process.env.ORCA_TERMINAL_HANDLE;
+      const workerTerminal = journal
+        .listGoals()
+        .some(goal =>
+          Object.values(goal.packages ?? {}).some(item => item.runtimeRef?.terminal === handle && Boolean(handle)),
+        );
+      if (workerTerminal) throw new Error(`${command}: Lead or Human only`);
+      const state = journal.getGoal(goalId);
+      if (!state) throw new Error(`${command}: Goal not found`);
+      assertLeadTerminal(state, process.env.ORCA_TERMINAL_HANDLE, `${command} (Lead or Human only)`);
+    }
+  };
   const packages = program.command('package');
   packages
     .command('add')
@@ -54,6 +71,7 @@ export function registerPackage(ctx: CliContext): void {
     .requiredOption('--file <json>')
     .action((goalId: string, { file }: { file: string }) =>
       withJournal(journal => {
+        assertLeadOrHuman(journal, goalId, 'package evidence');
         const evidence = new PackageService(journal, packageRuntime()).submitEvidence(goalId, readJsonFile(file));
         write(`Recorded ${evidence.packageId} ${evidence.acceptanceId}`);
       }),
@@ -64,6 +82,7 @@ export function registerPackage(ctx: CliContext): void {
     .argument('<packageId>')
     .action((goalId: string, packageId: string) =>
       withJournalAsync(async journal => {
+        assertLeadOrHuman(journal, goalId, 'package verify');
         const service = new PackageService(journal, packageRuntime());
         await service.verify(goalId, packageId);
         const refs = await service.dispatchReady(goalId, repo());

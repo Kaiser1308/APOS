@@ -1,5 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { applyEvent, type GoalEvent, type GoalEventType, type GoalState } from '../domain/transitions.js';
 import { parseGoalSpec } from '../domain/contracts.js';
 import { sourceDigest } from '../domain/gate.js';
@@ -38,6 +40,7 @@ export class ProjectJournal implements GoalRepository {
     private readonly repoPath: string,
     private readonly store: SqliteStore,
     home?: string,
+    private readonly createEvent?: (goalId: string, type: GoalEventType, data: unknown) => GoalEvent,
   ) {
     assertGitRoot(repoPath);
     this.home = home ?? controllerHome(repoPath);
@@ -46,11 +49,15 @@ export class ProjectJournal implements GoalRepository {
   }
 
   /** Opens the journal with its SQLite index inside the controller home. */
-  static open(repoPath: string, home?: string): { journal: ProjectJournal; close(): void } {
+  static open(
+    repoPath: string,
+    home?: string,
+    createEvent?: (goalId: string, type: GoalEventType, data: unknown) => GoalEvent,
+  ): { journal: ProjectJournal; close(): void } {
     const dir = home ?? controllerHome(repoPath);
     mkdirSync(dir, { recursive: true });
     const store = SqliteStore.open(join(dir, 'state.sqlite'));
-    return { journal: new ProjectJournal(repoPath, store, dir), close: () => store.close() };
+    return { journal: new ProjectJournal(repoPath, store, dir, createEvent), close: () => store.close() };
   }
 
   private rebuildIndex(): void {
@@ -62,6 +69,7 @@ export class ProjectJournal implements GoalRepository {
   }
 
   append(event: GoalEvent): void {
+    if (event.type === 'documents-published') throw new Error('Document milestones are controller-only');
     withLock(this.home, () => this.appendLocked(event));
   }
 
@@ -99,6 +107,8 @@ export class ProjectJournal implements GoalRepository {
   private appendLocked(event: GoalEvent): void {
     this.rebuildIndex();
     if (this.store.hasEvent(event.id)) return;
+    if (MILESTONES.has(event.type) && !this.createEvent)
+      throw new Error('Controller event factory required to publish milestones');
     const next = applyEvent(this.store.getGoal(event.goalId), event);
     this.log.append(event);
     this.store.append(event);
@@ -143,7 +153,19 @@ export class ProjectJournal implements GoalRepository {
         content: `# ${goalId}: controller gate ${gate.result}\n\nBase ${gate.baseCommit} → delivery ${gate.deliveryCommit} (${gate.environment.shell}, ${gate.environment.node})\n\n${gate.checks.map(item => `- ${item.checkId}: **${item.status}** — ${item.reason}${item.newFailures.length ? ` (new: ${item.newFailures.join(', ')})` : ''}`).join('\n')}\n`,
       });
     }
-    commitGoalDocuments(this.repoPath, goalId, docs, message);
+    const commit = commitGoalDocuments(this.repoPath, goalId, docs, message);
+    if (!commit) return;
+    const files: Record<string, string> = {};
+    for (const doc of docs) {
+      const path = `.apos/goals/${goalId}/${doc.path}`;
+      const content = execFileSync('git', ['-C', this.repoPath, 'show', `${commit}:${path}`]);
+      files[path] = createHash('sha256').update(content).digest('hex');
+    }
+    if (!this.createEvent) throw new Error('Controller event factory required to publish milestones');
+    const event = this.createEvent(goalId, 'documents-published', { commit, files });
+    applyEvent(this.store.getGoal(goalId), event);
+    this.log.append(event);
+    this.store.append(event);
   }
 
   /**

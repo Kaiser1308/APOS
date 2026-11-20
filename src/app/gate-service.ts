@@ -23,6 +23,7 @@ import { assertGitRoot } from '../store/project-history.js';
 import { GitCommitInspector } from './integration.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
+import { untrustedProtectedFiles } from './protected-milestones.js';
 
 export type ExecResult = { exitCode: number | null; timedOut: boolean; output: string };
 export interface CommandExecutor {
@@ -250,11 +251,18 @@ export class GateService {
     const current = this.digest(repoPath, goalId);
     if (current !== state.spec.source.sha256)
       throw new Error('Source snapshot changed or missing since approval; revise the Goal before gating');
-    const packageBase = Object.values(state.packages ?? {})
-      .map(item => item.runtimeRef?.baseCommit)
-      .find(Boolean);
-    // The commit the owner's worktree was created from is the truest base; the proposal's is a fallback.
-    const baseCommit = input.baseCommit ?? state.runtimeRef?.baseCommit ?? packageBase ?? state.proposal?.baseCommit;
+    if (
+      phase === 'delivery' &&
+      state.proposal?.mode === 'multi-wp' &&
+      input.baseCommit &&
+      input.baseCommit.toLowerCase() !== state.proposal.baseCommit?.toLowerCase()
+    )
+      throw new Error('Multi-WP integration gate must use the proposal base commit');
+    const baseCommit =
+      input.baseCommit ??
+      (state.proposal?.mode === 'multi-wp'
+        ? state.proposal.baseCommit
+        : (state.runtimeRef?.baseCommit ?? state.proposal?.baseCommit));
     if (!baseCommit) throw new Error('Base commit unknown; record it in the proposal or pass --base');
     for (const [label, ref] of [
       ['base', baseCommit],
@@ -284,7 +292,13 @@ export class GateService {
     };
     const changedFiles = this.inspector.files(repoPath, input.deliveryCommit, baseCommit);
     // After a merge the target legitimately carries APOS milestone commits; the guard applies to deliveries.
-    const guard = phase === 'delivery' ? protectedCheck(goalId, changedFiles) : undefined;
+    const guard =
+      phase === 'delivery'
+        ? protectedCheck(
+            goalId,
+            untrustedProtectedFiles(this.store, goalId, repoPath, input.deliveryCommit, changedFiles),
+          )
+        : undefined;
     if (guard) checks.push(guard);
     const report: GateReport = {
       gateId,

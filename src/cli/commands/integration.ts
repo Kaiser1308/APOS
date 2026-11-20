@@ -1,10 +1,10 @@
-import { IntegrationService, parseIntegrationInput } from '../../app/integration.js';
+import { IntegrationService } from '../../app/integration.js';
 import { MergeService } from '../../app/merge.js';
 import { GateService } from '../../app/gate-service.js';
 import type { CliContext } from '../context.js';
 
 export function registerIntegration(ctx: CliContext): void {
-  const { program, options, write, repo, withJournal, readJsonFile } = ctx;
+  const { program, options, write, repo, withJournal } = ctx;
   const integration = program.command('integration');
   integration
     .command('prepare')
@@ -17,10 +17,11 @@ export function registerIntegration(ctx: CliContext): void {
   integration
     .command('complete')
     .argument('<goalId>')
-    .requiredOption('--file <json>')
-    .action((goalId: string, { file }: { file: string }) =>
+    .requiredOption('--commit <sha>')
+    .option('--conflict-resolution <text>')
+    .action((goalId: string, { commit, conflictResolution }: { commit: string; conflictResolution?: string }) =>
       withJournal(journal => {
-        const input = parseIntegrationInput(readJsonFile(file));
+        const input = { commitRef: commit, conflictResolution };
         const current = journal.getGoal(goalId)?.gate;
         // The controller gates the integration commit itself; a red result wakes the Lead on the next tick.
         if (current?.deliveryCommit !== input.commitRef || current.result !== 'green') {

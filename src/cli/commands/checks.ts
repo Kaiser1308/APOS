@@ -18,6 +18,7 @@ export function registerChecks(ctx: CliContext): void {
     .option('--base <sha>', 'override the proposal base commit')
     .action((goalId: string, { commit, base }: { commit: string; base?: string }) =>
       withJournal(journal => {
+        if (base !== undefined) assertHuman(journal, 'gate run --base');
         const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(goalId, repo(), {
           deliveryCommit: commit,
           baseCommit: base,

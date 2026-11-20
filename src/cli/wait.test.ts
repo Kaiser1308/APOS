@@ -1,3 +1,4 @@
+import { newEvent } from '../app/events.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -28,7 +29,7 @@ async function setupProject(withControllerHeartbeat = true) {
       JSON.stringify({ pid: process.pid, at: new Date().toISOString() }),
     );
   }
-  const opened = ProjectJournal.open(dir, home);
+  const opened = ProjectJournal.open(dir, home, newEvent);
   let n = 0;
   const baseAt = Date.parse('2026-11-18T05:00:00.000Z');
   const add = (type: GoalEventType, data?: unknown, goalId = spec.id) =>

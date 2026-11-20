@@ -67,6 +67,14 @@ export type GoalEventType =
   | 'merge-completed'
   | 'integration-completed'
   | 'package-added'
+  | 'package-plan-added'
+  | 'package-removed'
+  | 'package-dispatch-approved'
+  | 'package-dispatch-held'
+  | 'package-approval-policy-set'
+  | 'package-approval-policy-initialized'
+  | 'package-failure-decided'
+  | 'multi-time-exhausted'
   | 'package-revised'
   | 'package-dispatch-intended'
   | 'package-started'
@@ -93,12 +101,16 @@ export type PackageState = {
   gate?: GateReport;
   finding?: string;
   findings?: string[];
+  dispatchApproved?: boolean;
+  leadDecisionRequired?: boolean;
 };
 export type GoalState = {
   spec: GoalSpec;
   status: GoalStatus;
   approvedGoalVersion?: number;
   selected: boolean;
+  leadApprovalRequired?: boolean;
+  multiTimeExhaustedLimit?: number;
   publishedDocuments?: { commit: string; files: Record<string, string> }[];
   proposal?: ExecutionProposal;
   proposalApprovedVersion?: number;
@@ -274,7 +286,50 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'appetite-set': {
       const data = event.data as { appetite?: unknown; reason?: unknown };
       requireThat(typeof data?.reason === 'string' && data.reason.trim(), 'Appetite change needs the Human reason');
-      return { ...state, appetite: parseAppetite(data.appetite) };
+      const appetite = parseAppetite(data.appetite);
+      return {
+        ...state,
+        appetite,
+        ...(state.appetite?.maxWallMinutes !== appetite.maxWallMinutes ? { multiTimeExhaustedLimit: undefined } : {}),
+      };
+    }
+    case 'multi-time-exhausted': {
+      const data = event.data as { limit?: unknown; reason?: unknown };
+      requireThat(
+        state.proposal?.mode === 'multi-wp' &&
+          typeof data?.limit === 'number' &&
+          data.limit > 0 &&
+          typeof data.reason === 'string' &&
+          data.reason.trim(),
+        'Multi-WP time limit and reason required',
+      );
+      return { ...state, multiTimeExhaustedLimit: data.limit };
+    }
+    case 'package-failure-decided': {
+      const data = event.data as { packageId?: string; decision?: string; reason?: unknown };
+      const item = state.packages?.[data?.packageId ?? ''];
+      requireThat(
+        item?.leadDecisionRequired && typeof data.reason === 'string' && data.reason.trim(),
+        'Package awaiting Lead decision and reason required',
+      );
+      requireThat(['retry', 'hold', 'escalate'].includes(data.decision ?? ''), 'Invalid failure decision');
+      if (data.decision === 'retry')
+        requireThat(item.attempts < attemptLimit(state), 'Human decision required when attempts are exhausted');
+      return {
+        ...state,
+        packages: {
+          ...state.packages,
+          [item.spec.id]: {
+            ...item,
+            leadDecisionRequired: data.decision !== 'retry',
+            ...(data.decision === 'retry' &&
+            item.status === 'blocked' &&
+            item.blocker?.note === 'Retry budget exhausted'
+              ? { status: 'stale' as const, blocker: undefined }
+              : {}),
+          },
+        },
+      };
     }
     case 'proposal-drafted':
     case 'proposal-revised': {
@@ -370,20 +425,124 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(!state.settlements?.[data.dispatchId], 'Worker settlement already recorded');
       return { ...state, settlements: { ...state.settlements, [data.dispatchId]: data.outcome } };
     }
-    case 'package-added': {
+    case 'package-approval-policy-initialized': {
       requireThat(
-        state.status === 'planned' && state.proposal?.mode === 'multi-wp',
+        state.proposal?.mode === 'multi-wp' &&
+          ['ready', 'executing'].includes(state.status) &&
+          state.leadApprovalRequired === undefined,
+        'Uninitialized Multi-WP approval policy required',
+      );
+      const packages = { ...state.packages };
+      for (const item of Object.values(packages)) {
+        const last = item.findings?.at(-1);
+        if (
+          (item.status === 'stale' || item.status === 'blocked') &&
+          (item.gate?.result === 'unverifiable' ||
+            (last && item.findings!.filter(value => value === last).length >= 3) ||
+            item.attempts >= attemptLimit(state))
+        )
+          packages[item.spec.id] = { ...item, leadDecisionRequired: true };
+      }
+      return { ...state, packages, leadApprovalRequired: true };
+    }
+    case 'package-approval-policy-set': {
+      const data = event.data as { enabled?: unknown; reason?: unknown };
+      requireThat(
+        typeof data?.enabled === 'boolean' && typeof data.reason === 'string' && data.reason.trim(),
+        'Approval policy and reason required',
+      );
+      requireThat(
+        state.proposal?.mode === 'multi-wp' && ['ready', 'executing'].includes(state.status),
+        'Active Multi-WP required',
+      );
+      return { ...state, leadApprovalRequired: data.enabled };
+    }
+    case 'package-dispatch-approved':
+    case 'package-dispatch-held': {
+      const data = event.data as { packageId?: string; reason?: unknown };
+      const item = state.packages?.[data?.packageId ?? ''];
+      requireThat(typeof data?.reason === 'string' && data.reason.trim(), 'Lead decision reason required');
+      requireThat(
+        (item?.status === 'specified' || item?.status === 'stale') &&
+          item.spec.dependencies.length &&
+          item.spec.dependencies.every(dep => state.packages?.[dep]?.status === 'verified'),
+        'Dependency-ready package required',
+      );
+      return {
+        ...state,
+        packages: {
+          ...state.packages,
+          [item.spec.id]: { ...item, dispatchApproved: event.type === 'package-dispatch-approved' },
+        },
+      };
+    }
+    case 'package-added':
+    case 'package-plan-added': {
+      requireThat(
+        (event.type === 'package-added'
+          ? state.status === 'planned'
+          : ['planned', 'ready', 'executing'].includes(state.status)) && state.proposal?.mode === 'multi-wp',
         'Draft Multi-WP proposal required before approval',
       );
-      const spec = parseWorkPackage(event.data);
+      const data =
+        event.type === 'package-plan-added' ? (event.data as { spec?: unknown; reason?: unknown }) : undefined;
+      if (data) requireThat(typeof data.reason === 'string' && data.reason.trim(), 'Package addition reason required');
+      const spec = parseWorkPackage(data ? data.spec : event.data);
       requireThat(
         spec.goalId === state.spec.id && spec.goalVersion === state.spec.version,
         'Package Goal version mismatch',
       );
       requireThat(!state.packages?.[spec.id], `Package ${spec.id} already exists`);
+      if (data && state.status !== 'planned')
+        validatePackageGraph(state.spec, state.proposal!, [
+          ...Object.values(state.packages ?? {}).map(item => item.spec),
+          spec,
+        ]);
       return {
         ...state,
         packages: { ...state.packages, [spec.id]: { spec, status: 'specified', evidence: [], attempts: 0 } },
+        ...(data && state.status !== 'planned'
+          ? {
+              gate: undefined,
+              integration: undefined,
+              reviews: state.reviews.filter(review => review.subject !== 'goal'),
+            }
+          : {}),
+      };
+    }
+    case 'package-removed': {
+      const data = event.data as { packageId?: string; reason?: unknown };
+      const item = state.packages?.[data?.packageId ?? ''];
+      requireThat(
+        state.proposal?.mode === 'multi-wp' && ['ready', 'executing'].includes(state.status),
+        'Active Multi-WP required',
+      );
+      requireThat(typeof data?.reason === 'string' && data.reason.trim(), 'Package removal reason required');
+      requireThat(
+        item && !['verified', 'dispatching', 'resuming'].includes(item.status),
+        'Package must be unverified and settled',
+      );
+      requireThat(
+        !item.runtimeRef || state.settlements?.[item.runtimeRef.dispatchId],
+        'Worker settlement must be recorded',
+      );
+      requireThat(
+        !Object.values(state.packages ?? {}).some(other => other.spec.dependencies.includes(item.spec.id)),
+        'Package has dependents',
+      );
+      const packages = { ...state.packages };
+      delete packages[item.spec.id];
+      validatePackageGraph(
+        state.spec,
+        state.proposal,
+        Object.values(packages).map(other => other.spec),
+      );
+      return {
+        ...state,
+        packages,
+        gate: undefined,
+        integration: undefined,
+        reviews: state.reviews.filter(review => review.subject !== 'goal'),
       };
     }
     case 'package-revised': {
@@ -404,11 +563,9 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       );
       requireThat(spec.owner === current.spec.owner, 'Package owner change requires reassignment');
       requireThat(
-        JSON.stringify(spec.scope) === JSON.stringify(current.spec.scope) &&
-          JSON.stringify(spec.exclusions) === JSON.stringify(current.spec.exclusions) &&
-          JSON.stringify(spec.acceptance.map(item => item.goalAcceptanceId)) ===
-            JSON.stringify(current.spec.acceptance.map(item => item.goalAcceptanceId)),
-        'Goal reapproval required for product scope or acceptance mapping change',
+        JSON.stringify(spec.acceptance.map(item => item.goalAcceptanceId)) ===
+          JSON.stringify(current.spec.acceptance.map(item => item.goalAcceptanceId)),
+        'Goal reapproval required for acceptance mapping change',
       );
       const replacement = { ...state.packages, [spec.id]: { ...current, spec } };
       validatePackageGraph(
@@ -429,18 +586,33 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       }
       for (const packageId of affected)
         requireThat(
-          !['dispatching', 'executing'].includes(replacement[packageId].status),
+          !['dispatching', 'resuming'].includes(replacement[packageId].status) &&
+            (replacement[packageId].status !== 'executing' ||
+              Boolean(
+                replacement[packageId].runtimeRef && state.settlements?.[replacement[packageId].runtimeRef!.dispatchId],
+              )),
           'Settle affected Workers before revising contract',
         );
       const packages = { ...replacement };
       for (const packageId of affected) {
         const item = packages[packageId];
-        packages[packageId] = { ...item, status: item.runtimeRef ? 'stale' : 'specified', evidence: [] };
+        packages[packageId] = {
+          ...item,
+          status: item.runtimeRef ? 'stale' : 'specified',
+          evidence: [],
+          ...(state.leadApprovalRequired !== undefined
+            ? {
+                dispatchApproved: undefined,
+                ...(packageId === spec.id ? { attempts: 0, findings: [], leadDecisionRequired: false } : {}),
+              }
+            : {}),
+        };
       }
       return {
         ...state,
         packages,
         integration: undefined,
+        ...(state.leadApprovalRequired !== undefined ? { gate: undefined } : {}),
         evidence: [],
         reviews: state.reviews.filter(review => review.subject === 'package' && !affected.has(review.packageId ?? '')),
       };
@@ -450,6 +622,14 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const data = event.data as { packageId?: string; key?: string };
       const packageState = data && state.packages?.[data.packageId ?? ''];
       requireThat(packageState?.status === 'specified' && data.key, 'Specified package and dispatch key required');
+      requireThat(
+        packageState.spec.dependencies.every(dep => state.packages?.[dep]?.status === 'verified'),
+        'Package dependencies must be verified',
+      );
+      requireThat(
+        !packageState.spec.dependencies.length || state.leadApprovalRequired !== true || packageState.dispatchApproved,
+        'Lead approval required before dependent package dispatch',
+      );
       return {
         ...state,
         packages: {
@@ -488,6 +668,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         item.spec.dependencies.every(dep => state.packages?.[dep]?.status === 'verified'),
         'Package dependencies must be verified',
       );
+      requireThat(!item.leadDecisionRequired, 'Lead decision required before retry');
       return {
         ...state,
         packages: { ...state.packages, [data.packageId!]: { ...item, status: 'resuming', dispatchIntent: data.key } },
@@ -524,6 +705,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
             ...item,
             status: 'blocked',
             blocker: { kind: 'technical', note: 'Retry budget exhausted' },
+            ...(state.leadApprovalRequired !== undefined ? { leadDecisionRequired: true } : {}),
           },
         },
       };
@@ -592,6 +774,12 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
             evidence: [],
             finding,
             findings: [...(item.findings ?? []), data.signature ?? finding],
+            ...((data.report.result === 'unverifiable' ||
+              (item.findings ?? []).filter(value => value === (data.signature ?? finding)).length >= 2 ||
+              item.attempts >= attemptLimit(state)) &&
+            state.leadApprovalRequired !== undefined
+              ? { leadDecisionRequired: true }
+              : {}),
           },
         },
       };

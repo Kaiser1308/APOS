@@ -6,7 +6,7 @@ import {
   watchdog,
   type ControllerTick,
 } from './controller-notices.js';
-import { PackageService } from './package-service.js';
+import { PackageService, reconcileFailureEscalations } from './package-service.js';
 import { SoloService } from './solo.js';
 import { LeadService } from './lead.js';
 import { handingOff } from '../domain/transitions.js';
@@ -238,7 +238,8 @@ export class ControllerService {
         continue;
       }
       if (snapshot.proposal.mode === 'multi-wp') {
-        const service = new PackageService(this.store, this.runtime);
+        reconcileFailureEscalations(this.store, goalId);
+        const service = new PackageService(this.store, this.runtime, this.options.now);
         try {
           for (const item of await service.reconcile(goalId))
             (item.state === 'recovered' ? result.recovered : result.unresolved).push(item.packageId);
@@ -264,6 +265,8 @@ export class ControllerService {
             }
             if (
               item.status !== 'stale' ||
+              item.leadDecisionRequired ||
+              (item.spec.dependencies.length > 0 && state.leadApprovalRequired !== false && !item.dispatchApproved) ||
               !item.spec.dependencies.every(dep => state.packages?.[dep]?.status === 'verified')
             )
               continue;

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
+import { spec, proposal, approval, gateReport } from '../domain/fixtures.test-support.js';
 import { PackageService } from './package-service.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
 import { ReviewService } from './review.js';
@@ -81,7 +81,7 @@ class FakeRuntime implements PackageRuntime {
   }
   async resumePackage(input: { package: WorkPackageSpec; prior: Awaited<ReturnType<PackageRuntime['startPackage']>> }) {
     this.resumes.push(input.package.id);
-    return { ...input.prior, dispatchId: `ctx-resumed-${input.package.id}` };
+    return { ...input.prior, dispatchId: `ctx-resumed-${input.package.id}-${this.resumes.length}` };
   }
 }
 
@@ -140,8 +140,167 @@ describe('package scheduling', () => {
       commitRef: 'abc123',
     });
     await service.verify(spec.id, a.id);
+    expect(service.ready(spec.id)).toEqual([]);
+    service.holdDispatch(spec.id, b.id, 'Wait for review');
+    expect(service.ready(spec.id)).toEqual([]);
+    service.setApprovalPolicy(spec.id, false, 'No further review needed');
+    expect(service.ready(spec.id).map(item => item.id)).toEqual([b.id]);
+    service.setApprovalPolicy(spec.id, true, 'Require review again');
+    expect(service.ready(spec.id)).toEqual([]);
+    service.approveDispatch(spec.id, b.id, 'The prerequisite is ready');
     expect(service.ready(spec.id).map(item => item.id)).toEqual(['WP-02']);
     store.close();
+  });
+  it('preserves verified packages when the Lead adds and removes settled work', async () => {
+    const { store, dir } = fixture();
+    const runtime = new FakeRuntime();
+    const service = new PackageService(store, runtime);
+    service.add(spec.id, a);
+    service.add(spec.id, b);
+    approve(store);
+    await service.dispatchReady(spec.id, dir);
+    service.submitEvidence(spec.id, {
+      packageId: a.id,
+      packageVersion: 1,
+      owner: a.owner,
+      acceptanceId: 'WP-AC-1',
+      result: 'pass',
+      command: 'test',
+      artifactRef: 'log',
+      commitRef: 'abc',
+    });
+    await service.verify(spec.id, a.id);
+    const extra = { ...b, id: 'WP-03', dependencies: ['WP-01'] };
+    service.add(spec.id, extra, 'Split remaining work');
+    expect(() => service.remove(spec.id, a.id, 'Remove verified')).toThrow(/unverified/);
+    service.approveDispatch(spec.id, b.id, 'Ready to run');
+    await service.dispatchReady(spec.id, dir);
+    const dispatchId = store.getGoal(spec.id)!.packages![b.id].runtimeRef!.dispatchId;
+    expect(() => service.remove(spec.id, b.id, 'Still running')).toThrow(/settlement/);
+    store.append({
+      id: 'settled-b',
+      goalId: spec.id,
+      type: 'worker-settled',
+      data: { dispatchId, outcome: 'failed' },
+      at: '2026-11-07T00:01:00.000Z',
+    });
+    service.remove(spec.id, b.id, 'Replace failed work');
+    expect(store.getGoal(spec.id)?.packages?.[a.id].status).toBe('verified');
+    expect(store.getGoal(spec.id)?.packages?.[b.id]).toBeUndefined();
+    expect(
+      store
+        .events(spec.id)
+        .filter(event => ['package-plan-added', 'package-removed'].includes(event.type))
+        .map(event => (event.data as { reason: string }).reason),
+    ).toEqual(['Split remaining work', 'Replace failed work']);
+    store.close();
+  });
+  it('stops new work at wall time until the Human raises the appetite', async () => {
+    const { store, dir } = fixture();
+    const runtime = new FakeRuntime();
+    const service = new PackageService(store, runtime, () => Date.parse('2026-11-07T05:00:00.000Z'));
+    store.append({
+      id: 'lead-intent',
+      goalId: spec.id,
+      type: 'lead-dispatch-intended',
+      data: 'lead-key',
+      at: '2026-11-07T00:00:00.000Z',
+    });
+    service.add(spec.id, a);
+    service.add(spec.id, b);
+    approve(store);
+    expect(await service.dispatchReady(spec.id, dir)).toEqual([]);
+    expect(await service.dispatchReady(spec.id, dir)).toEqual([]);
+    expect(store.events(spec.id).filter(event => event.type === 'multi-time-exhausted')).toHaveLength(1);
+    expect(store.events(spec.id).some(event => event.type === 'human-notified')).toBe(true);
+    store.append({
+      id: 'extend-time',
+      goalId: spec.id,
+      type: 'appetite-set',
+      data: { appetite: { ...approval.appetite, maxWallMinutes: 600 }, reason: 'Allow more time' },
+      at: '2026-11-07T05:01:00.000Z',
+    });
+    await service.dispatchReady(spec.id, dir);
+    expect(runtime.starts).toEqual([a.id]);
+    store.close();
+  });
+  it('routes an exhausted failure to the Lead and resets attempts for a revised version', async () => {
+    const { store, dir } = fixture([], 1);
+    const runtime = new FakeRuntime();
+    const service = new PackageService(store, runtime);
+    service.add(spec.id, a);
+    service.add(spec.id, b);
+    approve(store);
+    await service.dispatchReady(spec.id, dir);
+    const ref = store.getGoal(spec.id)!.packages![a.id].runtimeRef!;
+    store.append({
+      id: 'settled-a',
+      goalId: spec.id,
+      type: 'worker-settled',
+      data: { dispatchId: ref.dispatchId, outcome: 'completed' },
+      at: '2026-11-07T00:01:00.000Z',
+    });
+    store.append({
+      id: 'red-a',
+      goalId: spec.id,
+      type: 'package-gate-recorded',
+      data: {
+        packageId: a.id,
+        report: { ...gateReport(undefined, 'red'), attemptKey: 'WP-01@1:1' },
+        signature: 'same-failure',
+      },
+      at: '2026-11-07T00:02:00.000Z',
+    });
+    expect(store.getGoal(spec.id)?.packages?.[a.id].leadDecisionRequired).toBe(true);
+    await expect(service.resumeStale(spec.id, a.id)).rejects.toThrow(/Lead decision/);
+    expect(() => service.decideFailure(spec.id, a.id, 'retry', 'Try again')).toThrow(/Human decision/);
+    service.decideFailure(spec.id, a.id, 'escalate', 'Needs more attempts');
+    expect(store.events(spec.id).some(event => event.type === 'human-notified')).toBe(true);
+    service.revise(spec.id, { ...a, version: 2, scope: ['updated implementation'] }, 'Change approach');
+    expect(store.getGoal(spec.id)?.packages?.[a.id].attempts).toBe(0);
+    await service.resumeStale(spec.id, a.id);
+    expect(store.getGoal(spec.id)?.packages?.[a.id].attempts).toBe(1);
+    store.close();
+  });
+  it('routes three identical failures and an unverifiable gate to the Lead before the Human', async () => {
+    for (const result of ['red', 'unverifiable'] as const) {
+      const { store, dir } = fixture([], 5);
+      const service = new PackageService(store, new FakeRuntime());
+      service.add(spec.id, a);
+      service.add(spec.id, b);
+      approve(store);
+      await service.dispatchReady(spec.id, dir);
+      const count = result === 'red' ? 3 : 1;
+      for (let n = 1; n <= count; n++) {
+        const ref = store.getGoal(spec.id)!.packages![a.id].runtimeRef!;
+        store.append({
+          id: `settled-${n}`,
+          goalId: spec.id,
+          type: 'worker-settled',
+          data: { dispatchId: ref.dispatchId, outcome: 'completed' },
+          at: '2026-11-07T00:01:00.000Z',
+        });
+        store.append({
+          id: `gate-${n}`,
+          goalId: spec.id,
+          type: 'package-gate-recorded',
+          data: {
+            packageId: a.id,
+            report: { ...gateReport(undefined, result), attemptKey: `WP-01@1:${n}` },
+            signature: 'same',
+          },
+          at: '2026-11-07T00:02:00.000Z',
+        });
+        if (n < count) await service.resumeStale(spec.id, a.id);
+      }
+      expect(store.getGoal(spec.id)?.packages?.[a.id].leadDecisionRequired).toBe(true);
+      expect(store.events(spec.id).some(event => event.type === 'human-notified')).toBe(false);
+      await expect(service.resumeStale(spec.id, a.id)).rejects.toThrow(/Lead decision/);
+      service.decideFailure(spec.id, a.id, 'retry', 'A different repair is available');
+      await service.resumeStale(spec.id, a.id);
+      expect(store.events(spec.id).some(event => event.type === 'package-failure-decided')).toBe(true);
+      store.close();
+    }
   });
   it('starts a dependent package from its verified dependency commits (seen live: it started without them)', async () => {
     const { store, dir } = fixture();
@@ -162,6 +321,7 @@ describe('package scheduling', () => {
       commitRef: 'abc123',
     });
     await service.verify(spec.id, a.id);
+    service.approveDispatch(spec.id, b.id, 'Dependency verified');
     await service.dispatchReady(spec.id, dir);
     expect(runtime.deps.get('WP-01')).toEqual([]);
     expect(runtime.deps.get('WP-02')).toEqual(['abc123']);
@@ -259,6 +419,7 @@ describe('package scheduling', () => {
       note: 'Checked diff and tests',
     });
     await service.verify(spec.id, a.id);
+    service.approveDispatch(spec.id, b.id, 'Review accepted');
     expect(service.ready(spec.id).map(item => item.id)).toEqual([b.id]);
     store.close();
   });
@@ -314,6 +475,7 @@ describe('package scheduling', () => {
       commitRef: 'abc123',
     });
     await service.verify(spec.id, a.id);
+    service.approveDispatch(spec.id, b.id, 'Dependency verified');
     await service.dispatchReady(spec.id, dir);
     service.submitEvidence(spec.id, {
       packageId: b.id,
@@ -343,16 +505,21 @@ describe('package scheduling', () => {
     await expect(service.resumeStale(spec.id, b.id)).rejects.toThrow(/dependencies/i);
     store.close();
   });
-  it('rejects a package revision that changes the approved product scope or owner', () => {
+  it('allows package scope changes but protects Goal acceptance mapping and owner', () => {
     const { store } = fixture();
     const service = new PackageService(store, new FakeRuntime());
     service.add(spec.id, a);
     service.add(spec.id, b);
     approve(store);
-    expect(() => service.revise(spec.id, { ...a, version: 2, scope: ['new product area'] }, 'Expand scope')).toThrow(
-      /Goal reapproval/i,
-    );
-    expect(() => service.revise(spec.id, { ...a, version: 2, owner: 'another-worker' }, 'Change owner')).toThrow(
+    service.revise(spec.id, { ...a, version: 2, scope: ['new implementation area'] }, 'Change implementation scope');
+    expect(() =>
+      service.revise(
+        spec.id,
+        { ...a, version: 3, acceptance: [{ ...a.acceptance[0], goalAcceptanceId: undefined }] },
+        'Remove mapping',
+      ),
+    ).toThrow(/acceptance mapping/i);
+    expect(() => service.revise(spec.id, { ...a, version: 3, owner: 'another-worker' }, 'Change owner')).toThrow(
       /owner/i,
     );
     store.close();

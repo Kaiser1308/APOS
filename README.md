@@ -264,13 +264,17 @@ The **appetite** (`size`, `maxSpendUsd`, `maxWallMinutes`, `maxAttempts`, `overr
 
 ### Multi-WP
 
-The Lead adds packages (`package add --file wp.json`). Each names its owner, dependencies, versioned interfaces and local acceptance, optionally with `checkIds` from the Goal's checks. Then the Lead runs `lead commit GOAL-001` from its own terminal. APOS already knows that terminal from the Lead's dispatch and wakes it there (`--terminal` is no longer needed; if given, it must match). The Lead reports `worker_done` and ends its turn once the packages are dispatched.
+The Lead adds packages (`package add --file wp.json --reason "..."`). Each names its owner, dependencies, versioned interfaces and local acceptance, optionally with `checkIds` from the Goal's checks. Then the Lead runs `lead commit GOAL-001` from its own terminal. APOS already knows that terminal from the Lead's dispatch and wakes it there (`--terminal` is no longer needed; if given, it must match). The Lead reports `worker_done` and ends its turn once the packages are dispatched.
 
 The controller then:
 
-- dispatches packages as their dependencies are verified;
+- dispatches root packages at plan commit; by default each dependency-ready package waits for `package approve <goalId> <packageId> --reason <text>` or `package hold ... --reason <text>` from the Lead;
 - gates each settled package on its own head against its base: green verifies the package, red sends it back to the same owner with the finding;
 - wakes the Lead's terminal once per batch of new events (package results, owner questions, ready to integrate, a red integration gate), and only after the Lead's previous turn has settled.
+
+The Lead can change that default with `package approval-policy <goalId> on|off --reason <text>`, add work with `package add --file <json> --reason <text>`, or remove a settled, unverified package with no dependents using `package remove <goalId> <packageId> --reason <text>`. `package revise` may change implementation scope while preserving Goal acceptance mapping; a new version resets its attempt count. Repeated or unverifiable failures await `package decide-failure <goalId> <packageId> retry|hold|escalate --reason <text>` by the Lead; only the Human can increase the attempt appetite. Each decision is recorded in the hash-chained event log, and a fresh Lead gets a generated `.apos/goals/<id>/lead-log.md` reading copy that must not be committed. Do not roll back to an older version after coordination events are recorded: an older controller cannot enforce them. Goals from older logs get the default approval policy when the controller next schedules them.
+
+Multi-WP uses `maxWallMinutes` from the first Lead dispatch: after the limit the controller records a needs-decision and starts no new package, retry, Lead wake, reviewer or handoff. Running workers are not killed; the Human may increase the limit through `goal appetite`.
 
 The Lead integrates each package commit as an ancestor. A sequential chain may use its last package head directly. After a passing Goal review, run `apos integration complete <goalId> --commit <sha>`; add `--conflict-resolution <text>` when packages changed the same files.
 
@@ -351,7 +355,8 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `handoff <goalId> [--package <id> | --reviewer] [--agent <id> [--model] [--effort]]` | **Human.** Move a stuck owner (for example out of quota) to a fresh agent on the same worktree; no attempt spent. |
 | `lead propose --file <json>` | Submit an execution proposal. |
 | `lead commit <id>` | Lead only, from its own terminal. Controller checks the plan; Solo: the Lead becomes the owner; Multi-WP: dispatches packages. |
-| `package add --file <json>`, `package revise <goalId> --file <json> --reason <text>` | Multi-WP packages. |
+| `package add --file <json> --reason <text>`, `package revise <goalId> --file <json> --reason <text>`, `package remove <goalId> <packageId> --reason <text>` | Lead manages Multi-WP packages. |
+| `package approve/hold <goalId> <packageId> --reason <text>`, `package approval-policy <goalId> on\|off --reason <text>`, `package decide-failure <goalId> <packageId> retry\|hold\|escalate --reason <text>` | Lead records scheduling and failure decisions. |
 | `integration prepare <goalId>`, `integration complete <goalId> --commit <sha>`, `integration merge <goalId> --source <commit> --target <branch>` | Multi-WP integration: prepare, record the integration commit, merge. |
 | `controller tick` | One controller pass: reconcile, gate, dispatch, wake. |
 | `controller watch [--interval-ms <n>]` | Continuous loop, inside an Orca terminal (1000 to 300000 ms; default 15000). |

@@ -39,7 +39,7 @@ function fixture(extra: (add: (type: GoalEventType, data?: unknown) => void, dir
     owner: 'lead',
     repoPath: dir,
     terminal: 'term-lead',
-    worktreeId: 'repo::wt',
+    worktreeId: `repo::${dir}`,
     baseCommit: 'b'.repeat(40),
   });
   extra(add, dir);

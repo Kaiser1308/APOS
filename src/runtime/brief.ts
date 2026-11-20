@@ -216,7 +216,7 @@ export function leadWakeBrief(input: {
     ...input.events.map((item, index) => `(${index + 1}) ${oneLine(item)}`),
     planning
       ? `Continue under ${roleSkill('lead')} with what you already know: revise and resubmit with ${aposCommand(input.repoPath)} lead propose / lead commit ${input.goalId}. Solo: once accepted, deliver in this same turn as your first brief said. Report worker_done exactly once.`
-      : `Handle them under ${roleSkill('lead')}: answer within the approved Goal, revise packages or integrate, then report worker_done once and end your turn.`,
+      : `Read .apos/goals/${input.goalId}/lead-log.md, a generated reading copy of the event log; do not commit it. Handle events under ${roleSkill('lead')}: answer within the approved Goal, revise packages or integrate, then report worker_done once and end your turn.`,
     `${repoMarker(input.repoPath)} APOS dispatch key: ${input.idempotencyKey}.`,
   ].join(' ');
 }
@@ -255,7 +255,7 @@ export function handoffBrief(
       `You are the owner of the accepted Solo plan (.apos/goals/${goal}/execution.md). Deliver in this worktree under ${CORE_SKILL}: recheck every acceptance criterion and commit your delivery report at ${soloReportPath(goal, input.attempt)}; the controller runs every Goal check itself on your final commit.`,
     ],
     'lead-multi': [
-      `You are the Lead of this Multi-WP Goal; its packages run in their own worktrees. See where they stand with ${apos} package list ${goal}, handle what is pending under the lead skill (answer within the approved Goal, revise packages or integrate), then report worker_done once and end your turn; APOS wakes you here when there is work.`,
+      `You are the Lead of this Multi-WP Goal; its packages run in their own worktrees. Read .apos/goals/${goal}/lead-log.md, a generated reading copy of the event log; do not commit it. See where they stand with ${apos} package list ${goal}, handle what is pending under the lead skill (answer within the approved Goal, revise packages or integrate), then report worker_done once and end your turn; APOS wakes you here when there is work.`,
     ],
     worker: [
       `Contract: .apos/goals/${goal}/goal.md, source.md, execution.md and packages/${input.packageId}.md (v${input.packageVersion}). Ownership: ${input.owner} owns this Work Package end to end; deliver ${input.outcome}.`,

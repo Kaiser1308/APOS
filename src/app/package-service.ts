@@ -14,25 +14,77 @@ import { OrcaRefused } from '../runtime/orca/exec.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { PackageRuntime } from '../ports/runtime.js';
 import type { PackageRuntimeRef } from '../domain/runtime-refs.js';
+import { multiWallTimeExpired } from './multi-budget.js';
 
 export class PackageService {
   constructor(
     private readonly store: GoalRepository,
     private readonly runtime: PackageRuntime,
+    private readonly now: () => number = Date.now,
   ) {}
 
   private record(goalId: string, type: GoalEventType, data: unknown): void {
     this.store.append(newEvent(goalId, type, data));
   }
 
-  add(goalId: string, value: unknown): WorkPackageSpec {
+  private initializePolicy(goalId: string): void {
+    const state = this.store.getGoal(goalId);
+    if (
+      state?.proposal?.mode === 'multi-wp' &&
+      ['ready', 'executing'].includes(state.status) &&
+      state.leadApprovalRequired === undefined
+    )
+      this.record(goalId, 'package-approval-policy-initialized', {
+        enabled: true,
+        reason: 'Default Lead approval for dependent packages',
+      });
+  }
+
+  add(goalId: string, value: unknown, reason?: string): WorkPackageSpec {
     const spec = parseWorkPackage(value);
-    this.record(goalId, 'package-added', spec);
+    const state = this.store.getGoal(goalId);
+    if (state?.status !== 'planned') this.initializePolicy(goalId);
+    this.record(
+      goalId,
+      state?.status === 'planned' && reason === undefined ? 'package-added' : 'package-plan-added',
+      state?.status === 'planned' && reason === undefined ? spec : { spec, reason },
+    );
     return spec;
+  }
+
+  remove(goalId: string, packageId: string, reason: string): void {
+    this.initializePolicy(goalId);
+    this.record(goalId, 'package-removed', { packageId, reason });
+  }
+
+  approveDispatch(goalId: string, packageId: string, reason: string): void {
+    this.initializePolicy(goalId);
+    this.record(goalId, 'package-dispatch-approved', { packageId, reason });
+  }
+
+  holdDispatch(goalId: string, packageId: string, reason: string): void {
+    this.initializePolicy(goalId);
+    this.record(goalId, 'package-dispatch-held', { packageId, reason });
+  }
+
+  setApprovalPolicy(goalId: string, enabled: boolean, reason: string): void {
+    this.initializePolicy(goalId);
+    this.record(goalId, 'package-approval-policy-set', { enabled, reason });
+  }
+
+  decideFailure(goalId: string, packageId: string, decision: 'retry' | 'hold' | 'escalate', reason: string): void {
+    this.initializePolicy(goalId);
+    this.record(goalId, 'package-failure-decided', { packageId, decision, reason });
+    reconcileFailureEscalations(this.store, goalId);
+  }
+
+  outOfTime(goalId: string): boolean {
+    return multiWallTimeExpired(this.store, goalId, this.now);
   }
 
   revise(goalId: string, value: unknown, reason: string): WorkPackageSpec {
     const spec = parseWorkPackage(value);
+    this.initializePolicy(goalId);
     this.record(goalId, 'package-revised', { spec, reason });
     return spec;
   }
@@ -74,11 +126,16 @@ export class PackageService {
   }
 
   async resumeStale(goalId: string, packageId: string): Promise<PackageRuntimeRef> {
+    this.initializePolicy(goalId);
     const state = this.store.getGoal(goalId);
     const item = state?.packages?.[packageId];
     if (item?.status !== 'stale' || !item.runtimeRef) throw new Error('Stale package with prior owner required');
+    if (this.outOfTime(goalId)) throw new Error('Multi-WP wall time exhausted; Human decision required');
+    if (item.leadDecisionRequired) throw new Error('Lead decision required before retry');
     if (!item.spec.dependencies.every(dep => state?.packages?.[dep]?.status === 'verified'))
       throw new Error('Package dependencies are not verified');
+    if (item.spec.dependencies.length && state?.leadApprovalRequired !== false && !item.dispatchApproved)
+      throw new Error('Lead approval required before dependent package resume');
     if (state && item.attempts >= attemptLimit(state)) {
       this.record(goalId, 'package-retry-exhausted', { packageId });
       throw new Error('Package retry budget exhausted; Lead decision required');
@@ -126,12 +183,15 @@ export class PackageService {
       .filter(
         item =>
           item.status === 'specified' &&
+          (!item.spec.dependencies.length || state.leadApprovalRequired === false || item.dispatchApproved) &&
           item.spec.dependencies.every(dep => state.packages?.[dep]?.status === 'verified'),
       )
       .map(item => item.spec);
   }
 
   async dispatchReady(goalId: string, repoPath: string): Promise<PackageRuntimeRef[]> {
+    this.initializePolicy(goalId);
+    if (this.outOfTime(goalId)) return [];
     const ready = this.ready(goalId);
     const packages = this.store.getGoal(goalId)?.packages ?? {};
     const wave = ready.map(spec => {
@@ -173,5 +233,28 @@ export class PackageService {
       } else results.push({ packageId, state: 'unknown' });
     }
     return results;
+  }
+}
+
+/** Recover notification if a process stopped between a Lead escalation and its inbox event. */
+export function reconcileFailureEscalations(store: GoalRepository, goalId: string): void {
+  const events = store.events(goalId);
+  const notified = new Set(
+    events
+      .filter(event => event.type === 'human-notified')
+      .map(event => (event.data as { decisionId?: string }).decisionId),
+  );
+  for (const event of events.filter(event => event.type === 'package-failure-decided')) {
+    const data = event.data as { packageId: string; decision: string; reason: string };
+    if (data.decision === 'escalate' && !notified.has(event.id))
+      store.append(
+        newEvent(goalId, 'human-notified', {
+          kind: 'needs-decision',
+          goalId,
+          packageId: data.packageId,
+          decisionId: event.id,
+          note: data.reason,
+        }),
+      );
   }
 }

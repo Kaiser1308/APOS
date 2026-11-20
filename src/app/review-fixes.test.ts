@@ -49,7 +49,7 @@ const leadRef = (dir: string) => ({
   dispatchId: 'ctx_lead',
   repoPath: dir,
   terminal: 'term_lead',
-  worktreeId: 'repo::C:/lead',
+  worktreeId: `repo::${dir}`,
   baseCommit: BASE,
   requested: { agent: 'codex' },
 });
@@ -119,7 +119,7 @@ describe('Critical 1: a handed-off Multi-WP Lead is watched, retained and woken 
         owner: 'lead',
         repoPath: dir,
         terminal: 'term_9',
-        worktreeId: 'repo::C:/lead',
+        worktreeId: `repo::${dir}`,
         baseCommit: BASE,
         requested: { agent: 'claude' },
       },

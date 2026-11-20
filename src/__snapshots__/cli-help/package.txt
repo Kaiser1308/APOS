@@ -1,10 +1,15 @@
 Usage: apos package [options] [command]
 
 Options:
-  -h, --help                              display help for command
+  -h, --help                                                display help for command
 
 Commands:
   add [options]
+  remove [options] <goalId> <packageId>
+  approve [options] <goalId> <packageId>
+  hold [options] <goalId> <packageId>
+  approval-policy [options] <goalId> <enabled>
+  decide-failure [options] <goalId> <packageId> <decision>
   list <goalId>
   ready <goalId>
   dispatch <goalId>
@@ -15,4 +20,4 @@ Commands:
   block [options] <goalId> <packageId>
   unblock [options] <goalId> <packageId>
   resume <goalId> <packageId>
-  help [command]                          display help for command
+  help [command]                                            display help for command

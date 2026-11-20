@@ -6,6 +6,8 @@ import { reviewReasons } from '../domain/reviews.js';
 import { OrcaRefused } from '../runtime/orca/exec.js';
 import { handoffRole, packageReportPath } from '../runtime/brief.js';
 import { clockStart } from './lead.js';
+import { writeLeadLog } from './lead-log.js';
+import { multiWallTimeExpired } from './multi-budget.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { HandoffInput, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type {
@@ -77,8 +79,12 @@ export class HandoffService {
   ): Promise<{ dispatchId: string; warning?: string }> {
     const state = this.store.getGoal(goalId);
     if (!state) throw new Error(`Goal does not exist: ${goalId}`);
+    if ((target.kind === 'lead' || state.handoffIntent?.target.kind === 'lead') && state.proposal?.mode === 'multi-wp')
+      writeLeadLog(this.store, goalId, state.lead?.ref.worktreeId);
     const pending = state.handoffIntent;
     if (pending) return this.resumePending(state, pending, repoPath);
+    if (multiWallTimeExpired(this.store, goalId))
+      throw new Error('Multi-WP wall time exhausted; Human decision required before handoff');
 
     const busy = state.resumeIntent
       ? 'resume'
@@ -132,6 +138,8 @@ export class HandoffService {
       });
       return { dispatchId: found.dispatchId };
     }
+    if (multiWallTimeExpired(this.store, goalId))
+      throw new Error('Multi-WP wall time exhausted; Human decision required before handoff');
     if (!(await this.stopped(plan, repoPath)))
       throw new Error(
         `The handoff of ${goalId} is pending and Orca cannot confirm the old agent stopped; check Orca (orca orchestration worker-show --dispatch ${pending.from}), then \`apos execution abandon-intent ${goalId} --key ${pending.key} --reason ...\` if nothing started`,

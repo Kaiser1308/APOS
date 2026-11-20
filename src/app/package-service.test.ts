@@ -9,6 +9,7 @@ import type { WorkPackageSpec } from '../domain/packages.js';
 import { ReviewService } from './review.js';
 import type { PackageRuntime } from '../ports/runtime.js';
 import { applyEvent } from '../domain/transitions.js';
+import { attemptKey } from '../domain/gate.js';
 import { GateService } from './gate-service.js';
 
 const a: WorkPackageSpec = {
@@ -247,6 +248,58 @@ describe('package scheduling', () => {
     expect(() =>
       applyEvent(running, event('package-revised', { spec: { ...b, version: 2 }, reason: 'Revise' })),
     ).toThrow(/review.*pending/i);
+    store.close();
+  });
+  it('keeps a pending Goal review collectable when the Lead tries to change the plan after the gate', async () => {
+    const { store, dir } = fixture();
+    const service = new PackageService(store, new FakeRuntime());
+    const independent = { ...b, dependencies: [] };
+    service.add(spec.id, a);
+    service.add(spec.id, independent);
+    approve(store);
+    await service.dispatchReady(spec.id, dir);
+    for (const [item, commitRef] of [
+      [a, 'a'.repeat(40)],
+      [independent, 'b'.repeat(40)],
+    ] as const) {
+      service.submitEvidence(spec.id, {
+        packageId: item.id,
+        packageVersion: 1,
+        owner: item.owner,
+        acceptanceId: item.acceptance[0].id,
+        result: 'pass',
+        command: 'test',
+        artifactRef: 'log',
+        commitRef,
+      });
+      await service.verify(spec.id, item.id);
+    }
+    const delivery = 'd'.repeat(40);
+    store.append({
+      id: 'goal-gate',
+      goalId: spec.id,
+      type: 'gate-recorded',
+      data: { ...gateReport(delivery), attemptKey: attemptKey(store.getGoal(spec.id)!) },
+      at: '2026-11-07T00:02:00.000Z',
+    });
+    store.append({
+      id: 'goal-review-intent',
+      goalId: spec.id,
+      type: 'review-intended',
+      data: { key: 'goal-review', commit: delivery },
+      at: '2026-11-07T00:03:00.000Z',
+    });
+    expect(() => service.add(spec.id, { ...b, id: 'WP-03', dependencies: [] }, 'Add late work')).toThrow(
+      /review pending/i,
+    );
+    expect(() => service.revise(spec.id, { ...independent, version: 2 }, 'Revise during review')).toThrow(
+      /review pending/i,
+    );
+    expect(() => service.remove(spec.id, independent.id, 'Remove during review')).toThrow(/review pending/i);
+    const state = store.getGoal(spec.id)!;
+    expect(state.gate?.deliveryCommit).toBe(delivery);
+    expect(state.reviewIntent?.key).toBe('goal-review');
+    expect(Object.values(state.packages!).map(item => item.status)).toEqual(['verified', 'verified']);
     store.close();
   });
   it('stops new work at wall time until the Human raises the appetite', async () => {

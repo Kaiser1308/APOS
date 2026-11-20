@@ -19,6 +19,7 @@ import { GitCommitInspector, IntegrationService } from './integration.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { SupervisorOptions } from './solo-supervisor.js';
+import { gateSettledLead, reviewRun } from './multi-lead-gate.js';
 
 /**
  * The controller's loop for a Multi-WP Goal: gate each settled package on its own head, send red
@@ -140,6 +141,9 @@ export class MultiSupervisor {
         events.push(`package ${tag} needs a decision: ${latest.finding}`);
       } else events.push(`package ${tag} red, returned to its owner: ${latest.finding}`);
     }
+    actions.push(
+      ...(await gateSettledLead(this.store, this.runtime, this.gate, goalId, repoPath, this.options.inspector)),
+    );
     actions.push(...(await this.goalReview(goalId, repoPath, events)));
     state = this.store.getGoal(goalId)!;
     // Derived from the recorded review, not from the tick that read it: a wake Orca refuses is retried.
@@ -155,7 +159,7 @@ export class MultiSupervisor {
     if (verdict)
       events.push(
         verdict.result === 'pass'
-          ? `Goal review passed on ${verdict.commitRef}: submit the acceptance evidence and run ${aposCommand(repoPath)} integration complete ${goalId} --file <json> for that commit`
+          ? `Goal review passed on ${verdict.commitRef}: run ${aposCommand(repoPath)} integration complete ${goalId} --commit ${verdict.commitRef}`
           : `Goal review requested changes on ${verdict.commitRef}: ${verdict.note}`,
       );
     const packages = Object.values(state.packages ?? {});
@@ -210,15 +214,6 @@ export class MultiSupervisor {
     return this.startGoalReview(state, commit, repoPath, actions);
   }
 
-  private reviewRun(state: GoalState): string | undefined {
-    return (
-      state.leadTerminal?.runId ??
-      Object.values(state.packages ?? {})
-        .map(item => item.runtimeRef?.runId)
-        .find(Boolean)
-    );
-  }
-
   private async startGoalReview(
     state: GoalState,
     commit: string,
@@ -226,7 +221,7 @@ export class MultiSupervisor {
     actions: string[],
   ): Promise<string[]> {
     const goalId = state.spec.id;
-    const runId = this.reviewRun(state);
+    const runId = reviewRun(state);
     if (!runId || !state.proposal?.baseCommit) return actions;
     actions.push(
       await dispatchReviewer(
@@ -246,7 +241,7 @@ export class MultiSupervisor {
   private async recoverGoalReview(state: GoalState, repoPath: string, actions: string[]): Promise<string[]> {
     const goalId = state.spec.id;
     const intent = state.reviewIntent!;
-    const runId = this.reviewRun(state);
+    const runId = reviewRun(state);
     const found = await this.runtime.recover?.(intent.key, runId ?? '');
     if (found) {
       this.record(goalId, 'review-dispatched', {

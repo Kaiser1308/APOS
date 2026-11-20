@@ -18,6 +18,7 @@ import {
 import { ProjectJournal } from '../store/journal.js';
 import type { PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { PackageRuntimeRef } from '../domain/runtime-refs.js';
+import { untrustedProtectedFiles } from './protected-milestones.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -29,8 +30,10 @@ const spec: GoalSpec = {
   checks: [
     { id: 'CHK-A', kind: 'command', command: 'node a.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} },
     { id: 'CHK-B', kind: 'command', command: 'node b.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} },
+    { id: 'CHK-C', kind: 'command', command: 'node c.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} },
+    { id: 'CHK-M', kind: 'manual', procedure: 'Inspect result', expectedResult: 'Correct result' },
   ],
-  acceptance: [{ ...baseSpec.acceptance[0], checkIds: ['CHK-A', 'CHK-B'] }],
+  acceptance: [{ ...baseSpec.acceptance[0], checkIds: ['CHK-A', 'CHK-B', 'CHK-C', 'CHK-M'] }],
 };
 const a: WorkPackageSpec = {
   id: 'WP-01',
@@ -55,6 +58,13 @@ const b: WorkPackageSpec = {
   dependencies: ['WP-01'],
   acceptance: [{ id: 'WP-AC-2', text: 'history works', checkIds: ['CHK-B'] }],
 };
+const c: WorkPackageSpec = {
+  ...b,
+  id: 'WP-03',
+  owner: 'worker-c',
+  dependencies: ['WP-02'],
+  acceptance: [{ id: 'WP-AC-3', text: 'third step works', checkIds: ['CHK-C'] }],
+};
 
 it('gates each package on its own head, returns a red one to its owner, and wakes the Lead once per batch', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-multi-'));
@@ -68,16 +78,16 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   const settled = new Set<string>();
   const wakes: string[][] = [];
   const reviewerStarts: string[] = [];
-  const verdict = 'pass';
   let refusedOnce = false;
   // Orca refuses a wake while the Lead terminal is still bound to its last, unretained dispatch (seen live).
   const retained = new Set<string>();
   let leadDispatch = 'lead-0';
   let leadBase = '';
+  let leadTree = '';
   const work = (item: WorkPackageSpec, path: string, base: string) => {
     attempts[item.id] = (attempts[item.id] ?? 0) + 1;
     const n = attempts[item.id];
-    const file = item.id === 'WP-01' ? 'a.js' : 'b.js';
+    const file = item.id === 'WP-01' ? 'a.js' : item.id === 'WP-02' ? 'b.js' : 'c.js';
     // WP-01's first attempt is broken; everything else works.
     writeFileSync(join(path, file), item.id === 'WP-01' && n === 1 ? 'process.exit(1);' : 'process.exit(0);');
     const report = join(path, packageReportPath(spec.id, item.id, item.version, n));
@@ -95,6 +105,9 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   const runtime: RuntimeAdapter & PackageRuntime = {
     async startLead({ repoPath }) {
       leadBase = git(repoPath, 'rev-parse', 'HEAD');
+      leadTree = join(mkdtempSync(join(tmpdir(), 'apos-multi-lead-')), 'wt');
+      dirs.push(join(leadTree, '..'));
+      git(repoPath, 'worktree', 'add', '-q', '--detach', leadTree, leadBase);
       return {
         runId: 'run-lead',
         taskId: 'lead',
@@ -102,7 +115,7 @@ it('gates each package on its own head, returns a red one to its owner, and wake
         owner: 'lead',
         repoPath,
         terminal: 'term-lead',
-        worktreeId: `repo::${repoPath}`,
+        worktreeId: `repo::${leadTree}`,
         baseCommit: leadBase,
       };
     },
@@ -115,8 +128,8 @@ it('gates each package on its own head, returns a red one to its owner, and wake
     async inspect(ref) {
       return { state: 'settled', outcome: 'completed', ref };
     },
-    async startPackage({ package: item, repoPath }) {
-      const base = git(repoPath, 'rev-parse', 'HEAD');
+    async startPackage({ package: item, repoPath, dependencyCommits }) {
+      const base = dependencyCommits?.at(-1) ?? git(repoPath, 'rev-parse', 'HEAD');
       const path = join(mkdtempSync(join(tmpdir(), 'apos-multi-wt-')), 'wt');
       dirs.push(join(path, '..'));
       git(repoPath, 'worktree', 'add', '-q', '--detach', path, base);
@@ -167,14 +180,17 @@ it('gates each package on its own head, returns a red one to its owner, and wake
       ]);
       writeFileSync(
         file,
-        JSON.stringify({ result: verdict, note: 'Reviewed the integration commit against the Goal.' }),
+        JSON.stringify({
+          result: reviewerStarts.length === 1 ? 'changes' : 'pass',
+          note: 'Reviewed the integration commit against the Goal.',
+        }),
       );
       git(path, 'add', '-f', '-A');
       git(path, '-c', 'user.name=R', '-c', 'user.email=r@local.invalid', 'commit', '-qm', 'review');
       return {
         runId: 'run-1',
         taskId: 'rev',
-        dispatchId: 'rev-1',
+        dispatchId: `rev-${reviewerStarts.length}`,
         owner: 'lead',
         repoPath: input.repoPath,
         terminal: 'term-rev',
@@ -212,7 +228,27 @@ it('gates each package on its own head, returns a red one to its owner, and wake
     await invoke('lead', 'propose', '--file', input('plan.json', { ...proposal, mode: 'multi-wp' }));
     await invoke('package', 'add', '--file', input('a.json', a));
     await invoke('package', 'add', '--file', input('b.json', b));
+    await invoke('package', 'add', '--file', input('c.json', c));
     await invoke('lead', 'commit', spec.id);
+  } finally {
+    delete process.env.ORCA_TERMINAL_HANDLE;
+  }
+  process.env.ORCA_TERMINAL_HANDLE = 'term-lead';
+  try {
+    await expect(invoke('package', 'evidence', spec.id, '--file', input('bad.json', {}))).rejects.not.toThrow(
+      /Lead or Human only/,
+    );
+    await expect(invoke('package', 'verify', spec.id, 'not-a-package')).rejects.not.toThrow(/Lead or Human only/);
+  } finally {
+    delete process.env.ORCA_TERMINAL_HANDLE;
+  }
+  process.env.ORCA_TERMINAL_HANDLE = 'term-WP-01';
+  try {
+    await expect(invoke('gate', 'run', spec.id, '--commit', leadBase, '--base', leadBase)).rejects.toThrow(/Human/);
+    await expect(invoke('package', 'evidence', spec.id, '--file', input('fake.json', {}))).rejects.toThrow(
+      /Lead|Human/,
+    );
+    await expect(invoke('package', 'verify', spec.id, 'WP-01')).rejects.toThrow(/Lead|Human/);
   } finally {
     delete process.env.ORCA_TERMINAL_HANDLE;
   }
@@ -233,34 +269,93 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   expect(wakes.at(-1)!.join('\n')).toMatch(/WP-01 v1 attempt 1 red, returned to its owner/);
   await invoke('controller', 'tick'); // resumes WP-01 in its own worktree
   expect(attempts['WP-01']).toBe(2);
-  for (let i = 0; i < 4; i++) await invoke('controller', 'tick');
+  for (let i = 0; i < 6; i++) await invoke('controller', 'tick');
   expect(state().packages!['WP-01'].status).toBe('verified');
   expect(state().packages!['WP-02'].status).toBe('verified');
+  expect(state().packages!['WP-03'].status).toBe('verified');
   const all = wakes.flat();
   expect(all).toEqual(expect.arrayContaining(['all packages verified: ready to integrate']));
   expect(all.filter(item => item === 'all packages verified: ready to integrate')).toHaveLength(1);
 
   // Seen live: after the Lead integrated and the gate went green, nobody dispatched the Goal reviewer.
   const heads = Object.values(state().packages!).map(item => item.evidence.at(-1)!.commitRef);
-  const integrationTree = join(mkdtempSync(join(tmpdir(), 'apos-multi-int-')), 'wt');
-  dirs.push(join(integrationTree, '..'));
-  // The Lead integrates in its own worktree, cut from its base at selection (before APOS's plan milestone commit).
-  git(dir, 'worktree', 'add', '-q', '--detach', integrationTree, leadBase);
-  git(integrationTree, '-c', 'user.name=L', '-c', 'user.email=l@local.invalid', 'merge', '-q', '--no-edit', ...heads);
-  const integrationCommit = git(integrationTree, 'rev-parse', 'HEAD');
+  expect(state().packages!['WP-02'].runtimeRef?.baseCommit).toBe(heads[0]);
+  expect(state().packages!['WP-03'].runtimeRef?.baseCommit).toBe(heads[1]);
+  git(leadTree, 'checkout', '-q', '--detach', heads[2]);
+  const integrationCommit = git(leadTree, 'rev-parse', 'HEAD');
+  await invoke('controller', 'tick');
+  expect(state().gate?.result).toBe('pending');
+  await invoke(
+    'gate',
+    'confirm',
+    spec.id,
+    'CHK-M',
+    '--commit',
+    integrationCommit,
+    '--by',
+    'human',
+    '--note',
+    'checked',
+  );
+  await invoke('controller', 'tick');
+  expect(state().gate?.checks.map(check => [check.checkId, check.status, check.reason])).toEqual([
+    ['CHK-A', 'pass', expect.anything()],
+    ['CHK-B', 'pass', expect.anything()],
+    ['CHK-C', 'pass', expect.anything()],
+    ['CHK-M', 'pass', expect.anything()],
+  ]);
+  expect(state().gate?.result).toBe('green');
+  expect(state().gate?.baseCommit).toBe(leadBase);
+  await expect(invoke('gate', 'run', spec.id, '--commit', integrationCommit, '--base', heads[1])).rejects.toThrow(
+    /proposal base commit/,
+  );
+  const published = state().publishedDocuments;
+  expect(published?.length).toBeGreaterThan(0); // state() reopens and verifies the hash-chained log
+  const opened = ProjectJournal.open(dir);
+  expect(opened.journal.events(spec.id).some(event => event.type === 'documents-published')).toBe(true);
+  const legacy = { getGoal: () => undefined };
+  expect(untrustedProtectedFiles(legacy, spec.id, dir, integrationCommit, [`.apos/goals/${spec.id}/goal.md`])).toEqual([
+    `.apos/goals/${spec.id}/goal.md`,
+  ]);
+  expect(() =>
+    opened.journal.append({
+      id: 'forged',
+      goalId: spec.id,
+      type: 'documents-published',
+      at: new Date().toISOString(),
+      data: published?.at(-1),
+    }),
+  ).toThrow(/controller-only/);
+  opened.close();
+  const protectedPath = `.apos/goals/${spec.id}/goal.md`;
+  writeFileSync(join(leadTree, protectedPath), 'tampered');
+  git(leadTree, 'add', protectedPath);
+  git(leadTree, '-c', 'user.name=L', '-c', 'user.email=l@local.invalid', 'commit', '-qm', 'tamper');
+  await invoke('gate', 'run', spec.id, '--commit', git(leadTree, 'rev-parse', 'HEAD'));
+  expect(state().gate?.checks).toContainEqual(expect.objectContaining({ checkId: 'APOS-PROTECTED', status: 'fail' }));
+  git(leadTree, 'checkout', '-q', '--detach', integrationCommit);
   await invoke('gate', 'run', spec.id, '--commit', integrationCommit);
   expect(state().gate?.result).toBe('green');
-  for (let i = 0; i < 4; i++) await invoke('controller', 'tick'); // the first wake with the verdict is refused and retried
-  expect(reviewerStarts).toHaveLength(1); // one reviewer per gated integration commit
+  for (let i = 0; i < 3; i++) await invoke('controller', 'tick');
+  expect(state().reviews.at(-1)).toMatchObject({ result: 'changes', commitRef: integrationCommit });
+  expect(wakes.flat().join('\n')).toMatch(/Goal review requested changes/);
+  writeFileSync(join(leadTree, 'repair.txt'), 'review fix');
+  git(leadTree, 'add', 'repair.txt');
+  git(leadTree, '-c', 'user.name=L', '-c', 'user.email=l@local.invalid', 'commit', '-qm', 'review fix');
+  const repaired = git(leadTree, 'rev-parse', 'HEAD');
+  await invoke('controller', 'tick');
+  await invoke('gate', 'confirm', spec.id, 'CHK-M', '--commit', repaired, '--by', 'human', '--note', 'checked repair');
+  for (let i = 0; i < 5; i++) await invoke('controller', 'tick'); // first pass wake is refused and retried
+  expect(reviewerStarts).toHaveLength(2);
   expect(state().reviews.at(-1)).toMatchObject({
     subject: 'goal',
     result: 'pass',
-    commitRef: integrationCommit,
-    session: 'rev-1',
+    commitRef: repaired,
+    session: 'rev-2',
   });
-  expect(wakes.flat().join('\n')).toMatch(
-    new RegExp(`Goal review passed on ${integrationCommit}: .*integration complete`),
-  );
+  expect(wakes.flat().join('\n')).toMatch(new RegExp(`Goal review passed on ${repaired}: .*integration complete`));
   await invoke('controller', 'tick');
-  expect(reviewerStarts).toHaveLength(1); // a passed review is not asked for again
+  expect(reviewerStarts).toHaveLength(2); // a passed review is not asked for again
+  await invoke('integration', 'complete', spec.id, '--commit', repaired);
+  expect(state().status).toBe('verified');
 }, 120_000);

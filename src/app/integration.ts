@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { newEvent } from './events.js';
 import { validatePackageGraph } from '../domain/packages.js';
-import type { Evidence } from '../domain/contracts.js';
 import { assertGitRoot } from '../store/project-history.js';
 import { VerificationService } from './verification.js';
 import { requiresIndependentReview } from '../domain/reviews.js';
@@ -51,8 +50,6 @@ export class GitCommitInspector implements CommitInspector {
 
 export type IntegrationInput = {
   commitRef: string;
-  acceptance: Evidence[];
-  regression: { result: 'pass' | 'fail'; command: string; artifactRef: string };
   conflictResolution?: string;
 };
 
@@ -114,12 +111,6 @@ export class IntegrationService {
     for (const commit of prepared.commits)
       if (!this.inspector.contains(repoPath, commit, input.commitRef))
         throw new Error(`Package commit not integrated: ${commit}`);
-    if (
-      input.regression?.result !== 'pass' ||
-      !input.regression.command?.trim() ||
-      !input.regression.artifactRef?.trim()
-    )
-      throw new Error('Passing regression evidence required');
     const state = this.store.getGoal(goalId)!;
     if (state.gate?.deliveryCommit.toLowerCase() !== input.commitRef.toLowerCase() || state.gate.result !== 'green')
       throw new Error('Green controller gate on the integration commit required');
@@ -130,56 +121,12 @@ export class IntegrationService {
           'Passing independent Goal review of integration commit required: the controller dispatches the reviewer once the integration gate is green and wakes the Lead with the verdict; run integration complete again after a pass',
         );
     }
-    const latest = new Map(input.acceptance.map(item => [item.acceptanceId, item]));
-    if (
-      !state.spec.acceptance.every(
-        item =>
-          latest.get(item.id)?.result === 'pass' &&
-          latest.get(item.id)?.command?.trim() &&
-          latest.get(item.id)?.artifactRef?.trim(),
-      )
-    )
-      throw new Error('Passing Goal acceptance evidence required');
     this.store.append(
       newEvent(goalId, 'integration-completed', {
         commitRef: input.commitRef,
         conflictResolution: input.conflictResolution,
-        regression: input.regression,
       }),
     );
-    const verification = new VerificationService(this.store);
-    for (const item of input.acceptance) verification.submitEvidence(goalId, item);
-    verification.verify(goalId);
+    new VerificationService(this.store).verify(goalId);
   }
-}
-
-export const INTEGRATION_EXAMPLE =
-  '{"commitRef":"<integration commit sha>","acceptance":[{"acceptanceId":"AC-1","result":"pass","command":"npm test","artifactRef":"log:acceptance"}],"regression":{"result":"pass","command":"npm test","artifactRef":"log:regression"}}';
-
-/** Validates the `integration complete --file` input, naming every missing or invalid field at once rather than one per run. */
-export function parseIntegrationInput(raw: unknown): IntegrationInput {
-  const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const text = (value: unknown) => typeof value === 'string' && value.trim() !== '';
-  const problems: string[] = [];
-  if (!text(input.commitRef)) problems.push('commitRef');
-  if (!Array.isArray(input.acceptance) || !input.acceptance.length) problems.push('acceptance (a non-empty list)');
-  else
-    input.acceptance.forEach((item: Record<string, unknown>, index) => {
-      if (!text(item?.acceptanceId)) problems.push(`acceptance[${index}].acceptanceId`);
-      if (item?.result !== 'pass' && item?.result !== 'fail') problems.push(`acceptance[${index}].result`);
-      if (!text(item?.command)) problems.push(`acceptance[${index}].command`);
-      if (!text(item?.artifactRef)) problems.push(`acceptance[${index}].artifactRef`);
-    });
-  const regression = (input.regression && typeof input.regression === 'object' ? input.regression : {}) as Record<
-    string,
-    unknown
-  >;
-  if (regression.result !== 'pass' && regression.result !== 'fail') problems.push('regression.result');
-  if (!text(regression.command)) problems.push('regression.command');
-  if (!text(regression.artifactRef)) problems.push('regression.artifactRef');
-  if (problems.length)
-    throw new Error(
-      `Integration input is missing or invalid: ${problems.join(', ')}. Minimal file: ${INTEGRATION_EXAMPLE}`,
-    );
-  return input as IntegrationInput;
 }

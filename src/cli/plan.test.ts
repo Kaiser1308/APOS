@@ -1,3 +1,4 @@
+import { newEvent } from '../app/events.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -176,7 +177,7 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
     await invoke('goal', 'create', '--file', join(dir, 'g1.json'), '--source', sourceFile);
     await invoke('goal', 'create', '--file', join(dir, 'g2.json'), '--source', sourceFile);
 
-    const opened = ProjectJournal.open(dir, home);
+    const opened = ProjectJournal.open(dir, home, newEvent);
     let n = 0;
     const add = (goalId: string, type: string, data?: unknown) =>
       opened.journal.append({
@@ -234,7 +235,7 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
 
   it('replays legacy Goals that only have exclusionReason as unplanned without breaking the event log', async () => {
     const { dir, home } = await setup();
-    const opened = ProjectJournal.open(dir, home);
+    const opened = ProjectJournal.open(dir, home, newEvent);
     const legacySpec = {
       ...spec,
       id: 'GOAL-LEGACY',

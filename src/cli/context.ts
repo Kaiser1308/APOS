@@ -10,6 +10,7 @@ import { OrcaRuntime } from '../runtime/orca/adapter.js';
 import { worktreePath } from '../runtime/orca/parse.js';
 import { controllerHome } from '../store/event-log.js';
 import { ProjectJournal } from '../store/journal.js';
+import { newEvent } from '../app/events.js';
 import type { CliOptions } from './options.js';
 
 export type CliContext = {
@@ -74,7 +75,7 @@ export function createContext(program: Command, options: CliOptions): CliContext
   const openJournal = () => {
     const path = repo();
     if (!existsSync(join(path, '.apos', 'project.yaml'))) throw new Error('Run apos init first');
-    return ProjectJournal.open(path, options.home);
+    return ProjectJournal.open(path, options.home, newEvent);
   };
   const withJournal = <T>(fn: (journal: ProjectJournal) => T): T => {
     const { journal, close } = openJournal();

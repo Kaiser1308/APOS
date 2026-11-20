@@ -24,6 +24,7 @@ const asRef = <T>(value: unknown): T => value as T;
 
 export type GoalEventType =
   | 'goal-drafted'
+  | 'documents-published'
   | 'goal-approved'
   | 'goal-selected'
   | 'goal-revised'
@@ -98,6 +99,7 @@ export type GoalState = {
   status: GoalStatus;
   approvedGoalVersion?: number;
   selected: boolean;
+  publishedDocuments?: { commit: string; files: Record<string, string> }[];
   proposal?: ExecutionProposal;
   proposalApprovedVersion?: number;
   evidence: unknown[];
@@ -111,7 +113,7 @@ export type GoalState = {
   integration?: {
     commitRef: string;
     conflictResolution?: string;
-    regression: { result: 'pass'; command: string; artifactRef: string };
+    regression?: { result: 'pass'; command: string; artifactRef: string };
   };
   merge?: { sourceRef: string; targetBranch: string; mergeCommit: string };
   reviews: ReviewRecord[];
@@ -215,6 +217,26 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
   }
   requireThat(state, 'Goal does not exist');
   requireThat(state.spec.id === event.goalId, 'Event Goal ID mismatch');
+  if (event.type === 'documents-published') {
+    const data = event.data as { commit?: unknown; files?: unknown };
+    requireThat(typeof data?.commit === 'string' && /^[0-9a-f]{40,64}$/i.test(data.commit), 'Invalid milestone commit');
+    requireThat(data.files && typeof data.files === 'object' && !Array.isArray(data.files), 'Invalid milestone files');
+    const files = data.files as Record<string, unknown>;
+    requireThat(
+      Object.entries(files).every(
+        ([path, hash]) =>
+          path.startsWith(`.apos/goals/${event.goalId}/`) && typeof hash === 'string' && /^[0-9a-f]{64}$/.test(hash),
+      ),
+      'Invalid milestone file hash',
+    );
+    return {
+      ...state,
+      publishedDocuments: [
+        ...(state.publishedDocuments ?? []),
+        { commit: data.commit, files: files as Record<string, string> },
+      ],
+    };
+  }
   requireThat(state.status !== 'closed' && state.status !== 'stopped', 'Goal is terminal');
   switch (event.type) {
     case 'goal-approved':
@@ -799,15 +821,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         'All packages must be verified',
       );
       const data = event.data as GoalState['integration'];
-      requireThat(
-        data &&
-          typeof data.commitRef === 'string' &&
-          data.commitRef.trim() &&
-          data.regression?.result === 'pass' &&
-          data.regression.command?.trim() &&
-          data.regression.artifactRef?.trim(),
-        'Passing integration evidence required',
-      );
+      requireThat(data && typeof data.commitRef === 'string' && data.commitRef.trim(), 'Integration commit required');
       return { ...state, integration: data };
     }
     case 'verified':

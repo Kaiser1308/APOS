@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
 import { ProjectJournal } from '../store/journal.js';
+import { newEvent } from './events.js';
 import { initProject } from './init-project.js';
 import { GateService, GitWorktreeFactory, ShellExecutor } from './gate-service.js';
 import { VerificationService } from './verification.js';
@@ -64,7 +65,7 @@ async function project() {
   stores.push(store);
   const home = mkdtempSync(join(tmpdir(), 'apos-gate-home-'));
   dirs.push(home);
-  const journal = new ProjectJournal(dir, store, home);
+  const journal = new ProjectJournal(dir, store, home, newEvent);
   let n = 0;
   const add = (type: GoalEventType, data?: unknown) =>
     journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });

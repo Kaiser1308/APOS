@@ -123,7 +123,7 @@ describe('a wake on a session that has ended (GitHub #12, #13)', () => {
         throw new Error('Orca orchestration check failed: [session_caller_not_live] chat closed');
       },
       async ackRun() {
-        return;
+        return [];
       },
       async retainWorker() {
         return;
@@ -154,7 +154,7 @@ describe('a wake on a session that has ended (GitHub #12, #13)', () => {
         throw new Error(`Orca check failed: request req_${++n}abcdef12 took ${n * 7} ms`);
       },
       async ackRun() {
-        return;
+        return [];
       },
       async retainWorker() {
         return;

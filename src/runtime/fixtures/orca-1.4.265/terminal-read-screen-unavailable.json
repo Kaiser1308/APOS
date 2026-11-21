@@ -1,0 +1,23 @@
+{
+  "id": "397f72b6-2c96-46a3-b0b8-4e34a8f63273",
+  "ok": true,
+  "result": {
+    "terminal": {
+      "handle": "structworker_31e61bf0-470b-44ae-92a3-33400ff4e299",
+      "status": "running",
+      "tail": [
+        "[user] You are working inside Orca, a multi-agent IDE. You are a dispatched worker.",
+        "Your coordinator's Orca session ID is: orca_session_id:2d7ca6d5-06e4-47b3-8686-5067c46a8d56",
+        "Your task ID is: task_be21a4d86dad"
+      ],
+      "truncated": false,
+      "limited": false,
+      "nextCursor": null,
+      "returnedLineCount": 3,
+      "source": "screen-unavailable"
+    }
+  },
+  "_meta": {
+    "runtimeId": "6082af42-2dce-4501-ad81-94b8c5f50675"
+  }
+}

@@ -201,11 +201,12 @@ async function setup(
     ...(options.inbox
       ? {
           async checkRun() {
-            return inbox.length ? { deliveryId: 'delivery_1', messages: inbox } : { messages: [] };
+            return { messages: inbox };
           },
-          async ackRun(_run: string, deliveryId: string) {
-            acked.push(deliveryId);
+          async ackRun(_run: string, handled: string[]) {
+            acked.push(...handled);
             inbox = [];
+            return [];
           },
           async retainWorker() {},
           async replyMessage(_run: string, messageId: string, body: string) {
@@ -629,7 +630,7 @@ more
     expect(notices).toHaveLength(1);
     expect(notices[0].data).toMatchObject({ messageId: 'msg_1', subject: 'Conflicting oracle' });
     expect(replies).toEqual([{ messageId: 'msg_1', body: ESCALATION_REPLY }]);
-    expect(acked).toEqual(['delivery_1']);
+    expect(acked).toEqual(['msg_1']);
     await tick();
     expect(replies).toHaveLength(1);
     expect(state().status).toBe('verified');

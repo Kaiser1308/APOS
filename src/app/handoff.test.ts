@@ -242,6 +242,27 @@ describe('HandoffService', () => {
     expect(store.getGoal(spec.id)!.status).toBe('executing');
   });
 
+  it('does not start again on a pending handoff when the lookup by key fails: that is not "nothing started"', async () => {
+    const { dir, store, add } = open();
+    soloExecuting(add, dir);
+    await expect(
+      new HandoffService(store, fakeRuntime({ failStart: true }).runtime, () => claude).handoff(
+        spec.id,
+        { kind: 'lead' },
+        dir,
+      ),
+    ).rejects.toThrow(/Run apos handoff again/);
+    const { runtime, calls } = fakeRuntime();
+    runtime.recover = async () => {
+      throw new Error('Orca orchestration task-list failed');
+    };
+    await expect(
+      new HandoffService(store, runtime, () => claude).handoff(spec.id, { kind: 'lead' }, dir),
+    ).rejects.toThrow(/task-list failed/);
+    expect(calls).toEqual([]);
+    expect(store.getGoal(spec.id)!.handoffIntent).toBeDefined();
+  });
+
   it('clears a block caused by that dispatch failing, but not other blocks', async () => {
     const first = open();
     soloExecuting(first.add, first.dir);

@@ -20,23 +20,40 @@ export const isDeadSession = (error: unknown): boolean =>
     ? error.code === 'session_caller_not_live'
     : /\[session_caller_not_live\]/.test(error instanceof Error ? error.message : String(error));
 
-// Orca 1.4.254 answers worker-show and worker-start with a concise view by default; APOS reads the full record.
+/**
+ * Orca 1.4.265 answers with a concise view by default. APOS reads the full record of `worker-show`, and of
+ * `task-list`, whose concise rows drop the `spec` recovery finds a dispatch key in. `worker-start` stays concise:
+ * its receipt carries runId, taskId, dispatchId, terminal and workspace, and only the concise view exits 0 for a
+ * start whose turn Orca has not observed yet (`--full` exits 1 for anything but ready).
+ */
 const fullFlag = (args: string[]): string[] =>
-  args[0] === 'orchestration' && ['worker-show', 'worker-start'].includes(args[1] ?? '') && !args.includes('--full')
+  args[0] === 'orchestration' && ['worker-show', 'task-list'].includes(args[1] ?? '') && !args.includes('--full')
     ? ['--full']
     : [];
+
+/** A worker-start that exited 1 only because Orca has not observed its turn yet: the worker did start. */
+const startedUnobserved = (args: string[], result: Record<string, unknown> | undefined): boolean =>
+  args[0] === 'orchestration' &&
+  args[1] === 'worker-start' &&
+  typeof result?.dispatchId === 'string' &&
+  (result.stage === 'turn_start_unobserved' || result.state === 'turn_start_unobserved');
 
 /** `--compact` is APOS-internal: ask for Orca's concise view (the only one that carries `activity` and `lastActivity`) instead of the full record. */
 export const COMPACT = '--compact';
 
 export const SPILL_LIMIT = 400;
 
+/** The argv `runOrca` hands to the orca CLI for an APOS call. */
+export function orcaArgs(argv: string[]): string[] {
+  const args = argv.filter(item => item !== COMPACT);
+  return [...args, ...(argv.includes(COMPACT) ? [] : fullFlag(args)), '--json'];
+}
+
 export function runOrca(argv: string[]): Record<string, unknown> {
-  const compact = argv.includes(COMPACT);
   const args = argv.filter(item => item !== COMPACT);
   try {
     return parseOrcaResult(
-      execFileSync('orca', [...args, ...(compact ? [] : fullFlag(args)), '--json'], {
+      execFileSync('orca', orcaArgs(argv), {
         encoding: 'utf8',
         maxBuffer: 4 * 1024 * 1024,
       }),
@@ -48,9 +65,10 @@ export function runOrca(argv: string[]): Record<string, unknown> {
       const parsed = stdout
         ? (JSON.parse(stdout) as {
             error?: { code?: string; message?: string };
-            result?: { state?: string; stage?: string; failedStage?: string };
+            result?: Record<string, unknown> & { state?: string; stage?: string; failedStage?: string };
           })
         : undefined;
+      if (parsed?.result && startedUnobserved(args, parsed.result)) return parsed.result;
       if (parsed?.error) detail = ` [${parsed.error.code}] ${parsed.error.message}`;
       else if (parsed?.result)
         detail = ` state=${parsed.result.state} stage=${parsed.result.stage ?? ''} failedStage=${parsed.result.failedStage ?? ''}`;

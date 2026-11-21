@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "result": {
+    "messages": [
+      {
+        "id": "msg_54e54fbdf34c",
+        "type": "question",
+        "from": "structworker_1456086d-52dd-4bd5-a607-d776b602d679",
+        "subject": "m1",
+        "body": "one"
+      },
+      {
+        "id": "msg_f99a4f63806b",
+        "type": "status",
+        "from": "structworker_1456086d-52dd-4bd5-a607-d776b602d679",
+        "subject": "m2",
+        "body": "two"
+      },
+      {
+        "id": "msg_18d9c9b6ab36",
+        "type": "worker_done",
+        "from": "structworker_1456086d-52dd-4bd5-a607-d776b602d679",
+        "subject": "probe done",
+        "body": "probe done",
+        "followUp": "To give this worker more work: \"orca\" orchestration send --to dispatch:ctx_1c2a1160ebff --subject \"...\" --body \"...\"",
+        "payload": {
+          "taskId": "task_fd02df278a39",
+          "dispatchId": "ctx_1c2a1160ebff",
+          "outcome": "succeeded"
+        }
+      }
+    ]
+  }
+}

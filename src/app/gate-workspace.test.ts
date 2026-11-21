@@ -92,6 +92,29 @@ describe('gate worktree dependencies', () => {
     expect(workspace.preparation).toMatch(/\(main checkout has no node_modules\) exit 0/);
   });
 
+  it('runs npm ci instead of linking when the lock has workspace links, which would resolve into the main checkout (PR #37 review)', () => {
+    const workspaceLock = `${JSON.stringify({
+      name: 'scratch',
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'scratch', workspaces: ['packages/*'] },
+        'node_modules/local-lib': { resolved: 'packages/local-lib', link: true },
+        'packages/local-lib': { version: '1.0.0' },
+      },
+    })}\n`;
+    const { dir, head } = repo({ 'package.json': packageJson, 'package-lock.json': workspaceLock });
+    const executor = new RecordingExecutor();
+    const workspace = new GitWorktreeFactory({ executor }).checkout(dir, head);
+    try {
+      expect(existsSync(join(workspace.path, 'node_modules'))).toBe(false);
+      expect(executor.calls).toHaveLength(1);
+      expect(workspace.preparation).toMatch(/\(package-lock.json has workspace or file: links into the checkout\)/);
+    } finally {
+      workspace.dispose();
+    }
+    expect(readFileSync(join(dir, 'node_modules', 'dep', 'sentinel.txt'), 'utf8')).toBe('installed');
+  });
+
   it('changes nothing for a project without package.json', () => {
     const { dir, head } = repo({ 'main.py': 'print(1)\n' });
     const executor = new RecordingExecutor();

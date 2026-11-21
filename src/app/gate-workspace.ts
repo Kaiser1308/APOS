@@ -48,6 +48,29 @@ function isDirectory(path: string): boolean {
 const sameText = (a: string, b: string) => a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
 
 /**
+ * Workspace packages and `file:` directory deps are installed as links into the checkout that ran
+ * npm, so the main checkout's node_modules would run its own copy of them instead of the gate commit's
+ * (reported on PR #37). Any such link, or a lock that cannot be read, means a fresh install.
+ */
+function hasLocalLinks(lockText: string): boolean {
+  let lock: unknown;
+  try {
+    lock = JSON.parse(lockText);
+  } catch {
+    return true;
+  }
+  if (typeof lock !== 'object' || lock === null) return true;
+  const { packages, dependencies } = lock as { packages?: unknown; dependencies?: unknown };
+  const entries = (value: unknown) => (typeof value === 'object' && value !== null ? Object.values(value) : []);
+  const linked = (entry: unknown) =>
+    typeof entry === 'object' &&
+    entry !== null &&
+    ((entry as { link?: unknown }).link === true ||
+      String((entry as { version?: unknown }).version ?? '').startsWith('file:'));
+  return entries(packages).some(linked) || entries(dependencies).some(linked);
+}
+
+/**
  * Seen live (GOAL-G3, WP-SIGNALS): CHK-2 `npm run check` went red with "prettier is not recognized"
  * because a fresh worktree has no node_modules. When the gate commit's lock file is identical to the
  * main checkout's, that checkout's node_modules is linked in; otherwise `npm ci` runs, so a real
@@ -71,6 +94,8 @@ export function prepareDependencies(
   if (!isDirectory(mainModules)) reason = 'main checkout has no node_modules';
   else if (!existsSync(mainLock) || !sameText(readFileSync(mainLock, 'utf8'), readFileSync(lockPath, 'utf8')))
     reason = 'package-lock.json differs from the main checkout';
+  else if (hasLocalLinks(readFileSync(lockPath, 'utf8')))
+    reason = 'package-lock.json has workspace or file: links into the checkout';
   else {
     const target = realpathSync(mainModules);
     try {
@@ -135,6 +160,10 @@ export class GitWorktreeFactory implements WorkspaceFactory {
       try {
         execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', path], { stdio: 'ignore' });
       } catch {
+        /* finished below */
+      }
+      // Seen on Windows after `npm ci` with workspaces: git exits 0 but leaves the workspace junctions behind.
+      if (existsSync(path)) {
         rmSync(path, { recursive: true, force: true });
         execFileSync('git', ['-C', repo, 'worktree', 'prune'], { stdio: 'ignore' });
       }

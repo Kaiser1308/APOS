@@ -1,7 +1,7 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { newEvent } from './events.js';
 import type { CommandCheck } from '../domain/contracts.js';
@@ -24,91 +24,13 @@ import { GitCommitInspector } from './integration.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 import { untrustedProtectedFiles } from './protected-milestones.js';
+import { ShellExecutor, type CommandExecutor } from './shell-executor.js';
+import { GitWorktreeFactory, type WorkspaceFactory } from './gate-workspace.js';
 
-export type ExecResult = { exitCode: number | null; timedOut: boolean; output: string };
-export interface CommandExecutor {
-  readonly shell: string;
-  run(command: string, cwd: string, env: Record<string, string>, timeoutMs: number): ExecResult;
-}
-export interface Workspace {
-  readonly path: string;
-  dispose(): void;
-}
-export interface WorkspaceFactory {
-  checkout(repoPath: string, commit: string): Workspace;
-}
-
-const TIMEOUT_MARK = '[apos] check timed out; process tree killed';
-/**
- * Runs the command in a child node process that owns the timeout. Killing only the shell would leave
- * grandchildren alive holding the workspace (seen on Windows), so the launcher kills the whole tree.
- */
-const LAUNCHER = `
-const { spawn, spawnSync } = require('child_process');
-const command = process.argv[1], ms = Number(process.argv[2]), win = process.platform === 'win32';
-const child = spawn(command, { shell: true, stdio: 'inherit', detached: !win, windowsHide: true });
-let timedOut = false;
-const timer = setTimeout(() => {
-  timedOut = true;
-  if (win) spawnSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], { stdio: 'ignore' });
-  else { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } }
-}, ms);
-child.on('exit', code => {
-  clearTimeout(timer);
-  if (timedOut) { process.stderr.write(${JSON.stringify(`\n${TIMEOUT_MARK}\n`)}); process.exit(124); }
-  process.exit(code === null ? 1 : code);
-});
-`;
-
-/** Runs through the platform's default shell; the shell is recorded so base and delivery provably match. */
-export class ShellExecutor implements CommandExecutor {
-  readonly shell = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : '/bin/sh';
-  run(command: string, cwd: string, env: Record<string, string>, timeoutMs: number): ExecResult {
-    const result = spawnSync(process.execPath, ['-e', LAUNCHER, command, String(timeoutMs)], {
-      cwd,
-      env: { ...process.env, ...env },
-      encoding: 'utf8',
-      timeout: timeoutMs + 30_000,
-      maxBuffer: 64 * 1024 * 1024,
-      windowsHide: true,
-    });
-    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-    const timedOut =
-      (result.status === 124 && output.includes(TIMEOUT_MARK)) ||
-      (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
-    return {
-      exitCode: timedOut ? null : result.status,
-      timedOut,
-      output: `${output}${result.error && !timedOut ? `\n[apos] ${result.error.message}` : ''}`,
-    };
-  }
-}
-
-/** A fresh detached Git worktree at exactly the requested commit, outside the managed repo. */
-export class GitWorktreeFactory implements WorkspaceFactory {
-  checkout(repoPath: string, commit: string): Workspace {
-    const repo = assertGitRoot(repoPath);
-    const full = execFileSync('git', ['-C', repo, 'rev-parse', '--verify', `${commit}^{commit}`], {
-      encoding: 'utf8',
-    }).trim();
-    const path = mkdtempSync(join(tmpdir(), 'apos-gate-'));
-    execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', '--force', path, full], { stdio: 'ignore' });
-    const head = execFileSync('git', ['-C', path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    const dispose = () => {
-      try {
-        execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', path], { stdio: 'ignore' });
-      } catch {
-        rmSync(path, { recursive: true, force: true });
-        execFileSync('git', ['-C', repo, 'worktree', 'prune'], { stdio: 'ignore' });
-      }
-    };
-    if (head !== full) {
-      dispose();
-      throw new Error(`Gate workspace is at ${head}, expected ${full}`);
-    }
-    return { path, dispose };
-  }
-}
+export type { CommandExecutor, ExecResult } from './shell-executor.js';
+export { ShellExecutor } from './shell-executor.js';
+export type { Workspace, WorkspaceFactory } from './gate-workspace.js';
+export { GitWorktreeFactory } from './gate-workspace.js';
 
 /** sha256 of the committed source snapshot, or undefined when none is committed. */
 export function committedSourceDigest(repoPath: string, goalId: string): string | undefined {
@@ -146,8 +68,8 @@ export class GateService {
     options: GateOptions = {},
   ) {
     this.inspector = options.inspector ?? new GitCommitInspector();
-    this.workspaces = options.workspaces ?? new GitWorktreeFactory();
     this.executor = options.executor ?? new ShellExecutor();
+    this.workspaces = options.workspaces ?? new GitWorktreeFactory({ executor: this.executor });
     this.artifactRoot =
       options.artifactRoot ??
       process.env.APOS_ARTIFACTS ??
@@ -388,7 +310,7 @@ export class GateService {
       const workspace = this.workspaces.checkout(repoPath, commit);
       try {
         const result = this.executor.run(check.command, workspace.path, check.env, check.timeoutMs);
-        const log = `$ ${check.command}\n# commit ${commit} (${role} run ${n}), shell ${this.executor.shell}\n${result.output}\n# exit ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}\n`;
+        const log = `$ ${check.command}\n# commit ${commit} (${role} run ${n}), shell ${this.executor.shell}\n${workspace.preparation ? `${workspace.preparation}\n` : ''}${result.output}\n# exit ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}\n`;
         const logRef = join(artifacts, `${check.id}-${role}-${n}.log`);
         writeFileSync(logRef, log);
         runs.push({

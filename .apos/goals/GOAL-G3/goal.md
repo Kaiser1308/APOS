@@ -1,6 +1,6 @@
 # GOAL-G3 v1: APOS biết trạng thái agent bằng tín hiệu chính thức của Orca, không đọc màn hình terminal và không gõ vào agent
 
-Status: approved
+Status: ready
 
 ```json
 {

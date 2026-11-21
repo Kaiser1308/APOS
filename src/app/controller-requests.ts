@@ -97,7 +97,8 @@ const COMPLETES: Record<
     type === 'owner-handed-off' &&
     JSON.stringify(data.target) === JSON.stringify((request as { target?: unknown }).target),
   'lead-to-bot': type => type === 'lead-transferred',
-  'lead-to-apos': type => type === 'lead-returned',
+  // The return is done once the fresh Lead started; a `lead-returned` alone may be cut short (see `returnLead`).
+  'lead-to-apos': (type, data) => type === 'owner-handed-off' && (data.target as { kind?: string })?.kind === 'lead',
   'package-resume': (type, data, request) =>
     type === 'package-resumed' && data.packageId === (request as { packageId?: string }).packageId,
   'execution-resume': type => type === 'runtime-resumed',
@@ -160,10 +161,8 @@ async function execute(
       );
       return `Lead moved to bot ${moved.bot.name} (${moved.bot.id}); stopped ${moved.from}${moved.warning ? ` (warning: ${moved.warning})` : ''}`;
     }
-    case 'lead-to-apos': {
-      const back = await new LeadTransferService(store, runtime, profiles).back(goalId, request.by, repoPath);
-      return `Lead returned from its bot: ${back.note}${back.dispatchId ? ` (${back.dispatchId})` : ''}`;
-    }
+    case 'lead-to-apos':
+      return returnLead(store, runtime, profiles, goalId, repoPath, item);
     case 'package-resume':
       return `resumed ${(await new PackageService(store, runtime).resumeStale(goalId, request.packageId)).dispatchId}`;
     case 'execution-resume':
@@ -233,4 +232,35 @@ async function answerWorker(
     }),
   );
   return `replied on Run ${ref.runId}`;
+}
+
+/**
+ * Gives the Lead back from its bot. `back()` records `lead-returned` before it starts the fresh Lead, so a controller
+ * that stopped in between finds the bot gone: it then finishes the handoff (recovering one already started by its key)
+ * instead of returning again. A running Solo plan needs no fresh Lead: the return is complete at `lead-returned`.
+ */
+async function returnLead(
+  store: GoalRepository,
+  runtime: RuntimeAdapter & PackageRuntime,
+  profiles: () => RuntimeProfiles,
+  goalId: string,
+  repoPath: string,
+  item: PendingRequest,
+): Promise<string> {
+  const request = item.request as Extract<ControllerRequest, { kind: 'lead-to-apos' }>;
+  const state = store.getGoal(goalId);
+  const events = store.events(goalId);
+  const queued = events.findIndex(
+    event => event.type === 'controller-requested' && (event.data as { key?: string } | null)?.key === item.key,
+  );
+  const returned = !state?.leadBot && events.slice(queued + 1).some(event => event.type === 'lead-returned');
+  if (!returned) {
+    const back = await new LeadTransferService(store, runtime, profiles).back(goalId, request.by, repoPath);
+    return `Lead returned from its bot: ${back.note}${back.dispatchId ? ` (${back.dispatchId})` : ''}`;
+  }
+  const soloRunning =
+    state?.proposal?.mode.startsWith('solo') && ['executing', 'blocked', 'verified'].includes(state.status);
+  if (soloRunning) return 'Lead returned from its bot; the Solo owner keeps delivering';
+  const started = await new HandoffService(store, runtime, profiles).handoff(goalId, { kind: 'lead' }, repoPath);
+  return `Lead returned from its bot: a fresh APOS Lead took over (${started.dispatchId})`;
 }

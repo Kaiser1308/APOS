@@ -548,4 +548,31 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
       /must run from the Lead terminal/,
     );
   });
+
+  it('finishes a Lead return the controller left after lead-returned, starting the fresh Lead once', async () => {
+    const t = await setup();
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
+    // The controller recorded lead-returned for a queued return, then stopped before starting the fresh Lead.
+    const opened = ProjectJournal.open(t.dir);
+    opened.journal.append(
+      newEvent(spec.id, 'controller-requested', { key: 'rk', request: { kind: 'lead-to-apos', by: 'anh' } }),
+    );
+    opened.journal.append(newEvent(spec.id, 'lead-returned', { by: 'anh', botId: BOT.id }));
+    opened.close();
+    await t.tick();
+    expect(t.handoffs.map(item => item.kind)).toEqual(['lead-multi']);
+    const { goal, events } = t.journal();
+    expect(goal.lead?.current).toBe('lead-2');
+    expect(goal.requests).toBeUndefined();
+    expect(events.filter(item => item.type === 'lead-returned')).toHaveLength(1);
+    expect(
+      events.find(item => item.type === 'controller-request-settled' && (item.data as { key?: string }).key === 'rk')
+        ?.data,
+    ).toMatchObject({
+      key: 'rk',
+      result: expect.stringContaining('a fresh APOS Lead took over (lead-2)'),
+    });
+    await t.tick();
+    expect(t.handoffs).toHaveLength(1);
+  });
 });

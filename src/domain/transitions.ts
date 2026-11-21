@@ -18,6 +18,9 @@ import {
 } from './packages.js';
 import type { PackageRuntimeRef, RuntimeProfile, RuntimeRef } from './runtime-refs.js';
 import { ownerIdentities, parseReview, type ReviewRecord } from './reviews.js';
+import { applyLeadTransfer, type LeadBot } from './lead-transfer.js';
+import { InvariantError } from './errors.js';
+import { applyIntegrationGateRequest } from './integration-gate.js';
 
 /** Replay does not validate: old logs must replay as they are. Narrows event data and nothing else. */
 const asRef = <T>(value: unknown): T => value as T;
@@ -58,6 +61,8 @@ export type GoalEventType =
   | 'intent-abandoned'
   | 'handoff-intended'
   | 'owner-handed-off'
+  | 'lead-transferred'
+  | 'lead-returned'
   | 'owner-progress-observed'
   | 'verified'
   | 'outcome-accepted'
@@ -66,6 +71,7 @@ export type GoalEventType =
   | 'review-submitted'
   | 'merge-completed'
   | 'integration-completed'
+  | 'integration-gate-requested'
   | 'package-added'
   | 'package-plan-added'
   | 'package-removed'
@@ -165,9 +171,18 @@ export type GoalState = {
   lead?: LeadState;
   /** A handoff to another agent in flight: the controller leaves `from` alone until it is handed off or abandoned. */
   handoffIntent?: { key: string; target: HandoffTarget; from: string; at: string; runId?: string; unblock?: boolean };
+  /** The Orca bot holding the Lead role instead of an APOS dispatch (`apos handoff --to-bot`). */
+  leadBot?: LeadBot;
 };
-/** Whose dispatch a handoff replaces: the Goal's Lead (planning, Solo owner or Multi-WP), a package Worker, or the reviewer. */
-export type HandoffTarget = { kind: 'lead' } | { kind: 'package'; packageId: string } | { kind: 'reviewer' };
+/**
+ * Whose dispatch a handoff replaces: the Goal's Lead (planning, Solo owner or Multi-WP), a package Worker, or the
+ * reviewer. `bot` stops the Multi-WP Lead and gives its role to an Orca bot instead of a fresh dispatch.
+ */
+export type HandoffTarget =
+  | { kind: 'lead' }
+  | { kind: 'package'; packageId: string }
+  | { kind: 'reviewer' }
+  | { kind: 'bot'; botId: string; botName: string };
 export const handingOff = (state: GoalState | undefined): boolean => Boolean(state?.handoffIntent);
 export type LeadState = {
   ref: {
@@ -216,6 +231,10 @@ export type Finding = {
 
 function requireThat(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
+}
+/** For guards added or changed since errors were classified: the controller builds these events, so a breach is a defect. */
+function invariant(ok: unknown, message: string): asserts ok {
+  if (!ok) throw new InvariantError(message);
 }
 export const attemptLimit = (state: GoalState): number => state.appetite?.maxAttempts ?? 3;
 
@@ -841,11 +860,18 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           state.proposalApprovedVersion === state.proposal.version,
         'Approved current proposal required',
       );
-      // Solo: the owner is the Lead that planned, never a second session.
-      requireThat(
-        !state.lead || (event.data as { dispatchId?: string } | undefined)?.dispatchId === state.lead.current,
-        'Solo owner must be the current Lead dispatch',
-      );
+      // Solo: the owner is the Lead that planned, never a second session; a bot Lead never codes, so its owner is a
+      // separate dispatch the controller started under a dispatch intent.
+      if (state.leadBot)
+        invariant(
+          state.dispatchIntent && (event.data as { dispatchId?: string } | undefined)?.dispatchId,
+          'The Solo owner of a bot Lead needs a dispatch intent and its dispatch',
+        );
+      else
+        requireThat(
+          !state.lead || (event.data as { dispatchId?: string } | undefined)?.dispatchId === state.lead.current,
+          'Solo owner must be the current Lead dispatch',
+        );
       return {
         ...state,
         status: 'executing',
@@ -1177,6 +1203,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         leadIntent: undefined,
         lead: { ref, current: ref.dispatchId },
         leadTerminal: { terminal: ref.terminal, worktree: `id:${ref.worktreeId}`, runId: ref.runId },
+        leadBot: undefined,
         wokenFor: [],
       };
     }
@@ -1213,8 +1240,8 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         ['selected', 'planned', 'ready', 'executing', 'blocked'].includes(state.status),
         'Handoff needs a Goal whose owner is running',
       );
-      requireThat(
-        data?.key && data.from && data.target && ['lead', 'package', 'reviewer'].includes(data.target.kind),
+      invariant(
+        data?.key && data.from && data.target && ['lead', 'package', 'reviewer', 'bot'].includes(data.target.kind),
         'Handoff needs key, target and the dispatch it replaces',
       );
       return {
@@ -1247,8 +1274,13 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         'Handoff needs the new dispatch and the one it replaces',
       );
       const target = state.handoffIntent.target;
+      invariant(target.kind !== 'bot', 'A transfer to a bot settles with lead-transferred');
       let next: GoalState = { ...state, handoffIntent: undefined };
-      if (target.kind === 'lead') {
+      if (target.kind === 'lead' && state.leadBot) {
+        // A bot holds the Lead: only the Solo owner it does not code itself can be handed to a fresh agent.
+        invariant(state.runtimeRef?.dispatchId === data.from, 'A bot holds this Lead; return it before a Lead handoff');
+        next = { ...next, runtimeRef: { ...state.runtimeRef, ...asRef<RuntimeRef>(data.ref) } };
+      } else if (target.kind === 'lead') {
         requireThat(state.lead, 'Lead handoff needs an APOS-dispatched Lead');
         const prior = state.lead.ref;
         const ref = {
@@ -1295,6 +1327,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       if (data.unblock && state.status === 'blocked') next = { ...next, status: 'executing', blocker: undefined };
       return next;
     }
+    case 'integration-gate-requested':
+      return applyIntegrationGateRequest(state, event);
+    case 'lead-transferred':
+    case 'lead-returned':
+      return applyLeadTransfer(state, event);
     case 'human-notified':
       requireThat(event.data && typeof event.data === 'object', 'Notification details required');
       return state;
@@ -1332,6 +1369,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         lead: undefined,
         leadIntent: undefined,
         leadTerminal: undefined,
+        leadBot: undefined,
         wokenFor: [],
       };
     case 'outcome-stopped':

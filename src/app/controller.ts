@@ -9,6 +9,7 @@ import {
 import { PackageService, reconcileFailureEscalations } from './package-service.js';
 import { SoloService } from './solo.js';
 import { LeadService } from './lead.js';
+import { wakeBotLeads } from './bot-lead.js';
 import { handingOff } from '../domain/transitions.js';
 import { dispatchAgent, ownerOf, quotaEscalation, recordExhausted } from './watch.js';
 import { MultiSupervisor } from './multi-supervisor.js';
@@ -211,13 +212,15 @@ export class ControllerService {
         ['selected', 'planned'].includes(snapshot.status) ||
         (snapshot.status === 'ready' && snapshot.proposal?.mode !== 'multi-wp' && Boolean(snapshot.leadIntent));
       if (planning && (snapshot.lead || snapshot.leadIntent)) {
-        try {
-          result.supervised.push(...(await new LeadService(this.store, this.runtime).reconcile(goalId)));
-        } catch (error) {
-          result.errors.push(`lead: ${error instanceof Error ? error.message : String(error)}`);
-        }
+        // A bot holding the Lead has no dispatch to watch; the stopped APOS Lead must not read as a planning stop.
+        if (!snapshot.leadBot)
+          try {
+            result.supervised.push(...(await new LeadService(this.store, this.runtime).reconcile(goalId)));
+          } catch (error) {
+            result.errors.push(`lead: ${error instanceof Error ? error.message : String(error)}`);
+          }
         const current = this.store.getGoal(goalId)!;
-        if (current.status !== 'ready' || !current.lead || current.lead.settled) {
+        if (current.status !== 'ready' || !current.lead || (current.lead.settled && !current.leadBot)) {
           try {
             await this.consumeInbox(goalId, result);
           } catch (error) {
@@ -291,7 +294,7 @@ export class ControllerService {
         try {
           if (snapshot.status === 'ready') {
             const current = this.store.getGoal(goalId)!;
-            if (!current.lead || current.lead.settled) {
+            if (!current.lead || (current.lead.settled && !current.leadBot)) {
               // Accepted under the old flow (or its Lead ended its turn): there is no Lead to own it, and no cold owner is started.
               const note = `the Solo plan of ${goalId} has no running APOS-dispatched Lead to deliver it. Run \`apos lead start ${goalId}\`; that Lead proposes and commits again.`;
               if (
@@ -375,6 +378,7 @@ export class ControllerService {
       this.watchdog(goalId, result);
       results.push(result);
     }
+    await wakeBotLeads(this.store, this.runtime, repoPath, results);
     for (const result of results) noteErrors(this.store, result);
     return results;
   }

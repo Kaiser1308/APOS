@@ -107,6 +107,8 @@ These refuse to run from any terminal or worktree APOS dispatched an agent into,
 - `gate confirm`, `blocker resolve`, `execution abandon-intent`
 - `review submit` (the controller dispatches and reads reviewers itself, so no agent may post a verdict)
 
+They also refuse to run from the chat of an Orca bot that holds a Goal's Lead (see [Lead held by an Orca bot](#lead-held-by-an-orca-bot)), wherever that chat runs.
+
 `goal appetite` is the Human's overrun decision: it changes only the controller-held budget, never the scope.
 
 ## Install
@@ -282,6 +284,31 @@ Order: the Lead integrates and commits; the controller gates that commit and dis
 
 `integration complete` gates the integration commit itself. Every Multi-WP Goal needs an independent Goal review before it can verify; once the integration gate is green on a commit that contains every package, the controller dispatches that reviewer itself (one per gated commit) and wakes the Lead with the verdict. A Multi-WP plan must not declare `risks`: they would demand package reviews APOS does not dispatch.
 
+### Lead held by an Orca bot
+
+The Human can give a Goal's Lead role to an Orca bot (`orca bot list`) instead of an APOS-dispatched Lead:
+
+```bash
+apos handoff GOAL-001 --to-bot "Lead APOS" --by anh   # name or id
+apos handoff GOAL-001 --to-apos --by anh               # back to a fresh APOS-dispatched Lead
+```
+
+`--to-bot` works while the APOS Lead is planning, or once a Multi-WP plan runs. Like `handoff` it records an intent, stops the Lead's dispatch and refuses to go on unless Orca confirms it stopped; then `lead-transferred` records the bot (id and name), who moved it (`--by`) and when. `--to-apos` records `lead-returned`, tells the bot by an Orca `status` mail that its role ended, and starts a fresh APOS Lead with the ordinary handoff (a Solo plan already being delivered keeps its owner and starts no Lead). Both events are in the hash-chained log and replay like any other.
+
+While a bot holds the Lead:
+
+- APOS accepts Lead commands (`lead propose`, `lead commit`, every `package` decision, `package evidence/verify`, `integration gate`) only from that bot's chat. The stopped Lead's terminal and anything running in its worktree are refused.
+- The controller wakes the bot with `orca orchestration send --to bot:<id> --type handoff` instead of the Lead terminal: one mail per batch of new events, each one self-contained (the `apos --repo` command, `APOS_HOME` when the controller has one set, the Lead worktree, `lead-log.md`, the lead skill, the events), each recorded as `lead-woken`. `lead wake --note` from the Human is mailed the same way.
+- The bot never writes code, and every decision it makes is an APOS command, so it is an event with its reason:
+  - **Solo:** the bot proposes and commits; the controller then dispatches one owner on the Lead's worktree with the Solo owner brief. A red gate resumes that same owner, within `maxAttempts`, as in any Solo Goal. The bot is mailed the findings and the verified or blocked result.
+  - **Multi-WP integration:** the integration commit must be the head of a verified package: the last package of a sequential chain, or an integration package the bot adds for a Worker when branches need merging. The bot asks for the gate with `apos integration gate <goalId> --commit <sha> --reason <text>` (recorded as `integration-gate-requested`); the controller does not gate the stopped Lead's worktree on its own. `gate run` from the bot, and `integration gate` or `integration complete` on any other commit, are refused.
+  - **Goal review asks for changes:** the bot adds a fix package (`package add`), or revises the last package (`package revise`, with the review's comments in its contract and `--reason`) so the package's own owner resumes.
+- Human-only commands are refused from the bot's chat, wherever it runs.
+
+How the bot is recognized (seen on Orca 1.4.265): Orca sets `ORCA_AGENT_SESSION_ID` in a bot's chat to that chat's id, and `orca bot chats --json` run from there names the bot. APOS asks Orca that way; outside a bot chat Orca answers `invalid_argument`, which means "not a bot". When a bot holds a Lead and Orca cannot answer, Human-only commands from any session that has `ORCA_AGENT_SESSION_ID` set are refused rather than allowed.
+
+Not covered: taking a Solo plan from its APOS Lead while that Lead is delivering it (refused: that Lead is the owner writing the code), and a bot holding the Lead while it is being dispatched or handed off (refused until the controller settles it).
+
 ## Web UI
 
 `apos ui [--port 4343]` serves a **read-only** web view of one project on `127.0.0.1`. It observes; it never runs the controller (start `controller watch` separately) and never writes controller state.
@@ -330,7 +357,7 @@ The repo gets readable Goal documents (`.apos/goals/<id>/`) committed only at mi
 
 ## Trust model
 
-The controller home is **tamper-evident**, not a security boundary against a process that runs as the same OS user. Each event carries the hash of its predecessor, so an edit to the log breaks the chain and is detected; it does not stop an agent with the same user rights from reading or deleting files. The Human-only commands rely on APOS recognizing the terminals and worktrees it dispatched, which guards against an agent acting by mistake or by prompt, not against a determined local process. APOS assumes a single host operated by a trusted developer.
+The controller home is **tamper-evident**, not a security boundary against a process that runs as the same OS user. Each event carries the hash of its predecessor, so an edit to the log breaks the chain and is detected; it does not stop an agent with the same user rights from reading or deleting files. The Human-only commands rely on APOS recognizing the terminals and worktrees it dispatched, which guards against an agent acting by mistake or by prompt, not against a determined local process. APOS assumes a single host operated by a trusted developer. A bot Lead is recognized the same way, at the same level: Orca trusts the `ORCA_AGENT_SESSION_ID` it is given and does not check it, so a bot that unsets it, or a process that sets another chat's id, gets past the check. It is a guardrail against mistakes, not a boundary.
 
 ## CLI reference
 
@@ -353,10 +380,12 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `lead wake <id> --note <text>` | **Human.** Resume a Lead that ended its turn before its plan was accepted, in its own terminal, with your decision. |
 | `profile show`, `profile set <role|all> --agent <id> [--model <id>] [--effort <level>]`, `profile reset [role|all]` | Which agent each role runs; `set` and `reset` are **Human**. |
 | `handoff <goalId> [--package <id> | --reviewer] [--agent <id> [--model] [--effort]]` | **Human.** Move a stuck owner (for example out of quota) to a fresh agent on the same worktree; no attempt spent. |
+| `handoff <goalId> --to-bot <name|id> [--by <name>]`, `handoff <goalId> --to-apos [--by <name>]` | **Human.** Give the Lead role to an Orca bot, or back to a fresh APOS-dispatched Lead; both recorded in the event log. |
 | `lead propose --file <json>` | Submit an execution proposal. |
 | `lead commit <id>` | Lead only, from its own terminal. Controller checks the plan; Solo: the Lead becomes the owner; Multi-WP: dispatches packages. |
 | `package add --file <json> --reason <text>`, `package revise <goalId> --file <json> --reason <text>`, `package remove <goalId> <packageId> --reason <text>` | Lead manages Multi-WP packages. |
 | `package approve/hold <goalId> <packageId> --reason <text>`, `package approval-policy <goalId> on\|off --reason <text>`, `package decide-failure <goalId> <packageId> retry\|hold\|escalate --reason <text>` | Lead records scheduling and failure decisions. |
+| `integration gate <goalId> --commit <sha> --reason <text>` | Lead only (an APOS Lead or the bot holding it). Ask the controller to gate the integration commit; the request is an event. |
 | `integration prepare <goalId>`, `integration complete <goalId> --commit <sha>`, `integration merge <goalId> --source <commit> --target <branch>` | Multi-WP integration: prepare, record the integration commit, merge. |
 | `controller tick` | One controller pass: reconcile, gate, dispatch, wake. |
 | `controller watch [--interval-ms <n>]` | Continuous loop, inside an Orca terminal (1000 to 300000 ms; default 15000). |

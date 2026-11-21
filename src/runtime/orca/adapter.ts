@@ -23,11 +23,14 @@ import type {
   OrcaMessage,
   PackageRuntime,
   RuntimeAdapter,
+  BotIdentity,
+  BotWakeInput,
   RuntimeObservation,
   WakeInput,
 } from '../../ports/runtime.js';
 import { COMPACT, SPILL_LIMIT, launchArgs, listRuns, runOrca, type OrcaContext } from './exec.js';
 import { handoff, startReviewer, wakeLead } from './handoff.js';
+import { callerBot, findBot, mailBot, wakeBot } from './bots.js';
 import { inspectPackage, recoverPackage, resumePackage, startPackage } from './packages.js';
 import {
   assigneeOf,
@@ -419,6 +422,22 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
       ...(typeof worker.worktreeId === 'string' ? { worktreeId: worker.worktreeId } : {}),
       ...(baseCommit ? { baseCommit } : {}),
     };
+  }
+
+  findBot(nameOrId: string): BotIdentity | undefined {
+    return findBot(args => this.execute(args), nameOrId);
+  }
+
+  callerBot(): BotIdentity | undefined {
+    return callerBot(args => this.execute(args));
+  }
+
+  async wakeBot(input: BotWakeInput): Promise<{ messageId?: string }> {
+    return wakeBot(args => this.execute(args), input);
+  }
+
+  async tellBot(bot: BotIdentity, subject: string, body: string): Promise<void> {
+    mailBot(args => this.execute(args), bot, 'status', subject, body);
   }
 
   recoverPackage(key: string, knownRunId?: string): Promise<PackageRuntimeRef | undefined> {

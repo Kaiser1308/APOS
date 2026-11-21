@@ -46,7 +46,7 @@ export function noticePendingHandoff(
         kind: 'needs-decision',
         goalId,
         key: pending.key,
-        note: `the handoff of ${goalId} (from ${pending.from}) has been pending for ${HANDOFF_PENDING_MINUTES}+ min. Run \`apos handoff ${goalId}${pending.target.kind === 'package' ? ` --package ${pending.target.packageId}` : pending.target.kind === 'reviewer' ? ' --reviewer' : ''}\` to finish it (it recovers an agent that started), or check Orca and \`apos execution abandon-intent ${goalId} --key ${pending.key} --reason ...\` to drop it.`,
+        note: `the handoff of ${goalId} (from ${pending.from}) has been pending for ${HANDOFF_PENDING_MINUTES}+ min. Run \`apos handoff ${goalId}${pending.target.kind === 'package' ? ` --package ${pending.target.packageId}` : pending.target.kind === 'reviewer' ? ' --reviewer' : pending.target.kind === 'bot' ? ` --to-bot ${pending.target.botId}` : ''}\` to finish it (it recovers an agent that started), or check Orca and \`apos execution abandon-intent ${goalId} --key ${pending.key} --reason ...\` to drop it.`,
       },
       new Date(at).toISOString(),
     ),

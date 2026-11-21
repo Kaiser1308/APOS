@@ -50,7 +50,8 @@ export async function gateSettledLead(
   inspector: CommitInspector = new GitCommitInspector(),
 ): Promise<string[]> {
   const state = store.getGoal(goalId);
-  if (!state?.lead || state.integration || state.reviewDispatch || state.reviewIntent) return [];
+  // A bot Lead asks for its integration gate (`apos integration gate`); its stopped Lead dispatch has no turn to gate.
+  if (!state?.lead || state.leadBot || state.integration || state.reviewDispatch || state.reviewIntent) return [];
   const packages = Object.values(state.packages ?? {});
   if (!packages.length || !packages.every(item => item.status === 'verified')) return [];
   const ref = currentLeadRef(state.lead);

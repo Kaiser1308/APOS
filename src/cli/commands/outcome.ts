@@ -2,6 +2,7 @@ import { newEvent } from '../../app/events.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { HandoffService } from '../../app/handoff.js';
+import { LeadTransferService } from '../../app/lead-transfer.js';
 import type { HandoffTarget } from '../../domain/transitions.js';
 import { MergeService } from '../../app/merge.js';
 import {
@@ -41,6 +42,12 @@ export function registerOutcome(ctx: CliContext): void {
     .description(
       'Human: move a stuck owner (for example out of quota) to a fresh agent on the same worktree; no attempt is spent',
     )
+    .option(
+      '--to-bot <name>',
+      'give the Lead role to this Orca bot (name or id); it coordinates through APOS commands and never codes',
+    )
+    .option('--to-apos', 'give the Lead role back from its bot to a fresh APOS-dispatched Lead')
+    .option('--by <name>', 'who decided a Lead transfer', 'human')
     .option('--package <id>', 'the Worker of this package instead of the Lead')
     .option('--reviewer', 'the reviewer instead of the Lead')
     .option('--agent <id>', 'also make this agent the profile of that role (as `profile set`)')
@@ -49,10 +56,39 @@ export function registerOutcome(ctx: CliContext): void {
     .action(
       (
         goalId: string,
-        flags: { package?: string; reviewer?: boolean; agent?: string; model?: string; effort?: string },
+        flags: {
+          package?: string;
+          reviewer?: boolean;
+          agent?: string;
+          model?: string;
+          effort?: string;
+          toBot?: string;
+          toApos?: boolean;
+          by: string;
+        },
       ) =>
         withJournalAsync(async journal => {
           assertHuman(journal, 'handoff');
+          if (flags.toBot || flags.toApos) {
+            if ([flags.toBot, flags.toApos, flags.package, flags.reviewer].filter(Boolean).length > 1)
+              throw new UserError('Pass one of --to-bot, --to-apos, --package or --reviewer');
+            if (!flags.by.trim()) throw new UserError('--by needs a name');
+            if ((flags.model || flags.effort) && !flags.agent) throw new UserError('--model and --effort need --agent');
+            const transfers = new LeadTransferService(journal, runtime, () => loadProfiles(home()));
+            if (flags.toBot) {
+              if (flags.agent) throw new UserError('--agent does not apply to a bot');
+              const moved = await transfers.toBot(goalId, flags.toBot, flags.by, repo());
+              write(`Lead of ${goalId} moved to bot ${moved.bot.name} (${moved.bot.id}); stopped ${moved.from}`);
+              if (moved.warning) write(`warning: ${moved.warning}`);
+              return;
+            }
+            if (flags.agent) applyProfile(['lead'], { agent: flags.agent, model: flags.model, effort: flags.effort });
+            const back = await transfers.back(goalId, flags.by, repo());
+            write(
+              `Lead of ${goalId} returned from its bot: ${back.note}${back.dispatchId ? ` (${back.dispatchId})` : ''}`,
+            );
+            return;
+          }
           if (flags.package && flags.reviewer) throw new Error('Pass --package or --reviewer, not both');
           if ((flags.model || flags.effort) && !flags.agent) throw new Error('--model and --effort need --agent');
           const target: HandoffTarget = flags.package

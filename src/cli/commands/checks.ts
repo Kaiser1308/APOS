@@ -4,6 +4,7 @@ import { ReviewService } from '../../app/review.js';
 import { MetricsService } from '../../app/metrics.js';
 import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
+import { UserError } from '../../domain/errors.js';
 import type { CliContext } from '../context.js';
 
 export function registerChecks(ctx: CliContext): void {
@@ -19,6 +20,12 @@ export function registerChecks(ctx: CliContext): void {
     .action((goalId: string, { commit, base }: { commit: string; base?: string }) =>
       withJournal(journal => {
         if (base !== undefined) assertHuman(journal, 'gate run --base');
+        const leadBot = journal.getGoal(goalId)?.leadBot;
+        // A bot Lead asks for its gate with a recorded reason, so the request itself is an event.
+        if (leadBot && ctx.runtime.callerBot?.()?.id === leadBot.id)
+          throw new UserError(
+            `bot ${leadBot.name}: use apos integration gate ${goalId} --commit <sha> --reason <text>`,
+          );
         const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(goalId, repo(), {
           deliveryCommit: commit,
           baseCommit: base,

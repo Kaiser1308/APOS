@@ -7,6 +7,7 @@ import {
 } from '../../domain/contracts.js';
 import { SoloService } from '../../app/solo.js';
 import { LeadService, assertLeadTerminal, currentLeadRef } from '../../app/lead.js';
+import { wakeBot } from '../../app/bot-lead.js';
 import { PackageService } from '../../app/package-service.js';
 import { assertExecutionSettled } from '../../app/replan.js';
 import { GoalRegistryService } from '../../app/registry.js';
@@ -42,6 +43,14 @@ export function registerLead(ctx: CliContext): void {
       withJournalAsync(async journal => {
         assertHuman(journal, 'lead wake');
         if (!note.trim()) throw new Error('Wake note required');
+        if (journal.getGoal(id)?.leadBot) {
+          // A bot Lead has no terminal to wake: the Human's note goes to it by Orca mail, recorded like any wake.
+          const sent = await wakeBot(journal, runtime, id, repo(), [
+            `the Human says (${new Date().toISOString()}): ${note}`,
+          ]);
+          write(`Woke Lead ${id}: ${sent.join('; ')}`);
+          return;
+        }
         write(`Woke Lead ${id}: ${await new LeadService(journal, runtime).wake(id, repo(), note)}`);
       }),
     );
@@ -54,7 +63,13 @@ export function registerLead(ctx: CliContext): void {
         assertProposalRationale(parsed);
         const current = journal.getGoal(parsed.goalId);
         if (!current) throw new Error(`Goal does not exist: ${parsed.goalId}`);
-        const leadState = assertLeadTerminal(current, process.env.ORCA_TERMINAL_HANDLE, 'lead propose');
+        const leadState = assertLeadTerminal(
+          current,
+          process.env.ORCA_TERMINAL_HANDLE,
+          'lead propose',
+          process.cwd(),
+          () => runtime.callerBot?.(),
+        );
         // The gate compares against the commit the Lead's worktree was cut from: the code it actually read.
         if (parsed.baseCommit && parsed.baseCommit.toLowerCase() !== leadState.ref.baseCommit.toLowerCase())
           throw new Error(
@@ -89,7 +104,13 @@ export function registerLead(ctx: CliContext): void {
       withJournalAsync(async journal => {
         const state = journal.getGoal(id);
         if (!state) throw new Error(`Goal does not exist: ${id}`);
-        const leadState = assertLeadTerminal(state, process.env.ORCA_TERMINAL_HANDLE, 'lead commit');
+        const leadState = assertLeadTerminal(
+          state,
+          process.env.ORCA_TERMINAL_HANDLE,
+          'lead commit',
+          process.cwd(),
+          () => runtime.callerBot?.(),
+        );
         if (!state.proposal)
           throw new Error(
             `Current proposal required: ${id} has no proposal yet (run apos lead propose --file <execution.json> first)`,
@@ -134,7 +155,9 @@ export function registerLead(ctx: CliContext): void {
         } else {
           const ref = await new SoloService(journal, runtime).adopt(id);
           write(
-            `Accepted ${id}: you (Lead ${ref.dispatchId}) are the Solo owner. Deliver in this worktree and commit your report.`,
+            state.leadBot
+              ? `Accepted ${id}: the controller dispatched Solo owner ${ref.dispatchId} to deliver it; you check, you do not write code.`
+              : `Accepted ${id}: you (Lead ${ref.dispatchId}) are the Solo owner. Deliver in this worktree and commit your report.`,
           );
         }
       }),

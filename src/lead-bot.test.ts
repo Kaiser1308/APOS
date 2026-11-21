@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import { runCli } from './cli.js';
 import { spec as baseSpec, proposal, sourceText } from './domain/fixtures.test-support.js';
 import { ProjectJournal } from './store/journal.js';
+import { ReadOnlyJournal } from './store/readonly-journal.js';
+import { controllerHome } from './store/event-log.js';
+import { wakeBotLeads } from './app/bot-lead.js';
 import { newEvent } from './app/events.js';
 import { UserError } from './domain/errors.js';
 import type { GoalSpec } from './domain/contracts.js';
@@ -92,6 +95,9 @@ async function setup() {
   let stopResult: 'stopped' | 'unknown' = 'stopped';
   let caller: BotIdentity | undefined;
   let callerError: Error | undefined;
+  /** The mailbox Orca names for the bot's chat (`run-current`), and the one it stores the next wake in. */
+  let mailbox: string | undefined;
+  let landed: string | undefined;
   const runtime: RuntimeAdapter & PackageRuntime = {
     async startLead({ repoPath }) {
       return {
@@ -150,9 +156,10 @@ async function setup() {
       if (callerError) throw callerError;
       return caller;
     },
+    callerMailbox: () => mailbox,
     async wakeBot(item) {
       mails.push(item);
-      return { messageId: `msg_${mails.length}` };
+      return { messageId: `msg_${mails.length}`, ...(landed ? { toHandle: landed } : {}) };
     },
     async tellBot(bot, subject) {
       told.push(`${bot.id}:${subject}`);
@@ -281,6 +288,9 @@ async function setup() {
     tick,
     setStop: (value: 'stopped' | 'unknown') => (stopResult = value),
     setCallerError: (error: Error | undefined) => (callerError = error),
+    runtime,
+    setMailbox: (value: string | undefined) => (mailbox = value),
+    setLanded: (value: string | undefined) => (landed = value),
   };
 }
 
@@ -574,5 +584,168 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
     });
     await t.tick();
     expect(t.handoffs).toHaveLength(1);
+  });
+});
+
+describe("a bot Lead's wake mail: where Orca stored it (D) and whether the bot acted on it (A)", () => {
+  afterEach(() => vi.useRealTimers());
+  type Setup = Awaited<ReturnType<typeof setup>>;
+  const notices = (t: Setup, kind: string) =>
+    t.journal().events.filter(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === kind);
+  const resends = (t: Setup) => t.mails.filter(item => /^resent:/.test(item.events[0] ?? ''));
+
+  it('tells the Human at once when a wake lands in a mailbox other than the one the Lead chat named', async () => {
+    const t = await setup();
+    t.setLanded('run:run_home');
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
+    // No mailbox recorded yet: nothing to compare against.
+    expect(notices(t, 'lead-wake-misrouted')).toEqual([]);
+    t.setMailbox('run:run_home');
+    await t.asBot(() => t.invoke('lead', 'ack', spec.id));
+    const woken = t.mails.map((_, index) => `msg_${index + 1}`);
+    expect(t.output.at(-1)).toBe(
+      `${spec.id}: acked wake ${woken.join(', ')}; APOS expects your wake mail in run:run_home`,
+    );
+    expect(
+      t
+        .journal()
+        .events.filter(item => item.type === 'lead-bot-checked-in')
+        .at(-1)?.data,
+    ).toEqual({
+      botId: BOT.id,
+      command: 'lead ack',
+      acked: woken,
+      mailbox: 'run:run_home',
+    });
+    await t.invoke('lead', 'wake', spec.id, '--note', 'right chat');
+    expect(notices(t, 'lead-wake-misrouted')).toEqual([]);
+    // Another chat took the Home chat's Run: Orca stores the bot's mail in that chat's Run.
+    t.setLanded('run:run_other_chat');
+    await t.invoke('lead', 'wake', spec.id, '--note', 'wrong chat');
+    const [misrouted] = notices(t, 'lead-wake-misrouted');
+    expect(misrouted?.data).toMatchObject({
+      botId: BOT.id,
+      bot: 'Lead APOS',
+      messageId: `msg_${t.mails.length}`,
+      toHandle: 'run:run_other_chat',
+      expected: 'run:run_home',
+    });
+    expect((misrouted?.data as { note: string }).note).toMatch(/wake mail .* went to the wrong chat of bot Lead APOS/);
+    expect(
+      t
+        .journal()
+        .events.filter(item => item.type === 'lead-woken')
+        .at(-1)?.data,
+    ).toMatchObject({
+      toHandle: 'run:run_other_chat',
+    });
+    // Once per wrong mailbox until the bot checks in again.
+    await t.invoke('lead', 'wake', spec.id, '--note', 'wrong chat again');
+    expect(notices(t, 'lead-wake-misrouted')).toHaveLength(1);
+    // A receipt that names no mailbox leaves the check blind: said once.
+    t.setLanded(undefined);
+    await t.invoke('lead', 'wake', spec.id, '--note', 'no receipt mailbox');
+    await t.invoke('lead', 'wake', spec.id, '--note', 'no receipt mailbox again');
+    expect(notices(t, 'lead-wake-unchecked')).toHaveLength(1);
+  });
+
+  it('tells the Human once and resends once when no Lead command follows a wake within 10 minutes', async () => {
+    const t = await setup();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const start = Date.now();
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
+    const sent = t.mails.length;
+    const woken = t.mails.map((_, index) => `msg_${index + 1}`);
+    vi.setSystemTime(start + 9 * 60_000);
+    await t.tick();
+    expect(notices(t, 'lead-wake-unacked')).toEqual([]);
+    expect(resends(t)).toEqual([]);
+    vi.setSystemTime(start + 11 * 60_000);
+    await t.tick();
+    const [unacked] = notices(t, 'lead-wake-unacked');
+    expect(unacked?.data).toMatchObject({ botId: BOT.id, bot: 'Lead APOS', messageIds: woken });
+    expect(resends(t)).toHaveLength(1);
+    for (const mail of t.mails.slice(0, sent))
+      expect(resends(t)[0]!.events).toEqual(expect.arrayContaining(mail.events));
+    expect(
+      t
+        .journal()
+        .events.filter(item => item.type === 'lead-woken')
+        .at(-1)?.data,
+    ).toMatchObject({
+      resendOf: 'msg_1',
+    });
+    vi.setSystemTime(start + 25 * 60_000);
+    await t.tick();
+    vi.setSystemTime(start + 40 * 60_000);
+    await t.tick();
+    expect(notices(t, 'lead-wake-unacked')).toHaveLength(1);
+    expect(resends(t)).toHaveLength(1);
+    // The bot finally acts: the next silent wake starts a new count, with its own notice and resend.
+    await t.asBot(() => t.invoke('lead', 'ack', spec.id));
+    expect(t.output.at(-1)).toMatch(new RegExp(`acked wake ${[...woken, `msg_${sent + 1}`].join(', ')};`));
+    await t.invoke('lead', 'wake', spec.id, '--note', 'later');
+    vi.setSystemTime(start + 52 * 60_000);
+    await t.tick();
+    expect(notices(t, 'lead-wake-unacked')).toHaveLength(2);
+    expect(resends(t)).toHaveLength(2);
+  });
+
+  it('chases an unacked wake of a Goal the tick produced no result for (a verified Goal is skipped)', async () => {
+    const t = await setup();
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
+    const start = Date.now();
+    const opened = ProjectJournal.open(t.dir);
+    try {
+      await wakeBotLeads(opened.journal, t.runtime, t.dir, [], () => start + 11 * 60_000);
+    } finally {
+      opened.close();
+    }
+    expect(notices(t, 'lead-wake-unacked')).toHaveLength(1);
+    expect(resends(t)).toHaveLength(1);
+  });
+
+  it('counts any Lead command from the bot as the ack, but not one from the old Lead terminal', async () => {
+    for (const ack of [
+      ['lead', 'ack', spec.id],
+      ['package', 'approval-policy', spec.id, 'off', '--reason', 'bot decides'],
+    ]) {
+      const t = await setup();
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const start = Date.now();
+      await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
+      vi.setSystemTime(start + 5 * 60_000);
+      await expect(t.asLead(() => t.invoke(...ack))).rejects.toThrow(/run this from that bot's chat/);
+      expect(t.journal().events.some(item => item.type === 'lead-bot-checked-in')).toBe(false);
+      await t.asBot(() => t.invoke(...ack));
+      vi.setSystemTime(start + 11 * 60_000);
+      await t.tick();
+      expect(notices(t, 'lead-wake-unacked')).toEqual([]);
+      expect(resends(t)).toEqual([]);
+      vi.useRealTimers();
+    }
+  });
+
+  it('replays the check-ins, notices and resend from the hash-chained log to the same state', async () => {
+    const t = await setup();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const start = Date.now();
+    t.setLanded('run:run_other_chat');
+    t.setMailbox('run:run_home');
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
+    await t.asBot(() => t.invoke('lead', 'ack', spec.id));
+    await t.invoke('lead', 'wake', spec.id, '--note', 'wrong chat');
+    vi.setSystemTime(start + 11 * 60_000);
+    await t.tick();
+    vi.useRealTimers();
+    const live = t.journal();
+    const types = live.events.map(item => item.type);
+    expect(types).toContain('lead-bot-checked-in');
+    expect(notices(t, 'lead-wake-misrouted')).toHaveLength(1);
+    expect(notices(t, 'lead-wake-unacked')).toHaveLength(1);
+    const replayed = new ReadOnlyJournal(controllerHome(t.dir));
+    expect(replayed.failures.size).toBe(0);
+    expect(replayed.events(spec.id).map(item => item.type)).toEqual(types);
+    expect(replayed.getGoal(spec.id)).toEqual(live.goal);
   });
 });

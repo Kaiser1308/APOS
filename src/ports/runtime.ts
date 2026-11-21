@@ -135,8 +135,10 @@ export interface RuntimeAdapter {
   findBot?(nameOrId: string): BotIdentity | undefined;
   /** The bot whose chat runs this process; undefined outside a bot chat; throws when Orca cannot tell. */
   callerBot?(): BotIdentity | undefined;
-  /** Mails the bot holding a Lead its events (`orca orchestration send --to bot:<id> --type handoff`). */
-  wakeBot?(input: BotWakeInput): Promise<{ messageId?: string }>;
+  /** The mailbox Orca stores this chat's mail in (`run:<id>` or `orca_session_id:<id>`); undefined outside Orca. */
+  callerMailbox?(): string | undefined;
+  /** Mails the bot holding a Lead its events (`orca orchestration send --to bot:<id> --type handoff`); `toHandle` is where Orca stored it. */
+  wakeBot?(input: BotWakeInput): Promise<{ messageId?: string; toHandle?: string }>;
   /** Information for a bot with nothing to do (`--type status`), such as its Lead role ending. */
   tellBot?(bot: BotIdentity, subject: string, body: string): Promise<void>;
 }

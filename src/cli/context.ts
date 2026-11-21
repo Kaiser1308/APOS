@@ -15,6 +15,7 @@ import type { ControllerRequest } from '../domain/controller-requests.js';
 import { ProjectJournal } from '../store/journal.js';
 import { newEvent } from '../app/events.js';
 import { assertLeadTerminal } from '../app/lead.js';
+import { recordBotCheckIn } from '../app/bot-wake-check.js';
 import { UserError } from '../domain/errors.js';
 import type { LeadState } from '../domain/transitions.js';
 import type { CliOptions } from './options.js';
@@ -33,6 +34,8 @@ export type CliContext = {
   assertHuman(journal: ProjectJournal, command: string): void;
   /** The Goal's Lead only: the terminal or worktree APOS dispatched it, or the chat of the bot it moved to. */
   assertLead(journal: ProjectJournal, goalId: string, command: string): LeadState;
+  /** After a Lead check passed for the bot holding the Lead: it acks the wakes before it and names its chat's mailbox. */
+  checkInBot(journal: ProjectJournal, goalId: string, command: string): ReturnType<typeof recordBotCheckIn> | undefined;
   /** Set when a bot, a worker or another agent runs this command: it must not start workers or bind a Run. */
   callerAgent(journal: ProjectJournal): string | undefined;
   /** Queues a command that starts or moves an agent for the controller, and says so (warning when no watch runs). */
@@ -215,7 +218,24 @@ export function createContext(program: Command, options: CliOptions): CliContext
           }),
       );
     if (foreignTerminal) throw new UserError(`${command} is Lead only`);
-    return assertLeadTerminal(state, handle, command, process.cwd(), () => runtime.callerBot?.());
+    const lead = assertLeadTerminal(state, handle, command, process.cwd(), () => runtime.callerBot?.());
+    checkInBot(journal, goalId, command);
+    return lead;
+  };
+  /**
+   * Only after `assertLeadTerminal` passed: with a bot holding the Lead, this process is that bot's chat. Orca not
+   * naming the chat's mailbox never blocks the command; the ack still counts and check D keeps the last mailbox.
+   */
+  const checkInBot = (journal: ProjectJournal, goalId: string, command: string) => {
+    const bot = journal.getGoal(goalId)?.leadBot;
+    if (!bot) return undefined;
+    let mailbox: string | undefined;
+    try {
+      mailbox = runtime.callerMailbox?.();
+    } catch {
+      mailbox = undefined;
+    }
+    return recordBotCheckIn(journal, goalId, bot.id, mailbox, command);
   };
   const home = () => options.home ?? controllerHome(repo());
   const awaitController = (what: string) => {
@@ -259,6 +279,7 @@ export function createContext(program: Command, options: CliOptions): CliContext
     withJournalAsync,
     assertHuman,
     assertLead,
+    checkInBot,
     callerAgent,
     requestDispatch,
     awaitController,

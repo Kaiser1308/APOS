@@ -64,6 +64,7 @@ export type GoalEventType =
   | 'owner-handed-off'
   | 'lead-transferred'
   | 'lead-returned'
+  | 'lead-bot-checked-in'
   | 'owner-progress-observed'
   | 'verified'
   | 'outcome-accepted'
@@ -1344,6 +1345,13 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'lead-transferred':
     case 'lead-returned':
       return applyLeadTransfer(state, event);
+    case 'lead-bot-checked-in':
+      // The bot holding the Lead ran a Lead command: it acks the wakes before it and names its chat's mailbox.
+      requireThat(
+        state.leadBot && (event.data as { botId?: string } | undefined)?.botId === state.leadBot.id,
+        'Only the bot holding the Lead checks in',
+      );
+      return state;
     case 'human-notified':
       requireThat(event.data && typeof event.data === 'object', 'Notification details required');
       return state;

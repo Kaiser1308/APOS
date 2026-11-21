@@ -30,7 +30,7 @@ import type {
 } from '../../ports/runtime.js';
 import { COMPACT, SPILL_LIMIT, launchArgs, listRuns, runOrca, type OrcaContext } from './exec.js';
 import { handoff, startReviewer, wakeLead } from './handoff.js';
-import { callerBot, findBot, mailBot, wakeBot } from './bots.js';
+import { callerBot, callerMailbox, findBot, mailBot, wakeBot } from './bots.js';
 import { runCoordinator } from './runs.js';
 import { inspectPackage, recoverPackage, resumePackage, startPackage } from './packages.js';
 import {
@@ -443,7 +443,11 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
     return callerBot(args => this.execute(args));
   }
 
-  async wakeBot(input: BotWakeInput): Promise<{ messageId?: string }> {
+  callerMailbox(): string | undefined {
+    return callerMailbox(args => this.execute(args));
+  }
+
+  async wakeBot(input: BotWakeInput): Promise<{ messageId?: string; toHandle?: string }> {
     return wakeBot(args => this.execute(args), input);
   }
 

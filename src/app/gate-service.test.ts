@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
@@ -189,6 +189,27 @@ describe('controller gate on real commits', () => {
     const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery });
     expect(report.result).toBe('red');
     expect(report.checks.find(item => item.checkId === 'APOS-PROTECTED')?.reason).toMatch(/.apos\/skills\/reviewer.md/);
+  }, 60_000);
+
+  it('gives the checks the main checkout node_modules when the lock is unchanged and records it in the log (seen live: GOAL-G3 CHK-2 "prettier is not recognized")', async () => {
+    const { dir, commit, gate } = await project();
+    const lock = `${JSON.stringify({ name: 'p', lockfileVersion: 3, requires: true, packages: {} })}\n`;
+    const delivery = commit(
+      {
+        '.gitignore': 'node_modules/\n',
+        'package.json': '{"name":"p","version":"1.0.0"}',
+        'package-lock.json': lock,
+        'feature.js': "require('fs').readFileSync('node_modules/tool/bin.txt'); process.exit(0);",
+      },
+      'feature needs an installed tool',
+    );
+    mkdirSync(join(dir, 'node_modules', 'tool'), { recursive: true });
+    writeFileSync(join(dir, 'node_modules', 'tool', 'bin.txt'), 'tool');
+    const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery });
+    const check = report.checks.find(item => item.checkId === 'CHK-1')!;
+    expect(check.status).toBe('pass');
+    expect(readFileSync(check.delivery[0].logRef, 'utf8')).toMatch(/# dependencies: linked node_modules from /);
+    expect(existsSync(join(dir, 'node_modules', 'tool', 'bin.txt'))).toBe(true);
   }, 60_000);
 
   it('kills a hung check at its timeout and still removes the workspace', async () => {

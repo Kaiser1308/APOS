@@ -259,14 +259,17 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
   }
 
   /**
-   * Consumes the Run's unread batch once the controller handled every message it read. Returns the mail that
-   * arrived after that read: it is consumed now, so the caller handles it in the same tick. Handled mail that
-   * is already gone (an empty batch) is not an error.
+   * Consumes the Run's unread batch once the controller handled every message it read. Mail that arrived since
+   * that read is not consumed: a fresh peek finds it and nothing is consumed this tick, so it all comes back on
+   * the next read. Only mail landing between that peek and the consume is returned, consumed, for the caller to
+   * handle now. Handled mail that is already gone (an empty batch) is not an error.
    */
   async ackRun(runId: string, handled: string[]): Promise<OrcaMessage[]> {
     this.execute(['orchestration', 'run-use', '--id', runId]);
     const seen = new Set(handled);
-    return messagesOf(this.execute(['orchestration', 'check', '--run', runId])).filter(item => !seen.has(item.id));
+    const unseen = (rows: OrcaMessage[]) => rows.filter(item => !seen.has(item.id));
+    if (unseen(messagesOf(this.execute(['orchestration', 'check', '--run', runId, '--peek']))).length) return [];
+    return unseen(messagesOf(this.execute(['orchestration', 'check', '--run', runId])));
   }
 
   async retainWorker(dispatchId: string): Promise<void> {

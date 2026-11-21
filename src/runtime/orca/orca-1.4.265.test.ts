@@ -125,11 +125,27 @@ describe('Orca 1.4.265 mail: a consuming check marks its batch handled', () => {
     expect(calls.at(-1)).toEqual(['orchestration', 'check', '--run', 'run_21c066a74d51', '--peek']);
   });
 
-  it('ackRun consumes without --ack and returns only the mail that arrived after the read', async () => {
+  it('ackRun consumes nothing while mail it did not handle is unread: that mail comes back next tick', async () => {
     const calls: string[][] = [];
     const runtime = new OrcaRuntime(args => {
       calls.push(args);
-      return args[1] === 'check' ? fixture('check-consume') : {};
+      return args[1] === 'check' ? fixture('check-peek') : {};
+    });
+    expect(await runtime.ackRun('run_21c066a74d51', ['msg_54e54fbdf34c', 'msg_f99a4f63806b'])).toEqual([]);
+    expect(calls.filter(args => args[1] === 'check')).toEqual([
+      ['orchestration', 'check', '--run', 'run_21c066a74d51', '--peek'],
+    ]);
+  });
+
+  it('ackRun consumes without --ack once all unread mail is handled, and returns mail that landed in between', async () => {
+    const calls: string[][] = [];
+    const runtime = new OrcaRuntime(args => {
+      calls.push(args);
+      if (args[1] !== 'check') return {};
+      // The peek sees only handled mail; the worker_done lands just before the consume.
+      return args.includes('--peek')
+        ? { messages: messagesOf(fixture('check-peek')).slice(0, 2) }
+        : fixture('check-consume');
     });
     const late = await runtime.ackRun('run_21c066a74d51', ['msg_54e54fbdf34c', 'msg_f99a4f63806b']);
     expect(late.map(item => item.id)).toEqual(['msg_18d9c9b6ab36']);

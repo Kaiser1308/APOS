@@ -181,11 +181,23 @@ export class ControllerService {
       delivery.messages.map(item => item.id),
     );
     if (!late.length) return;
-    // Mail that arrived between the read and the consume is consumed already: handle it now. What stays pending
-    // reaches this tick's supervisor but will not come back.
+    // Mail that landed in the instant between the adapter's last peek and its consume is consumed already: handle
+    // it now. It will not be read again, so a message that stays pending (a worker question the Lead may not be
+    // woken for) goes to the Human's inbox instead of being lost. A worker_done needs nothing: settlement is
+    // read from the dispatch itself.
     await handle(late);
-    if (result.inboxPending.length)
-      result.supervised.push(`consumed while pending, not re-read next tick: ${result.inboxPending.join(', ')}`);
+    for (const message of late)
+      if (message.type !== 'worker_done' && result.inboxPending.includes(`${message.type}:${message.id}`))
+        this.store.append(
+          newEvent(goalId, 'human-notified', {
+            kind: 'needs-decision',
+            goalId,
+            messageId: message.id,
+            subject: message.subject,
+            body: message.body,
+            note: `Orca ${message.type} ${message.id} arrived while the controller consumed the Run's mail and will not be read again: ${message.subject ?? message.body ?? ''}`,
+          }),
+        );
   }
 
   /** Notifies the Human once per message and answers the owner with the standing rule. */

@@ -213,7 +213,10 @@ it('keeps pending mail unconsumed until it is handled, then handles mail that ar
   add('execution-started', ref);
   // Orca 1.4.265 check rows: no Delivery id. The worker_done arrives before its dispatch reads settled.
   const unread: OrcaMessage[] = [{ id: 'msg-1', type: 'worker_done', payload: { dispatchId: 'ctx-1' } }];
-  const late: OrcaMessage = { id: 'msg-late', type: 'worker_done', payload: { dispatchId: 'ctx-old' } };
+  const late: OrcaMessage[] = [
+    { id: 'msg-late', type: 'worker_done', payload: { dispatchId: 'ctx-old' } },
+    { id: 'msg-late-2', type: 'merge_ready', subject: 'ready to merge' },
+  ];
   let settled = false;
   const consumed: string[][] = [];
   const runtime: RuntimeAdapter & PackageRuntime = {
@@ -235,7 +238,7 @@ it('keeps pending mail unconsumed until it is handled, then handles mail that ar
     async retainWorker() {},
     async ackRun(_run, handled) {
       consumed.push(handled);
-      return [late];
+      return late;
     },
   };
   const first = (await new ControllerService(store, runtime).tick(dir))[0];
@@ -247,6 +250,14 @@ it('keeps pending mail unconsumed until it is handled, then handles mail that ar
   expect(consumed).toEqual([['msg-1']]);
   expect(store.getGoal(spec.id)?.settlements).toEqual({ 'ctx-1': 'completed' });
   expect(second.settled).toContain('stale msg-late');
+  // Consumed and still pending: it will not be read again, so the Human hears of it.
+  expect(
+    store
+      .events(spec.id)
+      .filter(
+        item => item.type === 'human-notified' && (item.data as { messageId?: string }).messageId === 'msg-late-2',
+      ),
+  ).toHaveLength(1);
   store.close();
 });
 

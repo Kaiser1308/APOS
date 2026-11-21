@@ -12,7 +12,7 @@ Verified against Orca 1.4.265 on 2026-11-21, in a scratch Git repo, from a plain
 
 ## Mail
 
-A consuming `orchestration check --run <run>` marks the batch it returns as handled and gives no Delivery id; `--ack` is only for older Orca. `check --peek` returns every unread message without marking it. APOS reads with `--peek` (`checkRun`) and consumes with a plain `check` (`ackRun`) only after it handled every message it read, so mail it leaves pending is unread on the next tick. `ackRun` returns any message the consume took that the read did not see, and the controller handles it in the same tick. Seen live: a peek, then a consume after more mail arrived, returned the same three messages, and the next peek was empty.
+A consuming `orchestration check --run <run>` marks the batch it returns as handled and gives no Delivery id; `--ack` is only for older Orca. `check --peek` returns every unread message without marking it. APOS reads with `--peek` (`checkRun`) and consumes with a plain `check` (`ackRun`) only after it handled every message it read, so mail it leaves pending is unread on the next tick. Before consuming, `ackRun` peeks again: if unread mail the controller did not handle is there, it consumes nothing that tick, and all of it comes back. Only mail that lands between that peek and the consume is returned. The controller handles it in the same tick, and sends to the Human's inbox any of it that stays pending. Seen live: a peek, then a consume after more mail arrived, returned the same three messages, and the next peek was empty.
 
 A chat coordinator (a `structworker_*` Orca session) gets its mail pushed into the chat, which marks it handled; only a terminal coordinator sees mail wait in `check`.
 

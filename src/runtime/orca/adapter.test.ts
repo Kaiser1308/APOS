@@ -403,6 +403,7 @@ it('binds to the Goal Run, reads its mail without consuming it, then consumes th
   expect(calls.filter(args => args[1] === 'run-use')).toHaveLength(2);
   expect(calls.filter(args => args[1] === 'check')).toEqual([
     ['orchestration', 'check', '--run', 'run_1', '--peek'],
+    ['orchestration', 'check', '--run', 'run_1', '--peek'],
     ['orchestration', 'check', '--run', 'run_1'],
   ]);
 });

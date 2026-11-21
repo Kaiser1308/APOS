@@ -3,6 +3,7 @@ import type { PackageRuntimeRef } from '../../domain/runtime-refs.js';
 import { packageBrief, packageReportPath, parseRepoMarker, repoMarker } from '../brief.js';
 import { OrcaRefused, launchArgs, listRuns, type OrcaContext } from './exec.js';
 import { composeBase } from './git.js';
+import { runCoordinator } from './runs.js';
 import { assigneeOf, extractStartedRef, id, interpretWorkerShow, object, profileChanged, runIdOf } from './parse.js';
 
 export function packageRun(ctx: OrcaContext, repoPath: string, goalId: string, goalVersion: number): Promise<string> {
@@ -10,7 +11,12 @@ export function packageRun(ctx: OrcaContext, repoPath: string, goalId: string, g
   let pending = ctx.packageRuns.get(objective);
   if (!pending) {
     pending = Promise.resolve().then(() => {
-      const existing = listRuns(args => ctx.execute(args)).find(row => row.objective === objective);
+      // Only a Run this terminal coordinates takes its workers: one created before, or by another session, would
+      // fence every start, and taking it over (`run-use`) would unbind this controller's other Runs.
+      const self = process.env.ORCA_TERMINAL_HANDLE;
+      const existing = listRuns(args => ctx.execute(args))
+        .filter(row => row.objective === objective)
+        .find(row => !self || runCoordinator(ctx.execute, id(row.id, 'Run ID')) === self);
       if (existing) return id(existing.id, 'Run ID');
       return runIdOf(ctx.execute(['orchestration', 'run-create', '--objective', objective]));
     });
@@ -36,7 +42,6 @@ export async function startPackage(
   if (!/^[0-9a-fA-F]{40,64}$/.test(baseCommit)) throw new Error('Full package base commit required');
   ctx.execute(['repo', 'add', '--path', input.repoPath]);
   const runId = await packageRun(ctx, input.repoPath, item.goalId, item.goalVersion);
-  ctx.execute(['orchestration', 'run-use', '--id', runId]);
   const spec = packageBrief({
     repoPath: input.repoPath,
     goalId: item.goalId,
@@ -129,7 +134,6 @@ export async function resumePackage(
     return { ...ref, owner: 'worker' };
   }
   if (!prior.terminal || !prior.worktreeId) throw new Error('Original Worker terminal and worktree required');
-  ctx.execute(['orchestration', 'run-use', '--id', prior.runId]);
   const spec = [
     `${item.goalId}, ${item.id}: continue the same package owner for contract v${item.version}, attempt ${input.attempt ?? 2}. Work only in your current working directory, your own worktree; never in the APOS repo.`,
     ...(input.finding

@@ -31,6 +31,7 @@ import type {
 import { COMPACT, SPILL_LIMIT, launchArgs, listRuns, runOrca, type OrcaContext } from './exec.js';
 import { handoff, startReviewer, wakeLead } from './handoff.js';
 import { callerBot, findBot, mailBot, wakeBot } from './bots.js';
+import { runCoordinator } from './runs.js';
 import { inspectPackage, recoverPackage, resumePackage, startPackage } from './packages.js';
 import {
   assigneeOf,
@@ -188,7 +189,6 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
       });
     }
     if (!ref.terminal) throw new Error('Orca terminal identity required to resume same owner');
-    this.execute(['orchestration', 'run-use', '--id', ref.runId]);
     if (!ref.worktreeId) throw new Error('Solo owner worktree identity required to resume same owner');
     const spec = repairBrief({
       repoPath: ref.repoPath,
@@ -250,8 +250,11 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
    * gives no Delivery to ack, so mail the controller leaves pending must not be consumed: it comes back next tick.
    */
   async checkRun(runId: string): Promise<OrcaDelivery> {
-    this.execute(['orchestration', 'run-use', '--id', runId]);
     return { messages: messagesOf(this.execute(['orchestration', 'check', '--run', runId, '--peek'])) };
+  }
+
+  async runCoordinator(runId: string): Promise<string | null> {
+    return runCoordinator(args => this.execute(args), runId);
   }
 
   async replyMessage(runId: string, messageId: string, body: string): Promise<void> {
@@ -265,7 +268,6 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
    * handle now. Handled mail that is already gone (an empty batch) is not an error.
    */
   async ackRun(runId: string, handled: string[]): Promise<OrcaMessage[]> {
-    this.execute(['orchestration', 'run-use', '--id', runId]);
     const seen = new Set(handled);
     const unseen = (rows: OrcaMessage[]) => rows.filter(item => !seen.has(item.id));
     if (unseen(messagesOf(this.execute(['orchestration', 'check', '--run', runId, '--peek']))).length) return [];

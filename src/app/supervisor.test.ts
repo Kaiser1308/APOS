@@ -104,7 +104,7 @@ async function setup(
   const budgets: (Budget | undefined)[] = [];
   const replies: { messageId: string; body: string }[] = [];
   const acked: string[] = [];
-  let inbox = options.inbox ?? [];
+  let inbox: OrcaMessage[] = [];
   let reviewKey: string | undefined;
   let lostReviewer: RuntimeRef | undefined;
   let refusals = 0;
@@ -236,10 +236,13 @@ async function setup(
   await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
   await invoke('goal', 'approve', spec.id, ...APPETITE);
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   await asLead('term_1', async () => {
     await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
     await invoke('lead', 'commit', spec.id);
   });
+  await invoke('controller', 'tick'); // the controller records the Lead as the Solo owner
+  inbox = options.inbox ?? []; // the owner's mail, once it owns the Goal
   runOwner();
   const tick = async () => {
     await invoke('controller', 'tick');

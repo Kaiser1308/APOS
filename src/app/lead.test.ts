@@ -360,7 +360,8 @@ describe('the Lead terminal through the CLI (I3, I5)', () => {
       '2',
     );
     await invoke('goal', 'select', spec.id);
-    expect(output.at(-1)).toBe(`Dispatched Lead ${spec.id}: lead_1`);
+    await invoke('controller', 'tick'); // the controller alone dispatches the Lead
+    expect(output.at(-1)).toContain('start the Lead: Lead lead_1');
     const head = git('rev-parse', 'HEAD');
     writeFileSync(join(dir, 'plan.json'), JSON.stringify(proposal));
     // Main moves on while the Lead plans: the plan still gates against the code the Lead read (F7).
@@ -382,6 +383,9 @@ describe('the Lead terminal through the CLI (I3, I5)', () => {
     );
     await expect(invoke('lead', 'propose', '--file', join(dir, 'no-rationale.json'))).rejects.toThrow(/rationale/);
     await invoke('lead', 'commit', spec.id);
+    delete process.env.ORCA_TERMINAL_HANDLE; // the controller runs in its own terminal
+    await invoke('controller', 'tick'); // and records the Lead as the Solo owner
+    process.env.ORCA_TERMINAL_HANDLE = 'term_lead';
     const opened = ProjectJournal.open(dir);
     try {
       expect(opened.journal.getGoal(spec.id)).toMatchObject({

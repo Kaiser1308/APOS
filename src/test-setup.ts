@@ -6,5 +6,6 @@ import { join } from 'node:path';
 process.env.APOS_HOME = process.env.APOS_TEST_HOME ?? mkdtempSync(join(tmpdir(), 'apos-home-'));
 // Tests run inside Orca terminals; they must not inherit the developer's terminal identity.
 delete process.env.ORCA_TERMINAL_HANDLE;
+delete process.env.ORCA_AGENT_SESSION_ID;
 // Tests use the skills bundled in this repo; a developer's APOS_SKILLS must not leak in.
 delete process.env.APOS_SKILLS;

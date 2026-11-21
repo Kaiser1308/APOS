@@ -157,6 +157,7 @@ async function setup() {
     '3',
   );
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   const state = () => {
     const opened = ProjectJournal.open(dir);
     try {
@@ -176,6 +177,8 @@ describe('a bot Lead on a Solo Goal never writes code', () => {
       /Lead terminal APOS dispatched/,
     );
     await invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    expect(stopped).toEqual([]); // queued: the controller moves the Lead at its next tick
+    await invoke('controller', 'tick');
     expect(stopped).toEqual(['ctx_lead']);
     expect(output.at(-1)).toMatch(/moved to bot Lead APOS/);
     expect(state().goal.leadBot).toMatchObject({ id: BOT.id, name: 'Lead APOS', by: 'anh' });
@@ -192,7 +195,10 @@ describe('a bot Lead on a Solo Goal never writes code', () => {
       await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
       await invoke('lead', 'commit', spec.id);
     });
-    expect(output.at(-1)).toMatch(/dispatched Solo owner ctx_owner/);
+    expect(output.join('\n')).toMatch(/the controller dispatches a Solo owner to deliver it at its next tick/);
+    expect(handoffs).toHaveLength(0);
+    await invoke('controller', 'tick');
+    expect(output.at(-1)).toContain('ctx_owner');
     expect(handoffs).toHaveLength(1);
     expect(handoffs[0]).toMatchObject({ kind: 'solo-owner', attempt: 1 });
     expect(handoffs[0].extra).toMatch(/Lead is the Orca bot Lead APOS/);

@@ -193,12 +193,14 @@ async function setup() {
     '3',
   );
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   await asLead(async () => {
     await invoke('lead', 'propose', '--file', input('proposal.json', { ...proposal, mode: 'multi-wp' }));
     await invoke('package', 'add', '--file', input('wp-a.json', a), '--reason', 'First stage');
     await invoke('package', 'add', '--file', input('wp-b.json', b), '--reason', 'Second stage');
     await invoke('lead', 'commit', spec.id);
   });
+  await invoke('controller', 'tick'); // the controller dispatches the ready package
   const journal = () => {
     const opened = ProjectJournal.open(dir);
     try {
@@ -227,6 +229,33 @@ async function setup() {
       commitRef,
       note,
     });
+  /** A controller tick, from the controller's own terminal even inside asBot or asLead. */
+  const tick = async () => {
+    const was = { caller, handle: process.env.ORCA_TERMINAL_HANDLE };
+    caller = undefined;
+    delete process.env.ORCA_TERMINAL_HANDLE;
+    try {
+      await invoke('controller', 'tick');
+    } finally {
+      caller = was.caller;
+      if (was.handle) process.env.ORCA_TERMINAL_HANDLE = was.handle;
+    }
+  };
+  /** The Human's `apos handoff`, carried out by the controller's next tick; the error it settled with, if any. */
+  const handoffError = async (...args: string[]): Promise<string | undefined> => {
+    const settled = () => journal().events.filter(item => item.type === 'controller-request-settled');
+    const before = settled().length;
+    await invoke('handoff', spec.id, ...args);
+    await invoke('controller', 'tick');
+    return settled()
+      .slice(before)
+      .map(item => (item.data as { error?: string }).error)
+      .find(Boolean);
+  };
+  const handoff = async (...args: string[]) => {
+    const error = await handoffError(...args);
+    if (error) throw new Error(error);
+  };
   return {
     dir,
     leadTree,
@@ -247,6 +276,9 @@ async function setup() {
     told,
     stops,
     inspected,
+    handoff,
+    handoffError,
+    tick,
     setStop: (value: 'stopped' | 'unknown') => (stopResult = value),
     setCallerError: (error: Error | undefined) => (callerError = error),
   };
@@ -259,18 +291,16 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
       /No Orca bot Nobody/,
     );
     t.setStop('unknown');
-    await expect(t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh')).rejects.toThrow(
-      /Could not confirm the Lead stopped/,
-    );
+    expect(await t.handoffError('--to-bot', 'Lead APOS', '--by', 'anh')).toMatch(/Could not confirm the Lead stopped/);
     expect(t.journal().goal.leadBot).toBeUndefined();
     expect(
       t
         .journal()
-        .events.slice(-2)
-        .map(item => item.type),
+        .events.map(item => item.type)
+        .filter(type => ['handoff-intended', 'intent-abandoned', 'lead-transferred'].includes(type)),
     ).toEqual(['handoff-intended', 'intent-abandoned']);
     t.setStop('stopped');
-    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
     const { goal, events } = t.journal();
     expect(goal.leadBot).toMatchObject({ id: BOT.id, name: 'Lead APOS', by: 'anh' });
     expect(events.find(item => item.type === 'lead-transferred')?.data).toMatchObject({
@@ -285,7 +315,7 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
 
   it('refuses every Human command from the bot, wherever it runs, and fails closed when Orca cannot tell', async () => {
     const t = await setup();
-    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
     const appetite = ['--size', 'L', '--max-spend', '99', '--max-minutes', '999', '--max-attempts', '9'];
     const human: string[][] = [
       ['goal', 'approve', spec.id, ...appetite],
@@ -328,7 +358,7 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
 
   it('takes Lead commands only from the bot, integrates on a verified package head, and fixes a review by packages', async () => {
     const t = await setup();
-    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
     // The stopped Lead's terminal, and any process in its worktree, no longer speak for the Lead.
     await expect(
       t.asLead(() => t.invoke('package', 'approve', spec.id, 'WP-02', '--reason', 'old Lead')),
@@ -345,6 +375,7 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
       await t.invoke('package', 'verify', spec.id, 'WP-01');
       await t.invoke('package', 'approve', spec.id, 'WP-02', '--reason', 'WP-01 checked');
       await t.invoke('package', 'dispatch', spec.id);
+      await t.tick(); // the controller dispatches what the bot released
       await t.invoke('package', 'evidence', spec.id, '--file', t.evidence(b, 'WP-AC-2', commitB));
       await t.invoke('package', 'verify', spec.id, 'WP-02');
       // The bot asks for its gate with a reason; a bare gate run and a commit it could have written are refused.
@@ -380,6 +411,7 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
       );
       await t.invoke('package', 'approve', spec.id, 'WP-03', '--reason', 'Fix package for the review');
       await t.invoke('package', 'dispatch', spec.id);
+      await t.tick(); // the controller dispatches what the bot released
     });
     expect(t.starts).toEqual(['WP-01', 'WP-02', 'WP-03']);
     expect(t.journal().goal.packages?.['WP-03']?.status).toBe('executing');
@@ -403,6 +435,8 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
       );
       await t.invoke('package', 'approve', spec.id, 'WP-03', '--reason', 'Revised for the second review');
       await t.invoke('package', 'resume', spec.id, 'WP-03');
+      expect(t.resumes).toEqual([]); // queued for the controller
+      await t.tick();
     });
     expect(t.resumes).toEqual(['WP-03:WP-03']);
     expect(t.journal().goal.packages?.['WP-03']?.status).toBe('executing');
@@ -435,7 +469,7 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
 
   it('wakes the bot from controller tick through Orca, never inspecting, waking or gating the stopped Lead', async () => {
     const t = await setup();
-    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
     const commitA = t.commit('scanner.ts', 'export const scan = true;', 'scanner');
     await t.asBot(async () => {
       await t.invoke('package', 'evidence', spec.id, '--file', t.evidence(a, 'WP-AC-1', commitA));
@@ -460,7 +494,7 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
 
   it('refuses to give the Lead back while a reviewer start is pending, before telling the bot anything', async () => {
     const t = await setup();
-    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
     const commitA = t.commit('scanner.ts', 'export const scan = true;', 'scanner');
     const commitB = t.commit('feature.js', 'process.exit(0);', 'history');
     await t.asBot(async () => {
@@ -468,6 +502,7 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
       await t.invoke('package', 'verify', spec.id, 'WP-01');
       await t.invoke('package', 'approve', spec.id, 'WP-02', '--reason', 'WP-01 checked');
       await t.invoke('package', 'dispatch', spec.id);
+      await t.tick(); // the controller dispatches what the bot released
       await t.invoke('package', 'evidence', spec.id, '--file', t.evidence(b, 'WP-AC-2', commitB));
       await t.invoke('package', 'verify', spec.id, 'WP-02');
       await t.invoke('integration', 'gate', spec.id, '--commit', commitB, '--reason', 'end of the chain');
@@ -475,7 +510,7 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
     const opened = ProjectJournal.open(t.dir);
     opened.journal.append(newEvent(spec.id, 'review-intended', { key: 'rk', commit: commitB }));
     opened.close();
-    await expect(t.invoke('handoff', spec.id, '--to-apos', '--by', 'anh')).rejects.toThrow(/pending/);
+    expect(await t.handoffError('--to-apos', '--by', 'anh')).toMatch(/pending/);
     expect(t.journal().events.some(item => item.type === 'lead-returned')).toBe(false);
     expect(t.journal().goal.leadBot).toMatchObject({ id: BOT.id });
     expect(t.told).toEqual([]);
@@ -483,26 +518,31 @@ describe('the Lead of a Multi-WP Goal moved to an Orca bot', () => {
 
   it('refuses to give the Lead back while the Goal is blocked for a reason a fresh Lead cannot clear', async () => {
     const t = await setup();
-    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
     await t.invoke('blocker', 'report', spec.id, '--kind', 'external', '--note', 'Test service unavailable');
-    await expect(t.invoke('handoff', spec.id, '--to-apos', '--by', 'anh')).rejects.toThrow(
-      /blocked for another reason/,
-    );
+    expect(await t.handoffError('--to-apos', '--by', 'anh')).toMatch(/blocked for another reason/);
     expect(t.journal().events.some(item => item.type === 'lead-returned')).toBe(false);
     expect(t.told).toEqual([]);
   });
 
   it('gives the Lead back to a fresh APOS Lead on a Human command, recorded as an event', async () => {
     const t = await setup();
-    await t.invoke('handoff', spec.id, '--to-bot', 'Lead APOS', '--by', 'anh');
-    await expect(t.invoke('handoff', spec.id)).rejects.toThrow(/--to-apos/);
-    await t.invoke('handoff', spec.id, '--to-apos', '--by', 'anh');
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
+    expect(await t.handoffError()).toMatch(/--to-apos/);
+    await t.handoff('--to-apos', '--by', 'anh');
     expect(t.told).toEqual([`${BOT.id}:APOS ${spec.id}: Lead role ended`]);
     expect(t.handoffs.map(item => item.kind)).toEqual(['lead-multi']);
     const { goal, events } = t.journal();
     expect(goal.leadBot).toBeUndefined();
     expect(goal.lead?.current).toBe('lead-2');
-    expect(events.slice(-3).map(item => item.type)).toEqual(['lead-returned', 'handoff-intended', 'owner-handed-off']);
+    expect(
+      events
+        .map(item => item.type)
+        .filter(
+          type => !['controller-request-settled', 'human-notified', 'decision-logged', 'lead-woken'].includes(type),
+        )
+        .slice(-3),
+    ).toEqual(['lead-returned', 'handoff-intended', 'owner-handed-off']);
     expect(events.find(item => item.type === 'lead-returned')?.data).toEqual({ by: 'anh', botId: BOT.id });
     await expect(t.asBot(() => t.invoke('package', 'approve', spec.id, 'WP-02', '--reason', 'late'))).rejects.toThrow(
       /must run from the Lead terminal/,

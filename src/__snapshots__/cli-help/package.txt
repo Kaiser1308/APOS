@@ -4,6 +4,7 @@ Options:
   -h, --help                                                display help for command
 
 Commands:
+  answer [options] <goalId> <packageId>                     Lead: answer a Worker's question; the controller sends it on the package's Run at its next tick
   add [options]
   remove [options] <goalId> <packageId>
   approve [options] <goalId> <packageId>
@@ -12,7 +13,7 @@ Commands:
   decide-failure [options] <goalId> <packageId> <decision>
   list <goalId>
   ready <goalId>
-  dispatch <goalId>
+  dispatch <goalId>                                         the controller dispatches every ready package at its next tick; this lists them
   reconcile <goalId>
   evidence [options] <goalId>
   verify <goalId> <packageId>

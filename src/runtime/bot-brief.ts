@@ -42,7 +42,7 @@ export function botLeadBrief(input: BotWakeInput): string {
   const mode =
     input.mode === 'multi'
       ? [
-          `See where packages stand with ${apos} package list ${goal}. Decide with package approve/hold/add/remove/revise/decide-failure/evidence/verify, each with --reason where it takes one.`,
+          `See where packages stand with ${apos} package list ${goal}. Decide with package approve/hold/add/remove/revise/decide-failure/evidence/verify, each with --reason where it takes one. Answer a Worker's question with ${apos} package answer ${goal} <packageId> --message-id <id> --text-file <file> --reason <why>; the controller sends it. You never send, reply or start workers through Orca yourself.`,
           `Integration is the head of a verified package: the head of the last package of a sequential chain, or of an integration package you add for a Worker when branches must be merged. Ask the controller to gate it with ${apos} integration gate ${goal} --commit <that head> --reason <why>; after a passing Goal review run ${apos} integration complete ${goal} --commit <that head>.`,
           `When the Goal review asks for changes, add a fix package (package add) or revise the last package (package revise, the review's comments in its contract and --reason) so its owner resumes; never fix it yourself.`,
         ]

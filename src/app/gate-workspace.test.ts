@@ -115,6 +115,20 @@ describe('gate worktree dependencies', () => {
     expect(readFileSync(join(dir, 'node_modules', 'dep', 'sentinel.txt'), 'utf8')).toBe('installed');
   });
 
+  it('runs npm ci instead of linking when a root install script may generate into node_modules (PR #37 review)', () => {
+    const generating = JSON.stringify({ name: 'scratch', version: '1.0.0', scripts: { postinstall: 'node gen.js' } });
+    const { dir, head } = repo({ 'package.json': generating, 'package-lock.json': lock('scratch') });
+    const executor = new RecordingExecutor();
+    const workspace = new GitWorktreeFactory({ executor }).checkout(dir, head);
+    try {
+      expect(existsSync(join(workspace.path, 'node_modules'))).toBe(false);
+      expect(executor.calls).toHaveLength(1);
+      expect(workspace.preparation).toMatch(/\(package.json has a root install script/);
+    } finally {
+      workspace.dispose();
+    }
+  });
+
   it('changes nothing for a project without package.json', () => {
     const { dir, head } = repo({ 'main.py': 'print(1)\n' });
     const executor = new RecordingExecutor();

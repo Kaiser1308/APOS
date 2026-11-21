@@ -70,6 +70,22 @@ function hasLocalLinks(lockText: string): boolean {
   return entries(packages).some(linked) || entries(dependencies).some(linked);
 }
 
+const ROOT_INSTALL_SCRIPTS = ['preinstall', 'install', 'postinstall', 'prepare'];
+
+/**
+ * A root install script can generate files into node_modules from checkout sources, so the main
+ * checkout's tree may hold its own generated code (reported on PR #37). Unreadable means a fresh install.
+ */
+function hasRootInstallScript(packageJsonPath: string): boolean {
+  if (!existsSync(packageJsonPath)) return false;
+  try {
+    const { scripts } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { scripts?: unknown };
+    return typeof scripts === 'object' && scripts !== null && ROOT_INSTALL_SCRIPTS.some(name => name in scripts);
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Seen live (GOAL-G3, WP-SIGNALS): CHK-2 `npm run check` went red with "prettier is not recognized"
  * because a fresh worktree has no node_modules. When the gate commit's lock file is identical to the
@@ -96,6 +112,8 @@ export function prepareDependencies(
     reason = 'package-lock.json differs from the main checkout';
   else if (hasLocalLinks(readFileSync(lockPath, 'utf8')))
     reason = 'package-lock.json has workspace or file: links into the checkout';
+  else if (hasRootInstallScript(join(path, 'package.json')) || hasRootInstallScript(join(repo, 'package.json')))
+    reason = 'package.json has a root install script that may generate into node_modules';
   else {
     const target = realpathSync(mainModules);
     try {

@@ -436,7 +436,7 @@ export class ControllerService {
       this.watchdog(goalId, result);
       results.push(result);
     }
-    await wakeBotLeads(this.store, this.runtime, repoPath, results);
+    await wakeBotLeads(this.store, this.runtime, repoPath, results, this.options.now ?? Date.now);
     for (const result of results) noteErrors(this.store, result);
     return results;
   }

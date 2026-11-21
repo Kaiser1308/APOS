@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { terminalWorktree } from './exec.js';
 import { composeBase } from './git.js';
 import { OrcaRuntime } from './adapter.js';
@@ -218,41 +218,67 @@ it('shares one Orca Run across independent packages in a dispatch wave', async (
   expect(refs.map(ref => ref.runId)).toEqual(['run_shared', 'run_shared']);
 });
 
-it('rebinds an existing Goal Run before dispatching its next package wave', async () => {
-  const calls: string[][] = [];
-  const runtime = new OrcaRuntime(
-    args => {
-      calls.push(args);
-      if (args[0] === 'repo') return { repo: {} };
-      if (args[1] === 'run-list')
-        return { runs: [{ id: 'run_shared', objective: 'APOS package Run C:/project GOAL-001 goal v1' }] };
-      if (args[1] === 'run-use') return { run: { id: 'run_shared' } };
-      return { runId: 'run_shared', taskId: 'task_2', dispatchId: 'ctx_2', effects: [] };
-    },
-    () => 'a'.repeat(40),
-    DEFAULT_PROFILES,
-    () => 'd'.repeat(64),
-  );
-  await runtime.startPackage({
-    repoPath: 'C:/project',
-    idempotencyKey: 'key-2',
-    package: {
-      id: 'WP-02',
-      goalId: 'GOAL-001',
-      goalVersion: 1,
-      version: 1,
-      owner: 'worker-b',
-      outcome: 'History',
-      scope: ['history'],
-      exclusions: [],
-      dependencies: [],
-      interfaces: ['history()@v1'],
-      acceptance: [{ id: 'WP-AC-2', text: 'history' }],
-      integration: 'Lead verifies',
-    },
+describe('the package Run of a Goal', () => {
+  const wp2 = {
+    id: 'WP-02',
+    goalId: 'GOAL-001',
+    goalVersion: 1,
+    version: 1,
+    owner: 'worker-b',
+    outcome: 'History',
+    scope: ['history'],
+    exclusions: [],
+    dependencies: [],
+    interfaces: ['history()@v1'],
+    acceptance: [{ id: 'WP-AC-2', text: 'history' }],
+    integration: 'Lead verifies',
+  };
+  const packageRuntime = (holder: string | null, calls: string[][]) =>
+    new OrcaRuntime(
+      args => {
+        calls.push(args);
+        if (args[0] === 'repo') return { repo: {} };
+        if (args[1] === 'run-list')
+          return { runs: [{ id: 'run_shared', objective: 'APOS package Run C:/project GOAL-001 goal v1' }] };
+        if (args[1] === 'run-show')
+          return { run: { id: 'run_shared', coordinator_handle: holder, consumer_generation: 3 } };
+        if (args[1] === 'run-create') return { runId: 'run_new' };
+        const runId = args[args.indexOf('--run') + 1];
+        return { runId, taskId: 'task_2', dispatchId: 'ctx_2', effects: [] };
+      },
+      () => 'a'.repeat(40),
+      DEFAULT_PROFILES,
+      () => 'd'.repeat(64),
+    );
+  afterEach(() => {
+    delete process.env.ORCA_TERMINAL_HANDLE;
   });
-  expect(calls.find(args => args[1] === 'run-use')).toEqual(['orchestration', 'run-use', '--id', 'run_shared']);
-  expect(calls.some(args => args[1] === 'run-create')).toBe(false);
+
+  it('starts the next wave in the Goal Run this controller coordinates, with --run and never run-use', async () => {
+    process.env.ORCA_TERMINAL_HANDLE = 'term_controller';
+    const calls: string[][] = [];
+    const ref = await packageRuntime('term_controller', calls).startPackage({
+      repoPath: 'C:/project',
+      idempotencyKey: 'key-2',
+      package: wp2,
+    });
+    expect(ref.runId).toBe('run_shared');
+    expect(calls.find(args => args[1] === 'worker-start')).toEqual(expect.arrayContaining(['--run', 'run_shared']));
+    expect(calls.some(args => args[1] === 'run-use' || args[1] === 'run-create')).toBe(false);
+  });
+
+  it('creates its own Run instead of taking over one another terminal coordinates', async () => {
+    process.env.ORCA_TERMINAL_HANDLE = 'term_controller';
+    const calls: string[][] = [];
+    const ref = await packageRuntime('term_bot_chat', calls).startPackage({
+      repoPath: 'C:/project',
+      idempotencyKey: 'key-2',
+      package: wp2,
+    });
+    expect(ref.runId).toBe('run_new');
+    expect(calls.find(args => args[1] === 'worker-start')).toEqual(expect.arrayContaining(['--run', 'run_new']));
+    expect(calls.some(args => args[1] === 'run-use')).toBe(false);
+  });
 });
 
 it('finds a package dispatch on an older Orca Run page', async () => {
@@ -390,17 +416,16 @@ describe('Orca worker-start receipt', () => {
   });
 });
 
-it('binds to the Goal Run, reads its mail without consuming it, then consumes the handled batch', async () => {
+it('reads the Goal Run mail with --run and no run-use, without consuming it, then consumes the handled batch', async () => {
   const calls: string[][] = [];
   const runtime = new OrcaRuntime(args => {
     calls.push(args);
-    if (args[1] === 'run-use') return { run: { id: 'run_1' } };
     return { messages: [{ id: 'msg_1', type: 'status', body: 'ready' }] };
   });
   const delivery = await runtime.checkRun('run_1');
   expect(delivery).toEqual({ messages: [{ id: 'msg_1', type: 'status', body: 'ready' }] });
   expect(await runtime.ackRun('run_1', ['msg_1'])).toEqual([]);
-  expect(calls.filter(args => args[1] === 'run-use')).toHaveLength(2);
+  expect(calls.filter(args => args[1] === 'run-use')).toHaveLength(0);
   expect(calls.filter(args => args[1] === 'check')).toEqual([
     ['orchestration', 'check', '--run', 'run_1', '--peek'],
     ['orchestration', 'check', '--run', 'run_1', '--peek'],
@@ -743,7 +768,7 @@ describe('handing work to another agent', () => {
     expect(start).not.toContain('--terminal');
     expect(start).not.toContain('new-top-level');
     expect(start[start.indexOf('--spec') + 1]).toContain('APOS dispatch key: hk.');
-    expect(calls.some(args => args[1] === 'run-use' && args.includes('run_1'))).toBe(true);
+    expect(calls.some(args => args[1] === 'run-use')).toBe(false);
     expect(ref).toMatchObject({
       dispatchId: 'ctx_2',
       terminal: 'term_2',

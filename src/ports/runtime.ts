@@ -26,6 +26,8 @@ export type OrcaMessage = {
   payload?: unknown;
   dispatch_id?: string;
   dispatchId?: string;
+  /** The sender's Orca handle (a worker's terminal or chat). */
+  from?: string;
 };
 /** An Orca bot on this computer (`orca bot list`); one can hold a Multi-WP Lead role. */
 export type BotIdentity = { id: string; name: string; paused?: boolean };
@@ -88,6 +90,8 @@ export interface RuntimeAdapter {
     idempotencyKey: string,
     budget?: Budget,
   ): Promise<RuntimeRef>;
+  /** The terminal Orca has as the Run's coordinator (`run-show --full`); null when no terminal is bound. */
+  runCoordinator?(runId: string): Promise<string | null>;
   /** Replies to an owner's message on its Run. */
   replyMessage?(runId: string, messageId: string, body: string): Promise<void>;
   inspect(ref: RuntimeRef): Promise<RuntimeObservation>;

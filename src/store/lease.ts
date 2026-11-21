@@ -26,7 +26,10 @@ export async function withControllerLease<T>(
     try {
       const now = new Date().toISOString();
       writeFileSync(path, JSON.stringify({ pid: process.pid, at: now }), { flag: 'wx' });
-      writeFileSync(join(home, 'controller.heartbeat'), JSON.stringify({ pid: process.pid, at: now }));
+      writeFileSync(
+        join(home, 'controller.heartbeat'),
+        JSON.stringify({ pid: process.pid, at: now, terminal: process.env.ORCA_TERMINAL_HANDLE }),
+      );
       try {
         return { ran: true, value: await fn() };
       } finally {
@@ -47,4 +50,24 @@ export async function withControllerLease<T>(
     }
   }
   throw new Error('controller lease could not be acquired');
+}
+
+/**
+ * The controller watch that ticked this project lately and still runs: the pid of its last tick is alive and that
+ * tick is younger than `maxAgeMs` (longer than the slowest watch interval). Undefined when none does, or for this
+ * process. `terminal` is the Orca terminal it runs in, which coordinates every Run the controller created.
+ */
+export function liveController(
+  home: string,
+  maxAgeMs = 10 * 60_000,
+): { pid: number; at: string; terminal?: string } | undefined {
+  let beat: { pid?: unknown; at?: unknown; terminal?: unknown };
+  try {
+    beat = JSON.parse(readFileSync(join(home, 'controller.heartbeat'), 'utf8'));
+  } catch {
+    return undefined;
+  }
+  if (typeof beat.pid !== 'number' || typeof beat.at !== 'string' || beat.pid === process.pid) return undefined;
+  if (!(Date.now() - Date.parse(beat.at) < maxAgeMs) || !alive(beat.pid)) return undefined;
+  return { pid: beat.pid, at: beat.at, ...(typeof beat.terminal === 'string' ? { terminal: beat.terminal } : {}) };
 }

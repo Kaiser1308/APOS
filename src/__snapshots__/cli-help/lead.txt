@@ -5,8 +5,8 @@ Options:
 
 Commands:
   recommend
-  start <id>             Human: dispatch the Lead of a selected Goal (goal
-                         select does this; use it to retry)
+  start <id>             Human: ask the controller to dispatch the Lead of a
+                         selected Goal (goal select does this; use it to retry)
   wake [options] <id>    Human: wake a Lead that ended its turn before its plan
                          was accepted, on its own terminal
   propose [options]

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { PackageService } from '../../app/package-service.js';
 import { parseWorkPackage } from '../../domain/packages.js';
 import { newEvent } from '../../app/events.js';
@@ -5,8 +6,18 @@ import type { CliContext } from '../context.js';
 import { UserError } from '../../domain/errors.js';
 
 export function registerPackage(ctx: CliContext): void {
-  const { program, write, packageRuntime, repo, withJournal, withJournalAsync, readJsonFile, assertHuman, assertLead } =
-    ctx;
+  const {
+    program,
+    write,
+    packageRuntime,
+    withJournal,
+    withJournalAsync,
+    readJsonFile,
+    assertHuman,
+    assertLead,
+    requestDispatch,
+    awaitController,
+  } = ctx;
   const assertLeadOrHuman = (journal: Parameters<typeof assertHuman>[0], goalId: string, command: string) => {
     try {
       assertHuman(journal, command);
@@ -15,6 +26,31 @@ export function registerPackage(ctx: CliContext): void {
     }
   };
   const packages = program.command('package');
+  packages
+    .command('answer')
+    .argument('<goalId>')
+    .argument('<packageId>')
+    .requiredOption('--message-id <id>', "the Orca message id of the Worker's question, as the wake names it")
+    .requiredOption('--text-file <file>', 'your answer, sent to the Worker as written')
+    .requiredOption('--reason <text>', 'why, for the log')
+    .description("Lead: answer a Worker's question; the controller sends it on the package's Run at its next tick")
+    .action((goalId: string, packageId: string, flags: { messageId: string; textFile: string; reason: string }) =>
+      withJournal(journal => {
+        assertLead(journal, goalId, 'package answer');
+        const text = readFileSync(flags.textFile, 'utf8').replace(/^﻿/, '').trim();
+        if (!text) throw new UserError('The answer is empty');
+        if (!flags.reason.trim()) throw new UserError('An answer needs a reason');
+        if (!journal.getGoal(goalId)?.packages?.[packageId]?.runtimeRef)
+          throw new UserError(`${packageId} of ${goalId} has no Worker to answer`);
+        requestDispatch(journal, goalId, {
+          kind: 'worker-answer',
+          packageId,
+          messageId: flags.messageId,
+          text,
+          reason: flags.reason,
+        });
+      }),
+    );
   packages
     .command('add')
     .requiredOption('--file <json>')
@@ -109,10 +145,13 @@ export function registerPackage(ctx: CliContext): void {
   packages
     .command('dispatch')
     .argument('<goalId>')
+    .description('the controller dispatches every ready package at its next tick; this lists them')
     .action((goalId: string) =>
-      withJournalAsync(async journal => {
-        const refs = await new PackageService(journal, packageRuntime()).dispatchReady(goalId, repo());
-        write(JSON.stringify(refs));
+      withJournal(journal => {
+        const ready = new PackageService(journal, packageRuntime()).ready(goalId).map(item => item.id);
+        awaitController(
+          `${goalId}: the controller dispatches ready packages at its next tick (ready now: ${ready.join(', ') || 'none'}).`,
+        );
       }),
     );
   packages
@@ -143,8 +182,7 @@ export function registerPackage(ctx: CliContext): void {
         assertLeadOrHuman(journal, goalId, 'package verify');
         const service = new PackageService(journal, packageRuntime());
         await service.verify(goalId, packageId);
-        const refs = await service.dispatchReady(goalId, repo());
-        write(`Verified ${packageId}; dispatched ${refs.map(ref => ref.dispatchId).join(', ') || 'none'}`);
+        awaitController(`Verified ${packageId}; the controller dispatches the packages it unblocks at its next tick.`);
       }),
     );
   packages
@@ -192,9 +230,10 @@ export function registerPackage(ctx: CliContext): void {
     .argument('<goalId>')
     .argument('<packageId>')
     .action((goalId: string, packageId: string) =>
-      withJournalAsync(async journal => {
-        const ref = await new PackageService(journal, packageRuntime()).resumeStale(goalId, packageId);
-        write(`Resumed ${packageId}: ${ref.dispatchId}`);
+      withJournal(journal => {
+        if (journal.getGoal(goalId)?.packages?.[packageId]?.status !== 'stale')
+          throw new UserError(`${packageId} is not a stale package of ${goalId}`);
+        requestDispatch(journal, goalId, { kind: 'package-resume', packageId });
       }),
     );
 }

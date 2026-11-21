@@ -59,7 +59,7 @@ Design notes: [`docs/FINAL-DESIGN.md`](docs/FINAL-DESIGN.md) (v2.1, in Vietnames
 | Who | Decides | Commands |
 | --- | --- | --- |
 | **PM + Human** | WHAT: which Goals, outcome, acceptance, appetite (budget) | `goal create --source`, **gate A** `goal approve` |
-| **Human** | Which approved Goal runs next. Selecting it dispatches its Lead | **gate B** `lead recommend`, `goal select` |
+| **Human** | Which approved Goal runs next. Selecting it asks the controller to dispatch its Lead | **gate B** `lead recommend`, `goal select` |
 | **Lead** (agent) | HOW: Solo or Multi-WP, packages, interfaces. No Human approval. In Solo it then delivers, in the same session | `lead propose`, `lead commit` |
 | **Controller** (no LLM) | Machine checks, dispatch, gates, findings, retries, wake-ups, budget breakers | `controller tick` / `controller watch` |
 | **Owner / Worker** (agent) | Implements in its own Orca worktree | dispatched by the controller |
@@ -73,7 +73,7 @@ flowchart TD
     subgraph Human1["Human and PM"]
         A[Source brief] --> B[goal create<br/>source snapshot + sha256]
         B --> C[goal approve<br/>gate A: scope + appetite]
-        C --> D[goal select<br/>gate B: dispatches the Lead]
+        C --> D[goal select<br/>gate B: the controller dispatches the Lead]
     end
     subgraph Lead["Lead"]
         D --> E[lead propose<br/>Solo or Multi-WP]
@@ -145,16 +145,16 @@ apos goal create --file goal.json --source brief.md
 # 2. Gate A: the Human approves the Goal and sets the controller's appetite
 apos goal approve GOAL-001 --size M --max-spend 20 --max-minutes 240 --max-attempts 3
 
-# 3. Gate B: choose what runs next; this dispatches the Lead into its own Orca worktree
+# 3. Gate B: choose what runs next; the controller then dispatches the Lead into its own Orca worktree
 apos lead recommend
 apos goal select GOAL-001
 
 # 4. The Lead (not you) proposes a plan from its own terminal; the controller checks it.
-#    Solo: the Lead is the owner and delivers in the same session. Multi-WP: packages are dispatched.
+#    Solo: the Lead is the owner and delivers in the same session. Multi-WP: the controller dispatches packages.
 apos --repo C:\path\to\project lead propose --file execution.json
 apos --repo C:\path\to\project lead commit GOAL-001
 
-# 5. Supervise (inside an Orca terminal), or run one pass at a time
+# 5. Supervise from a plain Orca terminal (not an agent chat). It must run: it alone starts every agent.
 apos controller watch            # or: apos controller tick
 
 # 6. Watch from a browser, or wait for the next event that needs you (no polling loop needed)
@@ -237,9 +237,11 @@ The **appetite** (`size`, `maxSpendUsd`, `maxWallMinutes`, `maxAttempts`, `overr
 
 **Before dispatch** (`lead commit`), the controller checks the plan's source hash and Goal version, that there are no open questions, that `rationale` (or `splitRationale`) explains why the Lead chose Solo or Multi-WP, and that the estimate fits the appetite. For Multi-WP it also checks at least two packages, an acyclic graph, versioned interfaces (`name@vN`), acceptance coverage and a split rationale.
 
-**The Lead is dispatched at gate B.** `goal select` starts the Lead in its own Orca worktree, cut from the managed repo's HEAD at that moment (its base commit). The appetite's wall clock starts here: planning counts. `lead propose` and `lead commit` are accepted only from that Lead's terminal, and the plan gates against the Lead's base, even if `main` moves meanwhile. If Orca refused the dispatch, `apos lead start <id>` retries it; an unknown outcome is recovered by key and reaches `apos inbox` after 10 minutes.
+**The Lead is dispatched at gate B.** `goal select` asks the controller, which at its next tick starts the Lead in its own Orca worktree, cut from the managed repo's HEAD at that moment (its base commit). The appetite's wall clock starts here: planning counts. `lead propose` and `lead commit` are accepted only from that Lead's terminal, and the plan gates against the Lead's base, even if `main` moves meanwhile. If Orca refused the dispatch, `apos inbox` says so and `apos lead start <id>` asks again; an unknown outcome is recovered by key and reaches `apos inbox` after 10 minutes.
 
 **Solo has no second dispatch.** When `lead commit` accepts a Solo plan, the controller records the Lead's own dispatch as the owner, and the Lead keeps going in the same turn with everything it read while planning. If the Lead ends its turn before any plan is accepted (for example the estimate exceeds the appetite), `apos inbox` says so; decide, then `apos lead wake <id> --note "..."` resumes it in the same terminal.
+
+**Only the controller dispatches.** Orca lets only a Run's coordinator start workers in it (`worker-start --run`) and read its mail (`check --run`), and `orca orchestration run-use` takes a Run from whoever holds it while unbinding every other Run of the caller. So `apos controller watch`, running in a plain Orca terminal, is the only process that creates Runs and starts, resumes, wakes, stops or hands off agents, always passing `--run <id>`; APOS never calls `run-use`. Every command that used to dispatch only records a request in the log: `goal select`, `lead start`, `lead wake`, `handoff` (also `--to-bot` and `--to-apos`), `package dispatch`, `package resume`, `execution start`, `execution resume` and `execution retry` from the Human; `lead commit`, `package verify`, `package approve` and `package answer` from the Lead, whether an APOS Lead terminal or a bot. The CLI says the controller acts at its next tick, and warns when no `controller watch` is running. The request's result, or why it failed, shows in `apos inbox`. `controller watch` and `controller tick` refuse to run in an agent session (a bot's chat, a worker: Orca sets `ORCA_AGENT_SESSION_ID` there) or in a terminal or worktree APOS dispatched, and beside a live watch in another terminal. Each tick reads every active Goal's Runs with `run-show --full`: if one is coordinated by another terminal, or by nobody, the controller leaves that Goal alone and tells the Human once (`run-coordinator-drift`) instead of taking it back. A Goal in flight from before this change usually has such Runs (the old per-command `run-use` unbound them): finish or stop it and start it again, or, when it is the controller's only Goal in flight, run `orca orchestration run-use --id <run>` once in the controller terminal.
 
 **Dispatch.** Every agent runs in its own Orca worktree created from an exact base commit, using its role profile (default: Codex `gpt-6.1-terra` for Lead and Worker, `gpt-6-sol` for Reviewer). The brief points at `.apos/skills/_core/execute.md` and the role skill by path and sha256, and names the activation line the delivery report must contain.
 
@@ -266,11 +268,11 @@ The **appetite** (`size`, `maxSpendUsd`, `maxWallMinutes`, `maxAttempts`, `overr
 
 ### Multi-WP
 
-The Lead adds packages (`package add --file wp.json --reason "..."`). Each names its owner, dependencies, versioned interfaces and local acceptance, optionally with `checkIds` from the Goal's checks. Then the Lead runs `lead commit GOAL-001` from its own terminal. APOS already knows that terminal from the Lead's dispatch and wakes it there (`--terminal` is no longer needed; if given, it must match). The Lead reports `worker_done` and ends its turn once the packages are dispatched.
+The Lead adds packages (`package add --file wp.json --reason "..."`). Each names its owner, dependencies, versioned interfaces and local acceptance, optionally with `checkIds` from the Goal's checks. Then the Lead runs `lead commit GOAL-001` from its own terminal. APOS already knows that terminal from the Lead's dispatch and wakes it there (`--terminal` is no longer needed; if given, it must match). The Lead reports `worker_done` and ends its turn; the controller dispatches the packages at its next tick.
 
 The controller then:
 
-- dispatches root packages at plan commit; by default each dependency-ready package waits for `package approve <goalId> <packageId> --reason <text>` or `package hold ... --reason <text>` from the Lead;
+- dispatches root packages at its first tick after the plan commit; by default each dependency-ready package waits for `package approve <goalId> <packageId> --reason <text>` or `package hold ... --reason <text>` from the Lead;
 - gates each settled package on its own head against its base: green verifies the package, red sends it back to the same owner with the finding;
 - wakes the Lead's terminal once per batch of new events (package results, owner questions, ready to integrate, a red integration gate), and only after the Lead's previous turn has settled.
 
@@ -293,7 +295,7 @@ apos handoff GOAL-001 --to-bot "Lead APOS" --by anh   # name or id
 apos handoff GOAL-001 --to-apos --by anh               # back to a fresh APOS-dispatched Lead
 ```
 
-`--to-bot` works while the APOS Lead is planning, or once a Multi-WP plan runs. Like `handoff` it records an intent, stops the Lead's dispatch and refuses to go on unless Orca confirms it stopped; then `lead-transferred` records the bot (id and name), who moved it (`--by`) and when. `--to-apos` records `lead-returned`, tells the bot by an Orca `status` mail that its role ended, and starts a fresh APOS Lead with the ordinary handoff (a Solo plan already being delivered keeps its owner and starts no Lead). Both events are in the hash-chained log and replay like any other.
+`--to-bot` works while the APOS Lead is planning, or once a Multi-WP plan runs. Like `handoff` it is carried out by the controller at its next tick: it records an intent, stops the Lead's dispatch and refuses to go on unless Orca confirms it stopped; then `lead-transferred` records the bot (id and name), who moved it (`--by`) and when. `--to-apos` records `lead-returned`, tells the bot by an Orca `status` mail that its role ended, and starts a fresh APOS Lead with the ordinary handoff (a Solo plan already being delivered keeps its owner and starts no Lead). Both events are in the hash-chained log and replay like any other.
 
 While a bot holds the Lead:
 
@@ -302,6 +304,7 @@ While a bot holds the Lead:
 - The bot never writes code, and every decision it makes is an APOS command, so it is an event with its reason:
   - **Solo:** the bot proposes and commits; the controller then dispatches one owner on the Lead's worktree with the Solo owner brief. A red gate resumes that same owner, within `maxAttempts`, as in any Solo Goal. The bot is mailed the findings and the verified or blocked result.
   - **Multi-WP integration:** the integration commit must be the head of a verified package: the last package of a sequential chain, or an integration package the bot adds for a Worker when branches need merging. The bot asks for the gate with `apos integration gate <goalId> --commit <sha> --reason <text>` (recorded as `integration-gate-requested`); the controller does not gate the stopped Lead's worktree on its own. `gate run` from the bot, and `integration gate` or `integration complete` on any other commit, are refused.
+  - **A Worker asks a question:** the wake names it and the command that answers it, `apos package answer <goalId> <packageId> --message-id <id> --text-file <file> --reason <text>`. The controller sends the answer on the package's Run; the bot never talks to a Worker through Orca itself.
   - **Goal review asks for changes:** the bot adds a fix package (`package add`), or revises the last package (`package revise`, with the review's comments in its contract and `--reason`) so the package's own owner resumes.
 - Human-only commands are refused from the bot's chat, wherever it runs.
 

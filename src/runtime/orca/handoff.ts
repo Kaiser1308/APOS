@@ -6,7 +6,6 @@ import { extractStartedRef, id, profileChanged } from './parse.js';
 
 /** Starts the role's current profile on an existing worktree and Run with a handoff brief: a fresh agent, never the old terminal. */
 export async function handoff(ctx: OrcaContext, input: HandoffInput): Promise<RuntimeRef> {
-  ctx.execute(['orchestration', 'run-use', '--id', input.runId]);
   const requested = ctx.profile(input.role);
   const spec = handoffBrief({
     ...input,
@@ -49,7 +48,6 @@ export async function startReviewer(
     runId: string;
   },
 ): Promise<ReviewerRef> {
-  ctx.execute(['orchestration', 'run-use', '--id', input.runId]);
   // Pin the reviewer skill at the base commit: the delivery under review must not choose its reviewer's rules.
   const spec = reviewBrief({
     repoPath: input.repoPath,
@@ -108,7 +106,6 @@ export async function wakeLead(
     });
     return { dispatchId: ref.dispatchId, terminal: ref.terminal, requested: ref.requested };
   }
-  ctx.execute(['orchestration', 'run-use', '--id', input.runId]);
   const joined = input.events.map((item, index) => `(${index + 1}) ${item}`).join('\n');
   const events =
     joined.length > SPILL_LIMIT

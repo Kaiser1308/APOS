@@ -15,7 +15,6 @@ import { parseAppetite } from '../../domain/contracts.js';
 import { UserError } from '../../domain/errors.js';
 import { sourceDigest } from '../../domain/gate.js';
 import { buildPlan } from '../../domain/plan.js';
-import { LeadService } from '../../app/lead.js';
 import { assertExecutionSettled } from '../../app/replan.js';
 import { GoalRegistryService } from '../../app/registry.js';
 import { describeProfiles } from '../../runtime/brief.js';
@@ -23,8 +22,19 @@ import { controllerHome } from '../../store/event-log.js';
 import type { CliContext } from '../context.js';
 
 export function registerGoal(ctx: CliContext): void {
-  const { program, options, write, runtime, repo, home, withJournal, withJournalAsync, assertHuman, goalWithSource } =
-    ctx;
+  const {
+    program,
+    options,
+    write,
+    runtime,
+    repo,
+    home,
+    withJournal,
+    withJournalAsync,
+    assertHuman,
+    goalWithSource,
+    requestDispatch,
+  } = ctx;
   const goal = program.command('goal');
   goal
     .command('create')
@@ -79,12 +89,12 @@ export function registerGoal(ctx: CliContext): void {
         write(`Appetite for ${id} updated`);
       }),
     );
-  // Gate B. Selecting a Goal dispatches its Lead, which plans and, in Solo, delivers in the same session.
+  // Gate B. Selecting a Goal asks the controller to dispatch its Lead, which plans and, in Solo, delivers in the same session.
   goal
     .command('select')
     .argument('<id>')
     .action((id: string) =>
-      withJournalAsync(async journal => {
+      withJournal(journal => {
         assertHuman(journal, 'goal select');
         new GoalRegistryService(journal).select(id);
         write(`Selected ${id}`);
@@ -92,18 +102,7 @@ export function registerGoal(ctx: CliContext): void {
         write(
           `Lead runs on ${lead.agent}${lead.model ? ` model=${lead.model}` : ''}${lead.effort ? ` effort=${lead.effort}` : ''} (${lead.source}); change it first with \`apos profile set lead --agent <id> --model <id>\`, or move a running Lead with \`apos handoff ${id}\`.`,
         );
-        try {
-          write(`Dispatched Lead ${id}: ${(await new LeadService(journal, runtime).start(id, repo())).dispatchId}`);
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          // A refusal abandons the intent, so a retry is safe. Any other failure leaves the intent pending: Orca may have created the task.
-          const key = journal.getGoal(id)?.leadIntent;
-          write(
-            key
-              ? `Lead dispatch outcome unknown for ${id}: ${reason}. Do not retry yet: check \`orca orchestration task-list --run <run_id>\` (find \`<run_id>\` with \`orca orchestration run-list\`), then \`apos execution abandon-intent ${id} --key ${key} --reason ...\` if Orca created nothing, then \`apos lead start ${id}\`.`
-              : `Lead not dispatched for ${id}: ${reason}. Retry with \`apos lead start ${id}\`.`,
-          );
-        }
+        requestDispatch(journal, id, { kind: 'lead-start' });
       }),
     );
   goal

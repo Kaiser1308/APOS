@@ -2,6 +2,8 @@ import { newEvent } from './events.js';
 import {
   noteErrors,
   noticeLeadQuestion,
+  answered,
+  describeQuestion,
   noticePendingHandoff,
   watchdog,
   type ControllerTick,
@@ -17,6 +19,9 @@ import { SoloSupervisor, type SupervisorOptions } from './solo-supervisor.js';
 import type { OrcaMessage, PackageRuntime, RuntimeAdapter } from '../ports/runtime.js';
 import type { PackageRuntimeRef, RuntimeRef } from '../domain/runtime-refs.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
+import type { RuntimeProfiles } from '../domain/runtime-refs.js';
+import { DEFAULT_PROFILES } from '../runtime/brief.js';
+import { openGoalTick } from './controller-requests.js';
 
 /**
  * The standing answer to an owner's question or escalation in Solo. Seen live: an owner escalated a
@@ -37,12 +42,21 @@ function logOnce(store: GoalRepository, goalId: string, note: string): void {
     store.append(newEvent(goalId, 'decision-logged', { note }));
 }
 
+export type ControllerOptions = SupervisorOptions & {
+  /** The Orca terminal the controller runs in: every Run it creates is coordinated from there (`run-ownership.ts`). */
+  controllerTerminal?: string;
+  /** Role profiles for the agents queued requests start. */
+  profiles?: () => RuntimeProfiles;
+};
+
 export class ControllerService {
   constructor(
     private readonly store: GoalRepository,
     private readonly runtime: RuntimeAdapter & PackageRuntime,
-    private readonly options: SupervisorOptions = {},
+    private readonly options: ControllerOptions = {},
   ) {}
+  /** What the Lead is told about each question the inbox holds for it this tick. */
+  private readonly questions = new Map<string, string>();
 
   private async consumeInbox(goalId: string, result: ControllerTick): Promise<void> {
     if (!this.runtime.checkRun || !this.runtime.ackRun || !this.runtime.retainWorker) return;
@@ -109,6 +123,9 @@ export class ControllerService {
             await this.relay(goalId, runId, message, result);
             continue;
           }
+          // A Multi-WP Worker's question waits for its Lead, who answers with `apos package answer`; once answered it is handled.
+          if (answered(this.store, goalId, message.id)) continue;
+          this.questions.set(`${message.type}:${message.id}`, describeQuestion(state, message));
           result.inboxPending.push(`${message.type}:${message.id}`);
           continue;
         }
@@ -226,8 +243,8 @@ export class ControllerService {
 
   async tick(repoPath: string): Promise<ControllerTick[]> {
     const results: ControllerTick[] = [];
-    for (const snapshot of this.store.listGoals()) {
-      const goalId = snapshot.spec.id;
+    for (const listed of this.store.listGoals()) {
+      const goalId = listed.spec.id;
       const result: ControllerTick = {
         goalId,
         dispatched: [],
@@ -239,6 +256,13 @@ export class ControllerService {
         errors: [],
         supervised: [],
       };
+      const profiles = this.options.profiles ?? (() => DEFAULT_PROFILES);
+      const controller = this.options.controllerTerminal;
+      if (await openGoalTick(this.store, this.runtime, profiles, goalId, repoPath, controller, result)) {
+        results.push(result);
+        continue;
+      }
+      const snapshot = this.store.getGoal(goalId)!;
       noticePendingHandoff(this.store, this.options.now ?? Date.now, snapshot, result);
       // The Lead is planning (no plan accepted yet), or its dispatch is still unknown. A running Lead whose Solo plan is
       // accepted is adopted below as the owner, so its end of turn counts as a delivery, not as a planning stop.
@@ -402,7 +426,7 @@ export class ControllerService {
             ? await new MultiSupervisor(this.store, this.runtime, this.options).step(
                 goalId,
                 repoPath,
-                result.inboxPending,
+                result.inboxPending.map(item => this.questions.get(item) ?? item),
               )
             : await new SoloSupervisor(this.store, this.runtime, this.options).step(goalId, repoPath)),
         );

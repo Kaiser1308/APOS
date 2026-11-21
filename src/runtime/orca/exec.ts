@@ -21,13 +21,16 @@ export const isDeadSession = (error: unknown): boolean =>
     : /\[session_caller_not_live\]/.test(error instanceof Error ? error.message : String(error));
 
 /**
- * Orca 1.4.265 answers with a concise view by default. APOS reads the full record of `worker-show`, and of
- * `task-list`, whose concise rows drop the `spec` recovery finds a dispatch key in. `worker-start` stays concise:
+ * Orca 1.4.265 answers with a concise view by default. APOS reads the full record of `worker-show`, of `run-show`
+ * (only the full record names the Run's coordinator), and of `task-list`, whose concise rows drop the `spec` recovery
+ * finds a dispatch key in. `worker-start` stays concise:
  * its receipt carries runId, taskId, dispatchId, terminal and workspace, and only the concise view exits 0 for a
  * start whose turn Orca has not observed yet (`--full` exits 1 for anything but ready).
  */
 const fullFlag = (args: string[]): string[] =>
-  args[0] === 'orchestration' && ['worker-show', 'task-list'].includes(args[1] ?? '') && !args.includes('--full')
+  args[0] === 'orchestration' &&
+  ['worker-show', 'task-list', 'run-show'].includes(args[1] ?? '') &&
+  !args.includes('--full')
     ? ['--full']
     : [];
 

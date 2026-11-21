@@ -93,6 +93,7 @@ describe('target branch head moved after verification', { timeout: 90_000 }, () 
       terminal: 'term_lead',
       worktreeId: 'repo::C:/lead-wt',
     };
+    let delivered = false;
     const runtime: RuntimeAdapter = {
       async startLead() {
         ref.baseCommit = git('rev-parse', 'HEAD');
@@ -101,8 +102,9 @@ describe('target branch head moved after verification', { timeout: 90_000 }, () 
       async resumeSolo() {
         return ref;
       },
+      // The Lead plans, then delivers as the Solo owner: it has settled only once its delivery is committed.
       async inspect() {
-        return { state: 'settled', outcome: 'completed', ref };
+        return delivered ? { state: 'settled', outcome: 'completed', ref } : { state: 'live', ref };
       },
     };
     const output: string[] = [];
@@ -139,6 +141,7 @@ describe('target branch head moved after verification', { timeout: 90_000 }, () 
       '2',
     );
     await invoke('goal', 'select', spec.id);
+    await invoke('controller', 'tick'); // the controller alone dispatches the Lead
     process.env.ORCA_TERMINAL_HANDLE = 'term_lead';
     try {
       await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
@@ -146,11 +149,13 @@ describe('target branch head moved after verification', { timeout: 90_000 }, () 
     } finally {
       delete process.env.ORCA_TERMINAL_HANDLE;
     }
+    await invoke('controller', 'tick'); // the controller records the Lead as the Solo owner
     git('switch', '-q', '-c', 'owner', ref.baseCommit!); // the Lead's branch, cut from its base at selection
     writeFileSync(join(dir, 'feature.js'), 'module.exports = 1;');
     git('add', 'feature.js');
     git('-c', 'user.name=O', '-c', 'user.email=o@x.invalid', 'commit', '-qm', 'owner work');
     const delivery = git('rev-parse', 'HEAD');
+    delivered = true;
     await invoke('gate', 'run', spec.id, '--commit', delivery);
     await invoke('execution', 'verify', spec.id, '--commit', delivery);
     // Someone moves the target branch after verification, in a way that breaks the Goal's check.

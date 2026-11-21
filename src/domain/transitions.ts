@@ -21,6 +21,7 @@ import { ownerIdentities, parseReview, type ReviewRecord } from './reviews.js';
 import { applyLeadTransfer, type LeadBot } from './lead-transfer.js';
 import { InvariantError } from './errors.js';
 import { applyIntegrationGateRequest } from './integration-gate.js';
+import { applyControllerRequest, type PendingRequest } from './controller-requests.js';
 
 /** Replay does not validate: old logs must replay as they are. Narrows event data and nothing else. */
 const asRef = <T>(value: unknown): T => value as T;
@@ -72,6 +73,9 @@ export type GoalEventType =
   | 'merge-completed'
   | 'integration-completed'
   | 'integration-gate-requested'
+  | 'controller-requested'
+  | 'controller-request-attempted'
+  | 'controller-request-settled'
   | 'package-added'
   | 'package-plan-added'
   | 'package-removed'
@@ -173,6 +177,8 @@ export type GoalState = {
   handoffIntent?: { key: string; target: HandoffTarget; from: string; at: string; runId?: string; unblock?: boolean };
   /** The Orca bot holding the Lead role instead of an APOS dispatch (`apos handoff --to-bot`). */
   leadBot?: LeadBot;
+  /** Commands that start or move an agent, waiting for the controller, which alone starts workers (`controller-requests.ts`). */
+  requests?: PendingRequest[];
 };
 /**
  * Whose dispatch a handoff replaces: the Goal's Lead (planning, Solo owner or Multi-WP), a package Worker, or the
@@ -1329,6 +1335,12 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'integration-gate-requested':
       return applyIntegrationGateRequest(state, event);
+    case 'controller-requested':
+    case 'controller-request-settled':
+      return applyControllerRequest(state, event);
+    case 'controller-request-attempted':
+      requireThat(event.data && typeof event.data === 'object', 'Request attempt details required');
+      return state;
     case 'lead-transferred':
     case 'lead-returned':
       return applyLeadTransfer(state, event);

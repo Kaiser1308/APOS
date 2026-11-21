@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import { withControllerLease } from '../../store/lease.js';
+import { liveController, withControllerLease } from '../../store/lease.js';
+import { UserError } from '../../domain/errors.js';
 import { HandoffService } from '../../app/handoff.js';
 import { ControllerService } from '../../app/controller.js';
 import { GateService } from '../../app/gate-service.js';
@@ -10,7 +11,7 @@ import type { PackageRuntime, RuntimeAdapter } from '../../ports/runtime.js';
 import type { CliContext } from '../context.js';
 
 export function registerController(ctx: CliContext): void {
-  const { program, options, write, runtime, repo, home, withJournalAsync } = ctx;
+  const { program, options, write, runtime, repo, home, withJournal, withJournalAsync, callerAgent } = ctx;
   const controller = program.command('controller');
   const leasedTick = async () => {
     const leased = await withControllerLease(options.home ?? controllerHome(repo()), () =>
@@ -18,6 +19,8 @@ export function registerController(ctx: CliContext): void {
         new ControllerService(journal, runtime as RuntimeAdapter & PackageRuntime, {
           gate: new GateService(journal, { inspector: options.inspector, ...options.gate }),
           telemetry: options.telemetry ?? new CodexSessionProbe(),
+          controllerTerminal: process.env.ORCA_TERMINAL_HANDLE,
+          profiles: () => loadProfiles(home()),
           freshLead: (goalId, repoPath) =>
             new HandoffService(journal, runtime, () => loadProfiles(home())).handoff(
               goalId,
@@ -29,7 +32,26 @@ export function registerController(ctx: CliContext): void {
     );
     return leased;
   };
+  /**
+   * The controller alone starts workers, and every Run it creates is coordinated from the terminal it runs in. So it
+   * never runs as an agent (a bot's chat, a worker, any agent session), and never beside a live watch in another
+   * terminal, whose Runs this one could not read.
+   */
+  const assertController = (command: string) => {
+    const agent = withJournal(journal => callerAgent(journal));
+    if (agent)
+      throw new UserError(
+        `controller ${command} cannot run as an agent (${agent}): the controller alone starts workers and coordinates their Orca Runs. Run it in a plain Orca terminal.`,
+      );
+    const live = liveController(home());
+    const here = process.env.ORCA_TERMINAL_HANDLE;
+    if (live?.terminal && here && live.terminal !== here)
+      throw new UserError(
+        `a controller watch (pid ${live.pid}) runs in Orca terminal ${live.terminal}, which coordinates this project's Runs; run controller ${command} there, or stop that watch first`,
+      );
+  };
   controller.command('tick').action(async () => {
+    assertController('tick');
     const leased = await leasedTick();
     write(
       leased.ran
@@ -49,6 +71,7 @@ export function registerController(ctx: CliContext): void {
         throw new Error(
           'controller watch must run inside a live Orca terminal (ORCA_TERMINAL_HANDLE is not set); Orca refuses orchestration calls from a process with no sender terminal',
         );
+      assertController('watch');
       let stopped = false;
       const abort = new AbortController();
       const stop = () => {

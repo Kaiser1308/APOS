@@ -1,8 +1,6 @@
 import { newEvent } from '../../app/events.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { HandoffService } from '../../app/handoff.js';
-import { LeadTransferService } from '../../app/lead-transfer.js';
 import type { HandoffTarget } from '../../domain/transitions.js';
 import { MergeService } from '../../app/merge.js';
 import {
@@ -16,7 +14,6 @@ import {
 import { DEFAULT_UI_PORT, startUi } from '../../ui/server.js';
 import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
-import { loadProfiles } from '../../runtime/brief.js';
 import { controllerHome } from '../../store/event-log.js';
 import { UserError } from '../../domain/errors.js';
 import type { Role } from '../../domain/runtime-refs.js';
@@ -30,11 +27,11 @@ export function registerOutcome(ctx: CliContext): void {
     writeError,
     runtime,
     repo,
-    home,
     withJournal,
     withJournalAsync,
     assertHuman,
     applyProfile,
+    requestDispatch,
   } = ctx;
   program
     .command('handoff')
@@ -67,47 +64,39 @@ export function registerOutcome(ctx: CliContext): void {
           by: string;
         },
       ) =>
-        withJournalAsync(async journal => {
+        withJournal(journal => {
           assertHuman(journal, 'handoff');
           if (flags.toBot || flags.toApos) {
             if ([flags.toBot, flags.toApos, flags.package, flags.reviewer].filter(Boolean).length > 1)
               throw new UserError('Pass one of --to-bot, --to-apos, --package or --reviewer');
             if (!flags.by.trim()) throw new UserError('--by needs a name');
             if ((flags.model || flags.effort) && !flags.agent) throw new UserError('--model and --effort need --agent');
-            const transfers = new LeadTransferService(journal, runtime, () => loadProfiles(home()));
             if (flags.toBot) {
               if (flags.agent) throw new UserError('--agent does not apply to a bot');
-              const moved = await transfers.toBot(goalId, flags.toBot, flags.by, repo());
-              write(`Lead of ${goalId} moved to bot ${moved.bot.name} (${moved.bot.id}); stopped ${moved.from}`);
-              if (moved.warning) write(`warning: ${moved.warning}`);
+              // Read-only, so a wrong name is refused now rather than at the controller's tick.
+              if (!runtime.findBot) throw new UserError('Configured runtime cannot reach Orca bots');
+              const bot = runtime.findBot(flags.toBot);
+              if (!bot) throw new UserError(`No Orca bot ${flags.toBot} on this computer (see \`orca bot list\`)`);
+              requestDispatch(journal, goalId, { kind: 'lead-to-bot', bot: bot.id, by: flags.by });
               return;
             }
             if (flags.agent) applyProfile(['lead'], { agent: flags.agent, model: flags.model, effort: flags.effort });
-            const back = await transfers.back(goalId, flags.by, repo());
-            write(
-              `Lead of ${goalId} returned from its bot: ${back.note}${back.dispatchId ? ` (${back.dispatchId})` : ''}`,
-            );
+            requestDispatch(journal, goalId, { kind: 'lead-to-apos', by: flags.by });
             return;
           }
           if (flags.package && flags.reviewer) throw new Error('Pass --package or --reviewer, not both');
           if ((flags.model || flags.effort) && !flags.agent) throw new Error('--model and --effort need --agent');
-          const target: HandoffTarget = flags.package
+          const target: Exclude<HandoffTarget, { kind: 'bot' }> = flags.package
             ? { kind: 'package', packageId: flags.package }
             : flags.reviewer
               ? { kind: 'reviewer' }
               : { kind: 'lead' };
           const role: Role = target.kind === 'package' ? 'worker' : target.kind === 'reviewer' ? 'reviewer' : 'lead';
-          // Written first: the runtime reads the role profile when it starts the new agent.
+          // Written now: the controller reads the role profile when it starts the new agent.
           if (flags.agent) applyProfile([role], { agent: flags.agent, model: flags.model, effort: flags.effort });
-          const result = await new HandoffService(journal, runtime, () => loadProfiles(home())).handoff(
-            goalId,
-            target,
-            repo(),
-          );
-          write(
-            `handed off ${goalId}${flags.package ? ` ${flags.package}` : flags.reviewer ? ' reviewer' : ''} to ${loadProfiles(home())[role].agent} (${result.dispatchId})`,
-          );
-          if (result.warning) write(`warning: ${result.warning}`);
+          if (target.kind === 'package' && !journal.getGoal(goalId)?.packages?.[target.packageId])
+            throw new UserError(`${goalId} has no package ${target.packageId}`);
+          requestDispatch(journal, goalId, { kind: 'handoff', target });
         }),
     );
 

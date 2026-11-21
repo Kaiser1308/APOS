@@ -104,14 +104,19 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
   expect(starts).toBe(0);
   expect(output.join('\n')).toContain(spec.id);
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   expect(starts).toBe(1); // selecting the Goal dispatches its Lead
   await expect(invoke('lead', 'propose', '--file', proposalFile)).rejects.toThrow(/Lead terminal APOS dispatched/);
   await asLead('term_lead', async () => {
     await invoke('lead', 'propose', '--file', proposalFile);
     await invoke('lead', 'commit', spec.id);
   });
+  expect(output.at(-1)).toMatch(/you \(Lead ctx_1\) are the Solo owner\. Deliver/);
+  // Recorded at once (a log entry, no Orca call), so the Lead can checkpoint before any tick.
+  await invoke('execution', 'status', spec.id);
+  expect(output.at(-1)).toContain('executing');
+  await invoke('controller', 'tick');
   expect(starts).toBe(1); // the Solo owner is that Lead: no second session
-  expect(output.at(-1)).toMatch(/you \(Lead ctx_1\) are the Solo owner/);
   await invoke('execution', 'status', spec.id);
   expect(output.at(-1)).toContain('executing');
   await invoke('execution', 'reconcile', spec.id);
@@ -242,6 +247,7 @@ it('runs an approved two-package Goal through dependency release, integration an
     '3',
   );
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   await asLead('term_lead', async () => {
     await invoke('lead', 'propose', '--file', input('proposal.json', { ...proposal, mode: 'multi-wp' }));
     await invoke('package', 'add', '--file', input('wp-a.json', a), '--reason', 'First stage');
@@ -249,6 +255,8 @@ it('runs an approved two-package Goal through dependency release, integration an
     expect(starts).toEqual([]);
     await invoke('lead', 'commit', spec.id);
   });
+  expect(starts).toEqual([]); // the Lead commits; the controller alone dispatches
+  await invoke('controller', 'tick');
   expect(starts).toEqual(['WP-01']);
   expect(output.find(line => line.startsWith('NOTICE'))).toMatch(/Multi-WP \(2 packages/);
   writeFileSync(join(dir, 'scanner.ts'), 'export const scan = true;');
@@ -274,6 +282,9 @@ it('runs an approved two-package Goal through dependency release, integration an
   await invoke('package', 'verify', spec.id, a.id);
   await asLead('term_lead', () => invoke('package', 'approve', spec.id, b.id, '--reason', 'Reviewed first stage'));
   await invoke('package', 'dispatch', spec.id);
+  expect(output.join('\n')).toContain('the controller dispatches ready packages at its next tick (ready now: WP-02)');
+  expect(starts).toEqual(['WP-01']);
+  await invoke('controller', 'tick');
   await invoke('package', 'ready', spec.id);
   expect(output.at(-1)).toBe('[]');
   expect(starts).toEqual(['WP-01', 'WP-02']);
@@ -439,6 +450,7 @@ it('refuses Human-only commands from an APOS agent terminal, so an owner cannot 
     '2',
   );
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   // The Lead is an agent from its dispatch on: before it commits any plan it already cannot act as the Human.
   await asLead('term_owner', async () => {
     await expect(
@@ -552,6 +564,7 @@ it('apos profile shows, sets and resets role profiles, and only the Human may ch
     '3',
   );
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   await asLead('term_lead', async () => {
     await expect(invoke('profile', 'set', 'worker', '--agent', 'claude')).rejects.toThrow(/Human decision/);
     await expect(invoke('profile', 'reset')).rejects.toThrow(/Human decision/);
@@ -624,12 +637,15 @@ it('apos handoff moves the Lead to a fresh agent and, with --agent, changes only
     '3',
   );
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   await asLead('term_lead', async () => {
     await expect(invoke('handoff', spec.id, '--agent', 'claude')).rejects.toThrow(/Human decision/);
   });
   await invoke('handoff', spec.id, '--agent', 'claude');
+  expect(stops).toEqual([]); // queued: the controller hands off at its next tick
+  await invoke('controller', 'tick');
   expect(stops).toEqual(['ctx_1']);
-  expect(output.at(-1)).toBe(`handed off ${spec.id} to claude (ctx_2)`);
+  expect(output.at(-1)).toContain('hand off the Lead: handed off to ctx_2');
   const { loadProfiles } = await import('./runtime/brief.js');
   expect(loadProfiles(home).lead).toEqual({ agent: 'claude' });
   expect(loadProfiles(home).worker.agent).toBe('codex');

@@ -223,6 +223,7 @@ it('gates each package on its own head, returns a red one to its owner, and wake
     '3',
   );
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   process.env.ORCA_TERMINAL_HANDLE = 'term-lead'; // the Lead APOS dispatched at selection plans and commits
   try {
     await invoke('lead', 'propose', '--file', input('plan.json', { ...proposal, mode: 'multi-wp' }));
@@ -233,6 +234,7 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   } finally {
     delete process.env.ORCA_TERMINAL_HANDLE;
   }
+  await invoke('controller', 'tick'); // the controller dispatches the ready packages
   process.env.ORCA_TERMINAL_HANDLE = 'term-lead';
   try {
     await expect(invoke('package', 'evidence', spec.id, '--file', input('bad.json', {}))).rejects.not.toThrow(
@@ -267,7 +269,7 @@ it('gates each package on its own head, returns a red one to its owner, and wake
   };
   expect(state().leadTerminal).toMatchObject({ terminal: 'term-lead', runId: 'run-lead' });
 
-  await invoke('controller', 'tick');
+  // The tick after the commit dispatched WP-01, saw it settle and gated it red in one pass.
   expect(state().packages!['WP-01'].status).toBe('stale');
   expect(state().packages!['WP-01'].finding).toMatch(/CHK-A fail/);
   expect(wakes.at(-1)!.join('\n')).toMatch(/WP-01 v1 attempt 1 red, returned to its owner/);

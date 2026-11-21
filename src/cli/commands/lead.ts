@@ -6,17 +6,27 @@ import {
   type PhaseCheckpoint,
 } from '../../domain/contracts.js';
 import { SoloService } from '../../app/solo.js';
-import { LeadService, assertLeadTerminal, currentLeadRef } from '../../app/lead.js';
+import { assertLeadTerminal, currentLeadRef } from '../../app/lead.js';
 import { wakeBot } from '../../app/bot-lead.js';
-import { PackageService } from '../../app/package-service.js';
+import { UserError } from '../../domain/errors.js';
 import { assertExecutionSettled } from '../../app/replan.js';
 import { GoalRegistryService } from '../../app/registry.js';
 import { assertMultiWpPlannable } from '../../domain/packages.js';
 import type { CliContext } from '../context.js';
 
 export function registerLead(ctx: CliContext): void {
-  const { program, write, runtime, packageRuntime, repo, withJournal, withJournalAsync, assertHuman, readJsonFile } =
-    ctx;
+  const {
+    program,
+    write,
+    runtime,
+    repo,
+    withJournal,
+    withJournalAsync,
+    assertHuman,
+    readJsonFile,
+    requestDispatch,
+    awaitController,
+  } = ctx;
   const lead = program.command('lead');
   lead.command('recommend').action(() =>
     withJournal(journal => {
@@ -27,11 +37,13 @@ export function registerLead(ctx: CliContext): void {
   lead
     .command('start')
     .argument('<id>')
-    .description('Human: dispatch the Lead of a selected Goal (goal select does this; use it to retry)')
+    .description(
+      'Human: ask the controller to dispatch the Lead of a selected Goal (goal select does this; use it to retry)',
+    )
     .action((id: string) =>
-      withJournalAsync(async journal => {
+      withJournal(journal => {
         assertHuman(journal, 'lead start');
-        write(`Dispatched Lead ${id}: ${(await new LeadService(journal, runtime).start(id, repo())).dispatchId}`);
+        requestDispatch(journal, id, { kind: 'lead-start' });
       }),
     );
   lead
@@ -51,7 +63,8 @@ export function registerLead(ctx: CliContext): void {
           write(`Woke Lead ${id}: ${sent.join('; ')}`);
           return;
         }
-        write(`Woke Lead ${id}: ${await new LeadService(journal, runtime).wake(id, repo(), note)}`);
+        if (!journal.getGoal(id)?.lead) throw new UserError(`No APOS-dispatched Lead for ${id}`);
+        requestDispatch(journal, id, { kind: 'lead-wake', note });
       }),
     );
   lead
@@ -150,14 +163,17 @@ export function registerLead(ctx: CliContext): void {
           write(
             `NOTICE ${id}: Lead chose Multi-WP (${notice.packages.length} packages, est. ${notice.estimatedCost?.spendUsd} USD / ${notice.estimatedCost?.wallMinutes} min): ${notice.splitRationale}`,
           );
-          const refs = await new PackageService(journal, packageRuntime()).dispatchReady(id, repo());
-          write(`Dispatched ${id}: ${refs.map(ref => ref.dispatchId).join(', ')}`);
+          awaitController(`Accepted ${id}: the controller dispatches its ready packages at its next tick.`);
+        } else if (state.leadBot) {
+          awaitController(
+            `Accepted ${id}: the controller dispatches a Solo owner to deliver it at its next tick; you check, you do not write code.`,
+          );
         } else {
+          // The APOS Lead is the owner already running: recording that is a log entry, no Orca call, so it happens now
+          // and the Lead can checkpoint and deliver at once.
           const ref = await new SoloService(journal, runtime).adopt(id);
           write(
-            state.leadBot
-              ? `Accepted ${id}: the controller dispatched Solo owner ${ref.dispatchId} to deliver it; you check, you do not write code.`
-              : `Accepted ${id}: you (Lead ${ref.dispatchId}) are the Solo owner. Deliver in this worktree and commit your report.`,
+            `Accepted ${id}: you (Lead ${ref.dispatchId}) are the Solo owner. Deliver in this worktree and commit your report.`,
           );
         }
       }),
@@ -165,10 +181,13 @@ export function registerLead(ctx: CliContext): void {
   execution
     .command('start')
     .argument('<id>')
-    .description('record the Lead as the owner of an accepted Solo plan (lead commit does this)')
+    .description('the controller records the owner of an accepted Solo plan at its next tick (lead commit leads to it)')
     .action((id: string) =>
-      withJournalAsync(async journal => {
-        write((await new SoloService(journal, runtime).adopt(id)).dispatchId);
+      withJournal(journal => {
+        const state = journal.getGoal(id);
+        if (!state?.proposal?.mode.startsWith('solo') || state.status !== 'ready')
+          throw new UserError(`${id} has no accepted Solo plan waiting for its owner`);
+        awaitController(`${id}: the controller starts the owner of its accepted Solo plan at its next tick.`);
       }),
     );
   execution
@@ -195,9 +214,8 @@ export function registerLead(ctx: CliContext): void {
     .command('resume')
     .argument('<id>')
     .action((id: string) =>
-      withJournalAsync(async journal => {
-        const ref = await new SoloService(journal, runtime).resume(id);
-        write(`Resumed ${id}: ${ref.dispatchId}`);
+      withJournal(journal => {
+        requestDispatch(journal, id, { kind: 'execution-resume' });
       }),
     );
   execution
@@ -205,12 +223,11 @@ export function registerLead(ctx: CliContext): void {
     .argument('<id>')
     .requiredOption('--reason <text>')
     .action((id: string, { reason }: { reason: string }) =>
-      withJournalAsync(async journal => {
+      withJournal(journal => {
         if (!reason.trim()) throw new Error('Retry reason required');
         if (!journal.getGoal(id)?.resumeIntent)
           journal.append(newEvent(id, 'checkpointed', { phase: 'repair', progress: reason, evidenceRefs: [] }));
-        const ref = await new SoloService(journal, runtime).resume(id);
-        write(`Retried ${id}: ${ref.dispatchId}`);
+        requestDispatch(journal, id, { kind: 'execution-resume' });
       }),
     );
   execution

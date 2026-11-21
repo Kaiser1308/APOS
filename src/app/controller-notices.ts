@@ -158,3 +158,22 @@ export function noteErrors(store: GoalRepository, result: ControllerTick): void 
     );
   }
 }
+
+/** True once the Lead answered this Orca message (`apos package answer`, or the Human's `lead wake` reply). */
+export const answered = (store: GoalRepository, goalId: string, messageId: string): boolean =>
+  store
+    .events(goalId)
+    .some(item => item.type === 'decision-logged' && (item.data as { answers?: string } | null)?.answers === messageId);
+
+/** A Worker's question as the Lead reads it: who asked, what, and the command that answers it through the controller. */
+export function describeQuestion(state: GoalState, message: OrcaMessage): string {
+  const goalId = state.spec.id;
+  const dispatchId = message.dispatchId ?? message.dispatch_id;
+  const asker = Object.values(state.packages ?? {}).find(
+    item =>
+      item.runtimeRef &&
+      ((message.from && item.runtimeRef.terminal === message.from) || item.runtimeRef.dispatchId === dispatchId),
+  )?.spec.id;
+  const text = [message.subject, message.body].filter(Boolean).join(': ');
+  return `${message.type} ${message.id} from ${asker ? `the Worker of ${asker}` : (message.from ?? 'an agent')}${text ? ` (${text})` : ''}; answer it with apos package answer ${goalId} ${asker ?? '<packageId>'} --message-id ${message.id} --text-file <file> --reason <why>`;
+}

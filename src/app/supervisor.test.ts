@@ -64,6 +64,8 @@ async function setup(
     refuseResumes?: number;
     hungIdleMinutes?: number;
     manualCheck?: boolean;
+    /** The Lead delivers and settles before the controller's first tick after its commit (no watch was running). */
+    deliverBeforeTick?: boolean;
   } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'apos-auto-'));
@@ -104,7 +106,7 @@ async function setup(
   const budgets: (Budget | undefined)[] = [];
   const replies: { messageId: string; body: string }[] = [];
   const acked: string[] = [];
-  let inbox = options.inbox ?? [];
+  let inbox: OrcaMessage[] = [];
   let reviewKey: string | undefined;
   let lostReviewer: RuntimeRef | undefined;
   let refusals = 0;
@@ -236,11 +238,15 @@ async function setup(
   await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
   await invoke('goal', 'approve', spec.id, ...APPETITE);
   await invoke('goal', 'select', spec.id);
+  await invoke('controller', 'tick'); // the controller alone dispatches the Lead
   await asLead('term_1', async () => {
     await invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
     await invoke('lead', 'commit', spec.id);
   });
-  runOwner();
+  if (options.deliverBeforeTick) runOwner();
+  await invoke('controller', 'tick'); // the controller records the Lead as the Solo owner
+  inbox = options.inbox ?? []; // the owner's mail, once it owns the Goal
+  if (!options.deliverBeforeTick) runOwner();
   const tick = async () => {
     await invoke('controller', 'tick');
     return output.at(-1)!;
@@ -294,6 +300,16 @@ describe('Solo autopilot', () => {
     expect(state().status).toBe('closed');
     expect(state().postMergeGate?.result).toBe('green');
     expect(released).toEqual(['ctx_1', 'ctx_2']);
+  }, 90_000);
+
+  it('adopts and settles a Solo Lead that delivered before the first tick after its commit', async () => {
+    const { tick, state } = await setup(
+      (attempt, commit, line) => commit({ 'feature.js': 'process.exit(0);', ...report(attempt, line) }, 'work'),
+      { deliverBeforeTick: true },
+    );
+    expect(state().runtimeRef?.dispatchId).toBe('ctx_1');
+    for (let i = 0; i < 3 && state().status !== 'verified'; i++) await tick();
+    expect(state()).toMatchObject({ status: 'verified', soloAttempts: 1 });
   }, 90_000);
 
   it('sends the Goal to a Human decision when the same failure survives two repairs', async () => {

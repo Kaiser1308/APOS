@@ -7,6 +7,7 @@ import { runCli } from '../cli.js';
 import { spec, sourceText } from '../domain/fixtures.test-support.js';
 import { OrcaRefused } from '../runtime/orca/exec.js';
 import type { RuntimeAdapter } from '../ports/runtime.js';
+import { ProjectJournal } from '../store/journal.js';
 
 // These tests build scratch Git repos and spawn many git processes; a loaded parallel run on Windows measured 3-5x slower than alone, past the default.
 vi.setConfig({ testTimeout: 60_000 });
@@ -16,7 +17,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
-/** Selects an approved Goal whose Lead dispatch fails with `failure`, and returns what the CLI told the Human. */
+/** Selects an approved Goal whose Lead dispatch fails with `failure` at the controller's tick; returns what the Human is told. */
 async function selectWithFailure(failure: Error): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'apos-select-'));
   dirs.push(dir);
@@ -53,9 +54,19 @@ async function selectWithFailure(failure: Error): Promise<string> {
     '--max-attempts',
     '3',
   );
-  output.length = 0;
   await invoke('goal', 'select', spec.id);
-  return output.join('\n');
+  expect(output.join('\n')).toMatch(/Requested: start the Lead for GOAL-001\. The controller does it at its next tick/);
+  await invoke('controller', 'tick');
+  const opened = ProjectJournal.open(dir);
+  try {
+    const notices = opened.journal
+      .events(spec.id)
+      .filter(item => item.type === 'human-notified' && (item.data as { kind?: string }).kind === 'request-failed');
+    expect(notices).toHaveLength(1);
+    return (notices[0].data as { note: string }).note;
+  } finally {
+    opened.close();
+  }
 }
 
 it('tells the Human to retry the Lead only when Orca clearly refused the dispatch', async () => {

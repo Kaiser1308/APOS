@@ -9,6 +9,9 @@ import { KNOWN_AGENTS, ROLES, loadProfiles, setProfile } from '../runtime/brief.
 import { OrcaRuntime } from '../runtime/orca/adapter.js';
 import { worktreePath } from '../runtime/orca/parse.js';
 import { controllerHome } from '../store/event-log.js';
+import { liveController } from '../store/lease.js';
+import { requestFromController } from '../app/controller-requests.js';
+import type { ControllerRequest } from '../domain/controller-requests.js';
 import { ProjectJournal } from '../store/journal.js';
 import { newEvent } from '../app/events.js';
 import { assertLeadTerminal } from '../app/lead.js';
@@ -30,6 +33,12 @@ export type CliContext = {
   assertHuman(journal: ProjectJournal, command: string): void;
   /** The Goal's Lead only: the terminal or worktree APOS dispatched it, or the chat of the bot it moved to. */
   assertLead(journal: ProjectJournal, goalId: string, command: string): LeadState;
+  /** Set when a bot, a worker or another agent runs this command: it must not start workers or bind a Run. */
+  callerAgent(journal: ProjectJournal): string | undefined;
+  /** Queues a command that starts or moves an agent for the controller, and says so (warning when no watch runs). */
+  requestDispatch(journal: ProjectJournal, goalId: string, request: ControllerRequest): void;
+  /** Says the controller acts at its next tick, warning when no `apos controller watch` runs for this project. */
+  awaitController(what: string): void;
   goalWithSource(file: string, sourcePath: string, origin: string): ReturnType<typeof goalWithSource>;
   readJsonFile(file: string): unknown;
   rolesOf(value: string): Role[];
@@ -98,11 +107,8 @@ export function createContext(program: Command, options: CliOptions): CliContext
       close();
     }
   };
-  /**
-   * Gates A, B and D, appetite changes and overrides belong to the Human. Owners run with a shell and
-   * know this CLI, so these commands refuse to run from any agent terminal or worktree APOS dispatched.
-   */
-  const assertHuman = (journal: ProjectJournal, command: string) => {
+  /** The terminal or worktree APOS dispatched an agent to that this process runs in, from the Goals' state and start events. */
+  const agentPlace = (journal: ProjectJournal): string | undefined => {
     const terminals = new Set<string>();
     const worktrees = new Set<string>();
     const add = (ref: unknown) => {
@@ -133,12 +139,37 @@ export function createContext(program: Command, options: CliOptions): CliContext
     }
     const here = resolve(process.cwd()).toLowerCase();
     const handle = process.env.ORCA_TERMINAL_HANDLE;
-    if (
-      (handle && terminals.has(handle)) ||
-      [...worktrees].some(path => here === path || here.startsWith(`${path}\\`) || here.startsWith(`${path}/`))
-    ) {
-      throw new Error(`${command} is a Human decision and cannot run from an APOS agent terminal or worktree`);
+    if (handle && terminals.has(handle)) return `APOS agent terminal ${handle}`;
+    const tree = [...worktrees].find(
+      path => here === path || here.startsWith(`${path}\\`) || here.startsWith(`${path}/`),
+    );
+    return tree ? `APOS agent worktree ${tree}` : undefined;
+  };
+  /**
+   * Why this process is an agent rather than the controller or the Human: a bot's chat, an Orca agent session (Orca
+   * sets ORCA_AGENT_SESSION_ID in every agent chat, bot or worker), or a terminal or worktree APOS dispatched. Only the
+   * controller starts workers and coordinates the Runs, so an agent's command records its decision and the controller
+   * acts on it at its next tick.
+   */
+  const callerAgent = (journal: ProjectJournal): string | undefined => {
+    let bot: ReturnType<NonNullable<typeof runtime.callerBot>>;
+    try {
+      bot = runtime.callerBot?.();
+    } catch {
+      bot = undefined;
     }
+    if (bot) return `bot ${bot.name}`;
+    const session = process.env.ORCA_AGENT_SESSION_ID?.trim();
+    if (session) return `Orca agent session ${session}`;
+    return agentPlace(journal);
+  };
+  /**
+   * Gates A, B and D, appetite changes and overrides belong to the Human. Owners run with a shell and
+   * know this CLI, so these commands refuse to run from any agent terminal or worktree APOS dispatched.
+   */
+  const assertHuman = (journal: ProjectJournal, command: string) => {
+    if (agentPlace(journal))
+      throw new Error(`${command} is a Human decision and cannot run from an APOS agent terminal or worktree`);
     // A bot holding a Lead is an agent too, wherever it runs: its session is told apart through Orca, not its cwd.
     const leadBots = new Map(
       journal
@@ -187,6 +218,15 @@ export function createContext(program: Command, options: CliOptions): CliContext
     return assertLeadTerminal(state, handle, command, process.cwd(), () => runtime.callerBot?.());
   };
   const home = () => options.home ?? controllerHome(repo());
+  const awaitController = (what: string) => {
+    write(what);
+    if (!liveController(home()))
+      write(
+        `warning: no \`apos controller watch\` is running for this project, so nothing happens until one does. Start it in a plain Orca terminal (not an agent chat): apos --repo ${repo()} controller watch`,
+      );
+  };
+  const requestDispatch = (journal: ProjectJournal, goalId: string, request: ControllerRequest) =>
+    awaitController(requestFromController(journal, goalId, request));
   /** `all` or one role, as the profile and handoff commands take it. */
   const rolesOf = (value: string): Role[] => {
     if (value === 'all') return ROLES;
@@ -219,6 +259,9 @@ export function createContext(program: Command, options: CliOptions): CliContext
     withJournalAsync,
     assertHuman,
     assertLead,
+    callerAgent,
+    requestDispatch,
+    awaitController,
     goalWithSource,
     readJsonFile,
     rolesOf,

@@ -8,6 +8,7 @@ import { spec as baseSpec, proposal, sourceText } from './domain/fixtures.test-s
 import { ProjectJournal } from './store/journal.js';
 import { ReadOnlyJournal } from './store/readonly-journal.js';
 import { controllerHome } from './store/event-log.js';
+import { wakeBotLeads } from './app/bot-lead.js';
 import { newEvent } from './app/events.js';
 import { UserError } from './domain/errors.js';
 import type { GoalSpec } from './domain/contracts.js';
@@ -287,6 +288,7 @@ async function setup() {
     tick,
     setStop: (value: 'stopped' | 'unknown') => (stopResult = value),
     setCallerError: (error: Error | undefined) => (callerError = error),
+    runtime,
     setMailbox: (value: string | undefined) => (mailbox = value),
     setLanded: (value: string | undefined) => (landed = value),
   };
@@ -687,6 +689,20 @@ describe("a bot Lead's wake mail: where Orca stored it (D) and whether the bot a
     await t.tick();
     expect(notices(t, 'lead-wake-unacked')).toHaveLength(2);
     expect(resends(t)).toHaveLength(2);
+  });
+
+  it('chases an unacked wake of a Goal the tick produced no result for (a verified Goal is skipped)', async () => {
+    const t = await setup();
+    await t.handoff('--to-bot', 'Lead APOS', '--by', 'anh');
+    const start = Date.now();
+    const opened = ProjectJournal.open(t.dir);
+    try {
+      await wakeBotLeads(opened.journal, t.runtime, t.dir, [], () => start + 11 * 60_000);
+    } finally {
+      opened.close();
+    }
+    expect(notices(t, 'lead-wake-unacked')).toHaveLength(1);
+    expect(resends(t)).toHaveLength(1);
   });
 
   it('counts any Lead command from the bot as the ack, but not one from the old Lead terminal', async () => {

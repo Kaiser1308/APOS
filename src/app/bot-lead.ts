@@ -171,7 +171,9 @@ export async function wakeBotLeads(
     if (!state.leadBot || ['closed', 'stopped', 'draft'].includes(state.status)) continue;
     const result = results.find(item => item.goalId === state.spec.id);
     try {
-      result?.supervised.push(...(await chaseUnacked(store, runtime, state, repoPath, now)));
+      // Computed first: a Goal the tick skipped (verified) has no result, and `result?.` would skip the call itself.
+      const chased = await chaseUnacked(store, runtime, state, repoPath, now);
+      result?.supervised.push(...chased);
       const current = store.getGoal(state.spec.id)!;
       const actions = await wakeBot(store, runtime, state.spec.id, repoPath, botNotices(current), now);
       result?.supervised.push(...actions);

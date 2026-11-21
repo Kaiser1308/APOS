@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "result": {
+    "workers": [
+      {
+        "dispatchId": "ctx_4198479649aa",
+        "taskId": "task_66090d36090e",
+        "state": "stopped",
+        "outcome": "failed",
+        "liveness": "exited",
+        "terminal": "structworker_0dd0f5af-1555-4a37-8c3a-46d12a5be5f6",
+        "terminalState": "retained",
+        "workspace": "34f05e12-c15c-4248-a36d-98d2d6e7f528::C:/orca/workspaces/smoke-repo/apos-goal-001-wp-01-096f4fc3",
+        "host": "local",
+        "attention": [
+          "failure"
+        ]
+      }
+    ],
+    "scope": {
+      "run": "run_ce076e854991",
+      "source": "flag"
+    }
+  }
+}

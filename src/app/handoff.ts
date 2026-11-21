@@ -140,7 +140,8 @@ export class HandoffService {
   ): Promise<{ dispatchId: string; warning?: string }> {
     const goalId = state.spec.id;
     const plan = await this.plan(state, pending.target, repoPath, Boolean(pending.unblock), true);
-    const found = await plan.recover(pending.key).catch(() => undefined);
+    // A failed lookup is not "nothing started": starting now could run a second agent, so it throws instead.
+    const found = await plan.recover(pending.key);
     if (found) {
       this.record(goalId, 'owner-handed-off', {
         key: pending.key,

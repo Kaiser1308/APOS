@@ -1,13 +1,33 @@
 # Orca adapter contract
 
-Verified against Orca 1.4.240 on 2026-11-07. `orchestration run-create --objective ... --json` returns `result.run.id`. `orchestration worker-start --spec ... --worktree path:<repo> --agent claude --run <run> --json` returns `result.runId`, `taskId`, `dispatchId`, and an agent terminal in `result.effects`. `orchestration worker-show --dispatch <id> --json` returns `result.dispatch.status`, `projection.liveness.verdict`, and terminal observations. `orchestration run-list`, `task-list --run`, and `dispatch-show --task` are used to find a previously accepted attempt after a lost CLI response.
+Verified against Orca 1.4.265 on 2026-11-21, in a scratch Git repo, from a plain Orca terminal (the identity `apos controller watch` runs under). Raw `--json` captures of every record below are in `fixtures/orca-1.4.265/`, with local paths shortened. Orca 1.4.265 answers most verbs with a concise view; `--full` prints the stored record. `runOrca` (`orca/exec.ts`) adds `--full` only where APOS needs it.
 
-The smoke dispatch `ctx_cfc504ed2891` reached Claude Code in a disposable Git project. Claude Code reported a weekly usage limit and is scheduled to continue at 1am Asia/Ho_Chi_Minh. The dispatch remains live. Do not retry or release it without authoritative settlement.
+- `orchestration run-create --objective ... --json` returns `result.runId` (older Orca: `result.run.id`; `runIdOf` reads both).
+- `orchestration worker-start --spec ... --worktree new-top-level --repo path:<repo> --agent claude --run <run> --json` stays concise. It returns `runId`, `taskId`, `dispatchId`, `terminal` (the agent handle) and `workspace` (the worktree id), with no `effects`. The concise view exits 0 for `ready` and for a start whose turn Orca has not observed yet; `--full` exits 1 for anything but `ready`. If a `worker-start` still exits 1 with `stage` `turn_start_unobserved`, `runOrca` returns its receipt: the worker did start.
+- `orchestration worker-show --dispatch <id>` is read `--full`: `dispatch.status`, `projection.liveness.verdict`, `worker.stage`, `worker.worktreeId`, `worker.startOptions.launch.effective`, `terminalResource.releaseState`. The concise view (APOS `--compact`) carries `activity` and `lastActivity`.
+- `orchestration task-list --run <run>` is read `--full`. Its concise rows carry only `id`, `status`, `title`, `dispatchId` and `assignee`, and no `spec`, so recovery by `APOS dispatch key:` needs the full record.
+- `orchestration dispatch-show --task <id>` (concise) returns `dispatch.id` and `dispatch.assignee_handle`.
+- `orchestration run-list` (concise) returns `runs[].id`, `runs[].objective` and `nextCursor`.
+- `orchestration run-list`, `task-list --run --full`, `dispatch-show --task` and `worker-show` find a previously accepted attempt after a lost CLI response. The G1 smoke started a real package worker, dropped the response, and `PackageService.reconcile` returned `recovered` with the same dispatch; the Run held exactly one Task and one worker.
 
-Agent ids are Orca's: `codex`, `claude`, `antigravity`. Verified 2026-11-14 with Orca and Antigravity CLI 1.5.8: `worker-start --agent claude` opens a structured chat (handle `structworker_*`, `terminal read` returns a `[user]`/`[assistant]` transcript); `--agent antigravity` opens a TUI terminal. Screen rules per agent live in `screens.ts`, written from the captures in `fixtures/screens/`.
+## Mail
+
+A consuming `orchestration check --run <run>` marks the batch it returns as handled and gives no Delivery id; `--ack` is only for older Orca. `check --peek` returns every unread message without marking it. APOS reads with `--peek` (`checkRun`) and consumes with a plain `check` (`ackRun`) only after it handled every message it read, so mail it leaves pending is unread on the next tick. `ackRun` returns any message the consume took that the read did not see, and the controller handles it in the same tick. Seen live: a peek, then a consume after more mail arrived, returned the same three messages, and the next peek was empty.
+
+A chat coordinator (a `structworker_*` Orca session) gets its mail pushed into the chat, which marks it handled; only a terminal coordinator sees mail wait in `check`.
+
+## Terminals and agents
+
+Agent ids are Orca's: `codex`, `claude`, `antigravity`. `worker-start` runs the agent the way the user's "Chat | CLI" setting says; on this machine `--agent claude` opens a structured chat (handle `structworker_*`). Verified 2026-11-14 with Antigravity CLI 1.5.8: `--agent antigravity` opens a TUI terminal. Screen rules per agent live in `screens.ts`, written from the captures in `fixtures/screens/`.
+
+`terminal read` returns accumulated output by default; the screen rules need the rendered screen, so the adapter reads `--screen`. The result names its `source`: `screen`, or `screen-unavailable` for a chat worker, where Orca returns the transcript instead (no error).
+
+`orchestration worker-keep-open --dispatch <id>` (old name `worker-retain`) returns `{ state: "retained", reason, processAction }`. A worker started in a new worktree is kept open from the start (`terminalResource.releaseState: "retained"`).
 
 `orchestration worker-stop --dispatch <id> --json` returns `{ state: "stopped", processAction: "closed_agent_terminal" }`, and `worker-show` then reads the dispatch `failed`. APOS stops a dispatch only for a Human `apos handoff`, and treats the stop as sure only on `closed_agent_terminal` or a settled dispatch. The new agent starts with `worker-start --worktree id:<same worktree> --run <same Run>` and no `--terminal`.
 
 An agent that runs out of quota makes Orca post an `escalation` on the Run (seen live 2026-11-14 with Codex, which Orca also opened as a chat): subject `Agent hit an error: Codex hit its usage limit.`, body `Details from the agent: You’ve hit your usage limit. …`, `payload.dispatchId`. Fixture: `fixtures/screens/codex/quota-escalation.json`.
 
-The adapter must not call `worker-start` again when dispatch outcome is unknown. Its caller records `dispatch-intended` first and inspects Orca using the same key. A terminal being live is distinct from Task completion; `dispatch.status` governs settlement.
+## Recovery
+
+The adapter must not call `worker-start` again when dispatch outcome is unknown. Its caller records `dispatch-intended` first and inspects Orca using the same key. A recovery lookup that fails is not "nothing started": it throws, and the caller retries under the same key instead of starting a second agent. A terminal being live is distinct from Task completion; `dispatch.status` governs settlement.

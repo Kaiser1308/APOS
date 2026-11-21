@@ -87,8 +87,9 @@ export async function wakeLead(
   input: WakeInput,
 ): Promise<{ dispatchId: string; terminal?: string; requested?: RuntimeProfile }> {
   if (input.baseCommit && input.worktree.startsWith('id:') && profileChanged(input.requested, ctx.profile('lead'))) {
-    // A fresh Lead started for this turn whose response was lost: found by its key, never started twice.
-    const found = await ctx.recover(input.idempotencyKey, input.runId).catch(() => undefined);
+    // A fresh Lead started for this turn whose response was lost: found by its key, never started twice. A failed
+    // lookup is not "nothing started": it throws, and the next tick retries under the same key.
+    const found = await ctx.recover(input.idempotencyKey, input.runId);
     if (found) return { dispatchId: found.dispatchId, terminal: found.terminal, requested: ctx.profile('lead') };
     const events = input.events.map((item, index) => `(${index + 1}) ${item}`).join('\n');
     const ref = await ctx.handoff({

@@ -178,7 +178,6 @@ it('processes a settled worker_done, retains its owner, then acknowledges the Or
     async checkRun() {
       actions.push('check');
       return {
-        deliveryId: 'delivery-1',
         messages: [{ id: 'msg-1', type: 'worker_done', payload: { dispatchId: 'ctx-1' } }],
       };
     },
@@ -187,12 +186,67 @@ it('processes a settled worker_done, retains its owner, then acknowledges the Or
     },
     async ackRun() {
       actions.push('ack');
+      return [];
     },
   };
   const tick = (await new ControllerService(store, runtime).tick(dir))[0];
   expect(tick.errors).toEqual([]);
   expect(actions).toEqual(['check', 'retain', 'ack']);
   expect(store.getGoal(spec.id)?.settlements).toEqual({ 'ctx-1': 'completed' });
+  store.close();
+});
+
+it('keeps pending mail unconsumed until it is handled, then handles mail that arrived meanwhile (Orca 1.4.265)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-controller-peek-'));
+  dirs.push(dir);
+  const store = SqliteStore.open(join(dir, 'state.sqlite'));
+  let n = 0;
+  const add = (type: GoalEventType, data?: unknown) =>
+    store.append({ id: `PEEK-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+  add('goal-drafted', spec);
+  add('goal-approved', approval);
+  add('goal-selected');
+  add('proposal-drafted', proposal);
+  add('proposal-approved');
+  const ref = { runId: 'run-1', taskId: 'task-1', dispatchId: 'ctx-1', owner: 'lead' as const, repoPath: dir };
+  add('dispatch-intended', 'key-1');
+  add('execution-started', ref);
+  // Orca 1.4.265 check rows: no Delivery id. The worker_done arrives before its dispatch reads settled.
+  const unread: OrcaMessage[] = [{ id: 'msg-1', type: 'worker_done', payload: { dispatchId: 'ctx-1' } }];
+  const late: OrcaMessage = { id: 'msg-late', type: 'worker_done', payload: { dispatchId: 'ctx-old' } };
+  let settled = false;
+  const consumed: string[][] = [];
+  const runtime: RuntimeAdapter & PackageRuntime = {
+    async startLead() {
+      throw new Error('No new dispatch expected');
+    },
+    async resumeSolo() {
+      throw new Error('No resume expected');
+    },
+    async inspect() {
+      return settled ? { state: 'settled', outcome: 'completed', ref } : { state: 'live', ref };
+    },
+    async startPackage() {
+      throw new Error('No package expected');
+    },
+    async checkRun() {
+      return { messages: unread };
+    },
+    async retainWorker() {},
+    async ackRun(_run, handled) {
+      consumed.push(handled);
+      return [late];
+    },
+  };
+  const first = (await new ControllerService(store, runtime).tick(dir))[0];
+  expect(first.inboxPending).toEqual(['unsettled:msg-1']);
+  expect(consumed).toEqual([]);
+  settled = true;
+  const second = (await new ControllerService(store, runtime).tick(dir))[0];
+  expect(second.errors).toEqual([]);
+  expect(consumed).toEqual([['msg-1']]);
+  expect(store.getGoal(spec.id)?.settlements).toEqual({ 'ctx-1': 'completed' });
+  expect(second.settled).toContain('stale msg-late');
   store.close();
 });
 
@@ -228,7 +282,6 @@ it('acks a worker_done for a dispatch that is not current, so a lost reviewer ca
     async checkRun() {
       actions.push('check');
       return {
-        deliveryId: 'delivery-1',
         messages: [{ id: 'msg-9', type: 'worker_done', payload: { dispatchId: 'ctx-lost-reviewer' } }],
       };
     },
@@ -237,6 +290,7 @@ it('acks a worker_done for a dispatch that is not current, so a lost reviewer ca
     },
     async ackRun() {
       actions.push('ack');
+      return [];
     },
   };
   await new ControllerService(store, runtime).tick(dir);
@@ -346,7 +400,6 @@ it('retains the settled dispatch of a Lead wake-up, so the next wake is not refu
     },
     async checkRun() {
       return {
-        deliveryId: 'delivery-1',
         messages: [{ id: 'msg-lead', type: 'worker_done', payload: { dispatchId: 'ctx-lead-wake' } }],
       };
     },
@@ -355,6 +408,7 @@ it('retains the settled dispatch of a Lead wake-up, so the next wake is not refu
     },
     async ackRun() {
       actions.push('ack');
+      return [];
     },
   };
   await new ControllerService(store, runtime).tick(dir);
@@ -402,7 +456,7 @@ describe('Lead messages before a plan is accepted (GitHub #3, #5)', () => {
       },
       async checkRun() {
         calls.push('check');
-        return { deliveryId: 'd-1', messages };
+        return { messages };
       },
       async replyMessage() {
         calls.push('reply');
@@ -412,6 +466,7 @@ describe('Lead messages before a plan is accepted (GitHub #3, #5)', () => {
       },
       async ackRun() {
         calls.push('ack');
+        return [];
       },
     };
     return { dir, store, runtime, calls };

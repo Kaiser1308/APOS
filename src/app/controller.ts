@@ -27,6 +27,16 @@ export const ESCALATION_REPLY =
   'APOS controller: logged for the Human, who will read it after this attempt. Keep working under the approved Goal and .apos/skills/_core/execute.md. Approved acceptance criteria and their recorded ambiguity decisions win over existing tests or fixtures that contradict them: update those, with the criterion as the reason. Where the Goal is silent, take the reading closest to source.md and record it in your report. Report failed only if the Goal cannot be met within scope.';
 const OWNER_MESSAGES = new Set(['escalation', 'question', 'decision_gate', 'blocker']);
 
+/** Records a controller note once per Goal. */
+function logOnce(store: GoalRepository, goalId: string, note: string): void {
+  if (
+    !store
+      .events(goalId)
+      .some(item => item.type === 'decision-logged' && (item.data as { note?: string }).note === note)
+  )
+    store.append(newEvent(goalId, 'decision-logged', { note }));
+}
+
 export class ControllerService {
   constructor(
     private readonly store: GoalRepository,
@@ -48,122 +58,134 @@ export class ControllerService {
     ) as (RuntimeRef | PackageRuntimeRef)[];
     const runId = refs[0]?.runId ?? state.lead?.ref.runId;
     if (!runId) return;
+    // Orca 1.4.265 gives no Delivery id and marks a consuming check handled: read without consuming, and consume
+    // only once every message read is handled, so mail left pending comes back on the next tick.
     const delivery = await this.runtime.checkRun(runId);
-    if (!delivery.deliveryId) return;
-    for (const message of delivery.messages) {
-      if (message.type === 'status' || message.type === 'heartbeat') continue;
-      if (planning && message.type === 'worker_done') continue;
-      if (message.type !== 'worker_done') {
-        // Orca's own report that an owner's agent ran out of quota: tell the Human who and how to hand it off. A
-        // "keep working" reply would reach an agent that cannot answer.
-        const quota = quotaEscalation(message);
-        const payloadDispatch =
-          message.payload && typeof message.payload === 'object'
-            ? (message.payload as { dispatchId?: unknown }).dispatchId
-            : undefined;
-        // Orca does not always name the dispatch; while planning the Lead is the only agent that could have asked.
-        const quotaDispatch =
-          message.dispatchId ??
-          message.dispatch_id ??
-          (typeof payloadDispatch === 'string' ? payloadDispatch : planning ? state.lead?.current : undefined);
-        const owner = quota && quotaDispatch ? ownerOf(this.store.getGoal(goalId)!, quotaDispatch) : undefined;
-        if (quota && quotaDispatch && owner) {
-          const agent = await dispatchAgent(this.runtime, quotaDispatch, owner.requested);
-          if (
-            recordExhausted(this.store, Date.now, {
-              goalId,
-              dispatchId: quotaDispatch,
-              role: owner.role,
-              agent,
-              model: owner.requested?.model,
-              packageId: owner.packageId,
-              message: quota,
-              handoffHint: owner.handoffHint,
-            })
-          )
-            result.supervised.push(
-              `${owner.role} ${quotaDispatch} out of quota (${agent ?? 'unknown agent'}); Human notified`,
-            );
-          continue;
-        }
-        if (planning && OWNER_MESSAGES.has(message.type)) {
-          noticeLeadQuestion(this.store, goalId, message, result);
-          continue;
-        }
-        if (state.proposal?.mode.startsWith('solo') && OWNER_MESSAGES.has(message.type)) {
-          await this.relay(goalId, runId, message, result);
-          continue;
-        }
-        result.inboxPending.push(`${message.type}:${message.id}`);
-        continue;
-      }
-      let payload = message.payload;
-      if (typeof payload === 'string') {
-        try {
-          payload = JSON.parse(payload);
-        } catch {
-          result.inboxPending.push(`invalid payload:${message.id}`);
-          continue;
-        }
-      }
-      const body = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
-      const dispatchId = message.dispatchId ?? message.dispatch_id ?? body.dispatchId ?? body.dispatch_id;
-      // The reviewer's worker_done: collectReview reads the review from its worktree.
-      if (dispatchId && dispatchId === this.store.getGoal(goalId)?.reviewDispatch?.dispatchId) continue;
-      const ref = refs.find(item => item.dispatchId === dispatchId);
-      if (!ref) {
-        // The Lead's own wake-up dispatches are not owner refs, but Orca keeps the Lead terminal bound to a
-        // settled dispatch until it is retained (seen live: the next wake was refused with agent_unconfigured).
-        if (
-          typeof dispatchId === 'string' &&
-          this.store
-            .events(goalId)
-            .some(
-              item => item.type === 'lead-woken' && (item.data as { dispatchId?: string })?.dispatchId === dispatchId,
+    if (!delivery.messages.length) return;
+    const ackRun = this.runtime.ackRun.bind(this.runtime);
+    const retainWorker = this.runtime.retainWorker.bind(this.runtime);
+    const handle = async (messages: OrcaMessage[]): Promise<void> => {
+      for (const message of messages) {
+        if (message.type === 'status' || message.type === 'heartbeat') continue;
+        if (planning && message.type === 'worker_done') continue;
+        if (message.type !== 'worker_done') {
+          // Orca's own report that an owner's agent ran out of quota: tell the Human who and how to hand it off. A
+          // "keep working" reply would reach an agent that cannot answer.
+          const quota = quotaEscalation(message);
+          const payloadDispatch =
+            message.payload && typeof message.payload === 'object'
+              ? (message.payload as { dispatchId?: unknown }).dispatchId
+              : undefined;
+          // Orca does not always name the dispatch; while planning the Lead is the only agent that could have asked.
+          const quotaDispatch =
+            message.dispatchId ??
+            message.dispatch_id ??
+            (typeof payloadDispatch === 'string' ? payloadDispatch : planning ? state.lead?.current : undefined);
+          const owner = quota && quotaDispatch ? ownerOf(this.store.getGoal(goalId)!, quotaDispatch) : undefined;
+          if (quota && quotaDispatch && owner) {
+            const agent = await dispatchAgent(this.runtime, quotaDispatch, owner.requested);
+            if (
+              recordExhausted(this.store, Date.now, {
+                goalId,
+                dispatchId: quotaDispatch,
+                role: owner.role,
+                agent,
+                model: owner.requested?.model,
+                packageId: owner.packageId,
+                message: quota,
+                handoffHint: owner.handoffHint,
+              })
             )
-        ) {
-          try {
-            await this.runtime.retainWorker(dispatchId);
-            result.settled.push(`lead:${dispatchId}`);
+              result.supervised.push(
+                `${owner.role} ${quotaDispatch} out of quota (${agent ?? 'unknown agent'}); Human notified`,
+              );
             continue;
+          }
+          if (planning && OWNER_MESSAGES.has(message.type)) {
+            noticeLeadQuestion(this.store, goalId, message, result);
+            continue;
+          }
+          if (state.proposal?.mode.startsWith('solo') && OWNER_MESSAGES.has(message.type)) {
+            await this.relay(goalId, runId, message, result);
+            continue;
+          }
+          result.inboxPending.push(`${message.type}:${message.id}`);
+          continue;
+        }
+        let payload = message.payload;
+        if (typeof payload === 'string') {
+          try {
+            payload = JSON.parse(payload);
           } catch {
-            result.inboxPending.push(`unsettled:${message.id}`);
+            // It never becomes valid, so holding it would keep the Run's mail from ever being consumed.
+            logOnce(this.store, goalId, `invalid worker_done payload ${message.id}: not JSON; acked`);
+            result.settled.push(`invalid payload ${message.id}`);
             continue;
           }
         }
-        // Seen live: the worker_done of a reviewer whose start was lost sat in the inbox for an hour and
-        // kept the delivery from being acked. Settlement never depends on this message (the controller
-        // inspects each current dispatch itself), so a worker_done for any other dispatch on this Run is
-        // logged once and acked.
-        const note = `stale worker_done ${message.id} for dispatch ${String(dispatchId ?? 'unknown')}: not a current dispatch of this Goal; acked`;
-        // A reviewer's worker_done can arrive before its start is recorded (review intent pending): not stale, and not worth a note.
-        const startPending = Boolean(
-          this.store.getGoal(goalId)?.reviewIntent || this.store.getGoal(goalId)?.resumeIntent,
-        );
-        if (
-          !startPending &&
-          !this.store
-            .events(goalId)
-            .some(item => item.type === 'decision-logged' && (item.data as { note?: string }).note === note)
-        ) {
-          this.store.append(newEvent(goalId, 'decision-logged', { note }));
+        const body = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+        const dispatchId = message.dispatchId ?? message.dispatch_id ?? body.dispatchId ?? body.dispatch_id;
+        // The reviewer's worker_done: collectReview reads the review from its worktree.
+        if (dispatchId && dispatchId === this.store.getGoal(goalId)?.reviewDispatch?.dispatchId) continue;
+        const ref = refs.find(item => item.dispatchId === dispatchId);
+        if (!ref) {
+          // The Lead's own wake-up dispatches are not owner refs, but Orca keeps the Lead terminal bound to a
+          // settled dispatch until it is retained (seen live: the next wake was refused with agent_unconfigured).
+          if (
+            typeof dispatchId === 'string' &&
+            this.store
+              .events(goalId)
+              .some(
+                item => item.type === 'lead-woken' && (item.data as { dispatchId?: string })?.dispatchId === dispatchId,
+              )
+          ) {
+            try {
+              await retainWorker(dispatchId);
+              result.settled.push(`lead:${dispatchId}`);
+              continue;
+            } catch {
+              result.inboxPending.push(`unsettled:${message.id}`);
+              continue;
+            }
+          }
+          // Seen live: the worker_done of a reviewer whose start was lost sat in the inbox for an hour and
+          // kept the delivery from being acked. Settlement never depends on this message (the controller
+          // inspects each current dispatch itself), so a worker_done for any other dispatch on this Run is
+          // logged once and acked.
+          const note = `stale worker_done ${message.id} for dispatch ${String(dispatchId ?? 'unknown')}: not a current dispatch of this Goal; acked`;
+          // A reviewer's worker_done can arrive before its start is recorded (review intent pending): not stale, and not worth a note.
+          const startPending = Boolean(
+            this.store.getGoal(goalId)?.reviewIntent || this.store.getGoal(goalId)?.resumeIntent,
+          );
+          if (!startPending) logOnce(this.store, goalId, note);
+          result.settled.push(`stale ${message.id}`);
+          continue;
         }
-        result.settled.push(`stale ${message.id}`);
-        continue;
+        const outcome =
+          ref.owner === 'lead' ? (await this.runtime.inspect(ref)).outcome : await this.runtime.inspectPackage?.(ref);
+        if (outcome !== 'completed' && outcome !== 'failed') {
+          result.inboxPending.push(`unsettled:${message.id}`);
+          continue;
+        }
+        await retainWorker(ref.dispatchId);
+        if (!this.store.getGoal(goalId)?.settlements?.[ref.dispatchId]) {
+          this.store.append(newEvent(goalId, 'worker-settled', { dispatchId: ref.dispatchId, outcome }));
+          result.settled.push(`${ref.dispatchId}:${outcome}`);
+        }
       }
-      const outcome =
-        ref.owner === 'lead' ? (await this.runtime.inspect(ref)).outcome : await this.runtime.inspectPackage?.(ref);
-      if (outcome !== 'completed' && outcome !== 'failed') {
-        result.inboxPending.push(`unsettled:${message.id}`);
-        continue;
-      }
-      await this.runtime.retainWorker(ref.dispatchId);
-      if (!this.store.getGoal(goalId)?.settlements?.[ref.dispatchId]) {
-        this.store.append(newEvent(goalId, 'worker-settled', { dispatchId: ref.dispatchId, outcome }));
-        result.settled.push(`${ref.dispatchId}:${outcome}`);
-      }
-    }
-    if (!result.inboxPending.length) await this.runtime.ackRun(runId, delivery.deliveryId);
+    };
+    await handle(delivery.messages);
+    if (result.inboxPending.length) return;
+    const late = await ackRun(
+      runId,
+      delivery.messages.map(item => item.id),
+    );
+    if (!late.length) return;
+    // Mail that arrived between the read and the consume is consumed already: handle it now. What stays pending
+    // reaches this tick's supervisor but will not come back.
+    await handle(late);
+    if (result.inboxPending.length)
+      result.supervised.push(`consumed while pending, not re-read next tick: ${result.inboxPending.join(', ')}`);
   }
 
   /** Notifies the Human once per message and answers the owner with the standing rule. */

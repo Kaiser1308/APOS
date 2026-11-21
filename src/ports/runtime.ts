@@ -92,8 +92,10 @@ export interface RuntimeAdapter {
   replyMessage?(runId: string, messageId: string, body: string): Promise<void>;
   inspect(ref: RuntimeRef): Promise<RuntimeObservation>;
   recover?(key: string, runId?: string): Promise<RuntimeRef | undefined>;
+  /** The Run's unread mail, read without consuming it: mail left pending comes back on the next read. */
   checkRun?(runId: string): Promise<OrcaDelivery>;
-  ackRun?(runId: string, deliveryId: string): Promise<void>;
+  /** Consumes the Run's unread mail once `handled` (message ids) is done; returns mail that arrived after the read. */
+  ackRun?(runId: string, handled: string[]): Promise<OrcaMessage[]>;
   retainWorker?(dispatchId: string): Promise<void>;
   releaseWorker?(dispatchId: string): Promise<void>;
   /** Head commit of the owner's worktree: the delivery the controller gates. */

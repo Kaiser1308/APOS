@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "result": {
+    "dispatchId": "ctx_1c2a1160ebff",
+    "taskId": "task_fd02df278a39",
+    "runId": "run_21c066a74d51",
+    "state": "ready",
+    "agent": "claude",
+    "model": "claude-opus-5-5",
+    "mode": "structured",
+    "terminal": "structworker_1456086d-52dd-4bd5-a607-d776b602d679",
+    "workspace": "34f05e12-c15c-4248-a36d-98d2d6e7f528::C:/orca/workspaces/smoke-repo/g1-probe2",
+    "keptOpen": true,
+    "next": "Orca wakes you when workers report; end your turn when you're done."
+  }
+}

@@ -390,19 +390,21 @@ describe('Orca worker-start receipt', () => {
   });
 });
 
-it('binds to the Goal Run and acknowledges the exact Orca Delivery', async () => {
+it('binds to the Goal Run, reads its mail without consuming it, then consumes the handled batch', async () => {
   const calls: string[][] = [];
   const runtime = new OrcaRuntime(args => {
     calls.push(args);
     if (args[1] === 'run-use') return { run: { id: 'run_1' } };
-    if (args.includes('--ack')) return { acknowledged: 'delivery_1', messages: [] };
-    return { deliveryId: 'delivery_1', messages: [{ id: 'msg_1', type: 'status', body: 'ready' }] };
+    return { messages: [{ id: 'msg_1', type: 'status', body: 'ready' }] };
   });
   const delivery = await runtime.checkRun('run_1');
-  expect(delivery).toEqual({ deliveryId: 'delivery_1', messages: [{ id: 'msg_1', type: 'status', body: 'ready' }] });
-  await runtime.ackRun('run_1', delivery.deliveryId!);
+  expect(delivery).toEqual({ messages: [{ id: 'msg_1', type: 'status', body: 'ready' }] });
+  expect(await runtime.ackRun('run_1', ['msg_1'])).toEqual([]);
   expect(calls.filter(args => args[1] === 'run-use')).toHaveLength(2);
-  expect(calls.at(-1)).toEqual(['orchestration', 'check', '--run', 'run_1', '--ack', 'delivery_1']);
+  expect(calls.filter(args => args[1] === 'check')).toEqual([
+    ['orchestration', 'check', '--run', 'run_1', '--peek'],
+    ['orchestration', 'check', '--run', 'run_1'],
+  ]);
 });
 
 it('releases a terminal only after Orca reports a settled Dispatch', async () => {
@@ -852,6 +854,35 @@ describe('resumes and wakes after the role profile changed', () => {
     expect(start()[start().indexOf('--spec') + 1]).toContain('.apos/goals/GOAL-X/evidence/WP-01-v1-a2.md');
     expect(start()[start().indexOf('--spec') + 1]).toContain('current package contract');
     expect(next).toMatchObject({ owner: 'worker', dispatchId: 'ctx_2', requested: { agent: 'antigravity' } });
+  });
+
+  it('wakeLead does not start a fresh Lead when looking up a lost start fails', async () => {
+    const calls: string[][] = [];
+    const runtime = new OrcaRuntime(
+      args => {
+        calls.push(args);
+        if (args[1] === 'task-list') throw new Error('Orca orchestration task-list failed');
+        return {};
+      },
+      () => 'a'.repeat(40),
+      claudeLead,
+      () => 'd'.repeat(64),
+    );
+    await expect(
+      runtime.wakeLead({
+        repoPath: 'C:/repo',
+        goalId: 'GOAL-X',
+        terminal: 'term_old',
+        worktree: 'id:repo::C:/wt',
+        runId: 'run_1',
+        events: ['package WP-01 verified'],
+        idempotencyKey: 'wk',
+        requested: { agent: 'codex' },
+        baseCommit: 'b'.repeat(40),
+        goalVersion: 1,
+      }),
+    ).rejects.toThrow(/task-list failed/);
+    expect(calls.some(args => args[1] === 'worker-start')).toBe(false);
   });
 
   it('wakeLead wakes the new agent on a fresh terminal and says where it is', async () => {

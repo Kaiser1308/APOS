@@ -287,10 +287,11 @@ describe("Orca's own out-of-quota escalation (seen live 2026-11-14: Codex in an 
         return { state: 'live', ref: r };
       },
       async checkRun() {
-        return { deliveryId: 'd1', messages: [{ ...raw, payload: { ...raw.payload, dispatchId: 'ctx_1' } }] };
+        return { messages: [{ ...raw, payload: { ...raw.payload, dispatchId: 'ctx_1' } }] };
       },
-      async ackRun(_run, delivery) {
-        acked.push(delivery);
+      async ackRun(_run, handled) {
+        acked.push(...handled);
+        return [];
       },
       async retainWorker() {},
       async replyMessage(_run, _id, body) {
@@ -309,7 +310,7 @@ describe("Orca's own out-of-quota escalation (seen live 2026-11-14: Codex in an 
     expect(String(notices('agent-exhausted')[0].note)).toContain(`apos handoff ${spec.id} --agent`);
     expect(notices('escalation')).toHaveLength(0);
     expect(replies).toEqual([]);
-    expect(acked).toEqual(['d1', 'd1']);
+    expect(acked).toEqual([raw.id, raw.id]);
   });
 });
 

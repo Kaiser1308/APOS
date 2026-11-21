@@ -38,6 +38,7 @@ import {
   id,
   idleMinutesFrom,
   interpretWorkerShow,
+  messagesOf,
   object,
   profileChanged,
   runIdOf,
@@ -244,23 +245,28 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
     };
   }
 
+  /**
+   * Reads the Run's unread mail without consuming it. Orca 1.4.265 marks a consuming check's batch handled and
+   * gives no Delivery to ack, so mail the controller leaves pending must not be consumed: it comes back next tick.
+   */
   async checkRun(runId: string): Promise<OrcaDelivery> {
     this.execute(['orchestration', 'run-use', '--id', runId]);
-    const result = this.execute(['orchestration', 'check', '--run', runId]);
-    return {
-      deliveryId: typeof result.deliveryId === 'string' ? result.deliveryId : undefined,
-      messages: Array.isArray(result.messages) ? result.messages.map(value => object(value) as OrcaMessage) : [],
-    };
+    return { messages: messagesOf(this.execute(['orchestration', 'check', '--run', runId, '--peek'])) };
   }
 
   async replyMessage(runId: string, messageId: string, body: string): Promise<void> {
     this.execute(['orchestration', 'reply', '--run', runId, '--id', messageId, '--body', oneLine(body)]);
   }
 
-  async ackRun(runId: string, deliveryId: string): Promise<void> {
+  /**
+   * Consumes the Run's unread batch once the controller handled every message it read. Returns the mail that
+   * arrived after that read: it is consumed now, so the caller handles it in the same tick. Handled mail that
+   * is already gone (an empty batch) is not an error.
+   */
+  async ackRun(runId: string, handled: string[]): Promise<OrcaMessage[]> {
     this.execute(['orchestration', 'run-use', '--id', runId]);
-    const result = this.execute(['orchestration', 'check', '--run', runId, '--ack', deliveryId]);
-    if (result.acknowledged !== deliveryId) throw new Error('Orca did not acknowledge the expected Delivery');
+    const seen = new Set(handled);
+    return messagesOf(this.execute(['orchestration', 'check', '--run', runId])).filter(item => !seen.has(item.id));
   }
 
   async retainWorker(dispatchId: string): Promise<void> {
@@ -269,7 +275,7 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
     if (status !== 'completed' && status !== 'failed') throw new Error('Orca Worker must settle before retention');
     const resource = object(shown.terminalResource);
     if (resource.releaseState === 'retained' || resource.ownershipState === 'retained') return;
-    this.execute(['orchestration', 'worker-retain', '--dispatch', dispatchId]);
+    this.execute(['orchestration', 'worker-keep-open', '--dispatch', dispatchId]);
   }
 
   async releaseWorker(dispatchId: string): Promise<void> {
@@ -333,7 +339,7 @@ export class OrcaRuntime implements RuntimeAdapter, PackageRuntime {
 
   private screen(terminal: string, dispatchId?: string): string[] {
     try {
-      const tail = object(this.execute(['terminal', 'read', '--terminal', terminal]).terminal).tail;
+      const tail = object(this.execute(['terminal', 'read', '--terminal', terminal, '--screen']).terminal).tail;
       if (Array.isArray(tail) && tail.length) return tail.map(String);
     } catch (error) {
       if (!dispatchId) throw error;

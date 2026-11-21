@@ -1,5 +1,6 @@
+import { z } from 'zod';
 import type { RuntimeProfile, RuntimeRef } from '../../domain/runtime-refs.js';
-import type { RuntimeObservation } from '../../ports/runtime.js';
+import type { OrcaMessage, RuntimeObservation } from '../../ports/runtime.js';
 import { SCREENS } from '../screens.js';
 
 /** True when the role's profile now names another agent or model than the dispatch runs; an unknown running profile is not a change. */
@@ -98,4 +99,16 @@ export function assigneeOf(dispatch: Record<string, unknown>, worker: Record<str
 /** The Codex check behind `composerPending`, on the visible tail of a Codex TUI (see `screens.ts`). */
 export function composerHasUnsentBrief(lines: string[]): boolean {
   return SCREENS.codex.unsentBrief(lines);
+}
+
+const checkResult = z.object({
+  messages: z
+    .array(z.looseObject({ id: z.string().min(1), type: z.string().min(1) }))
+    .optional()
+    .default([]),
+});
+
+/** The mail rows of `orchestration check` (concise in Orca 1.4.265: id, type, from, subject, body, payload). */
+export function messagesOf(value: unknown): OrcaMessage[] {
+  return checkResult.parse(value).messages as OrcaMessage[];
 }

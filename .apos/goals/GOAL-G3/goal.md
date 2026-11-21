@@ -1,16 +1,16 @@
-# GOAL-G3 v1: APOS biết trạng thái agent bằng tín hiệu chính thức của Orca, không đọc màn hình terminal và không gõ vào agent
+# GOAL-G3 v2: APOS biết trạng thái agent bằng tín hiệu chính thức của Orca, không đọc màn hình terminal và không gõ vào agent
 
-Status: ready
+Status: approved
 
 ```json
 {
   "id": "GOAL-G3",
-  "version": 1,
+  "version": 2,
   "outcome": "APOS biết trạng thái agent bằng tín hiệu chính thức của Orca, không đọc màn hình terminal và không gõ vào agent",
   "source": {
     "path": "C:/Users/thien/.orca/bots/forge/drafts/G3/brief.md",
     "sha256": "217fb8f8e5e43084eda2f25e16ec195a44c222bb349734eb67bf81e5594a2e72",
-    "capturedAt": "2026-11-21T09:04:09.494Z",
+    "capturedAt": "2026-11-21T10:05:36.454Z",
     "origin": "human"
   },
   "requirements": [
@@ -63,6 +63,7 @@ Status: ready
     "src/runtime/screens.ts",
     "src/runtime/orca/adapter.ts",
     "src/runtime/orca/parse.ts",
+    "src/ports/runtime.ts (chỉ mở rộng RuntimeObservation/RuntimeAdapter bằng các trường quan sát tín hiệu Orca: stage, agentWait, waitingOnHuman, stopReason, quotaExhausted, draft; không đổi hành vi khác)",
     "các file test và fixture tương ứng",
     "src/runtime/README.md"
   ],

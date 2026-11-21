@@ -1,11 +1,11 @@
-# WP-SUPERVISE v1: Giám sát của APOS dùng agent-signals@v1 thay cho đọc màn hình: không còn gõ vào agent, các trạng thái cần anh biết đều thành notice, lưới idle 15 phút vẫn giữ.
+# WP-SUPERVISE v2: Giám sát của APOS dùng agent-signals@v1 thay cho đọc màn hình: không còn gõ vào agent, các trạng thái cần anh biết đều thành notice, lưới idle 15 phút vẫn giữ.
 
 ```json
 {
   "id": "WP-SUPERVISE",
   "goalId": "GOAL-G3",
-  "goalVersion": 1,
-  "version": 1,
+  "goalVersion": 2,
+  "version": 2,
   "owner": "worker",
   "outcome": "Giám sát của APOS dùng agent-signals@v1 thay cho đọc màn hình: không còn gõ vào agent, các trạng thái cần anh biết đều thành notice, lưới idle 15 phút vẫn giữ.",
   "scope": [
@@ -20,7 +20,7 @@
     "không đổi domain/transitions, gate-service, luật cổng Human",
     "không thêm dependency",
     "không làm G4, G5, G6",
-    "không sửa src/ports/runtime.ts; nếu cần thì hỏi Lead"
+    "không sửa src/ports/runtime.ts (WP-SIGNALS đã làm); nếu cần thì hỏi Lead"
   ],
   "dependencies": [
     "WP-SIGNALS"

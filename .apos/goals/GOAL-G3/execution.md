@@ -1,17 +1,17 @@
-# PROP-G3 v1: multi-wp
+# PROP-G3 v2: multi-wp
 
-Hai WP tuần tự. WP-SIGNALS: adapter/parse đọc các tín hiệu chính thức của Orca 1.4.265 từ worker-show và escalation (worker.stage, observation.agentWait, waitingOnHuman, stopReason, escalation hết quota, trường draft) thành một quan sát có kiểu, kèm fixture JSON bắt thật từ 1.4.265; chưa đổi hành vi giám sát. WP-SUPERVISE: supervision/watch dùng quan sát đó để sinh notice (lượt chưa bắt đầu, hết quota, stopped-without-done, waiting-on-human, brief Codex chưa gửi), bỏ hết orca terminal send và regex màn hình trong screens.ts, giữ lưới idle 15 phút, cập nhật src/runtime/README.md và chạy CHK-4 trên repo nháp. Lo ngại: nếu cần mở rộng kiểu quan sát ở src/ports/runtime.ts (ngoài scope) thì Worker phải hỏi, Lead sẽ ghi intent_gap thay vì tự nới scope.
+Hai WP tuần tự. WP-SIGNALS: adapter/parse đọc các tín hiệu chính thức của Orca 1.4.265 từ worker-show và escalation (worker.stage, observation.agentWait, waitingOnHuman, stopReason, escalation hết quota, trường draft) thành một quan sát có kiểu, kèm fixture JSON bắt thật từ 1.4.265; chưa đổi hành vi giám sát. WP-SUPERVISE: supervision/watch dùng quan sát đó để sinh notice (lượt chưa bắt đầu, hết quota, stopped-without-done, waiting-on-human, brief Codex chưa gửi), bỏ hết orca terminal send và regex màn hình trong screens.ts, giữ lưới idle 15 phút, cập nhật src/runtime/README.md và chạy CHK-4 trên repo nháp. Goal v2 đã thêm src/ports/runtime.ts vào scope: WP-SIGNALS mở rộng RuntimeObservation/RuntimeAdapter bằng các trường tín hiệu. WP-SIGNALS bắt đầu từ phần đã làm ở v1 (commit c310ae5 trên nhánh Kaiser1308/apos-goal-g3-wp-signals-7c2b4bb7: parse tín hiệu và fixture thật).
 
 ```json
 {
   "id": "PROP-G3",
-  "version": 1,
+  "version": 2,
   "goalId": "GOAL-G3",
-  "goalVersion": 1,
+  "goalVersion": 2,
   "mode": "multi-wp",
-  "approach": "Hai WP tuần tự. WP-SIGNALS: adapter/parse đọc các tín hiệu chính thức của Orca 1.4.265 từ worker-show và escalation (worker.stage, observation.agentWait, waitingOnHuman, stopReason, escalation hết quota, trường draft) thành một quan sát có kiểu, kèm fixture JSON bắt thật từ 1.4.265; chưa đổi hành vi giám sát. WP-SUPERVISE: supervision/watch dùng quan sát đó để sinh notice (lượt chưa bắt đầu, hết quota, stopped-without-done, waiting-on-human, brief Codex chưa gửi), bỏ hết orca terminal send và regex màn hình trong screens.ts, giữ lưới idle 15 phút, cập nhật src/runtime/README.md và chạy CHK-4 trên repo nháp. Lo ngại: nếu cần mở rộng kiểu quan sát ở src/ports/runtime.ts (ngoài scope) thì Worker phải hỏi, Lead sẽ ghi intent_gap thay vì tự nới scope.",
+  "approach": "Hai WP tuần tự. WP-SIGNALS: adapter/parse đọc các tín hiệu chính thức của Orca 1.4.265 từ worker-show và escalation (worker.stage, observation.agentWait, waitingOnHuman, stopReason, escalation hết quota, trường draft) thành một quan sát có kiểu, kèm fixture JSON bắt thật từ 1.4.265; chưa đổi hành vi giám sát. WP-SUPERVISE: supervision/watch dùng quan sát đó để sinh notice (lượt chưa bắt đầu, hết quota, stopped-without-done, waiting-on-human, brief Codex chưa gửi), bỏ hết orca terminal send và regex màn hình trong screens.ts, giữ lưới idle 15 phút, cập nhật src/runtime/README.md và chạy CHK-4 trên repo nháp. Goal v2 đã thêm src/ports/runtime.ts vào scope: WP-SIGNALS mở rộng RuntimeObservation/RuntimeAdapter bằng các trường tín hiệu. WP-SIGNALS bắt đầu từ phần đã làm ở v1 (commit c310ae5 trên nhánh Kaiser1308/apos-goal-g3-wp-signals-7c2b4bb7: parse tín hiệu và fixture thật).",
   "risks": [],
-  "baseCommit": "0feeb97035331bb65cfe471d950abeab46a6c3fa",
+  "baseCommit": "844b62c6d6102d8b86d6ee8627e425a8ff09e261",
   "sourceSha256": "217fb8f8e5e43084eda2f25e16ec195a44c222bb349734eb67bf81e5594a2e72",
   "estimatedCost": {
     "spendUsd": 14,
@@ -20,7 +20,8 @@ Hai WP tuần tự. WP-SIGNALS: adapter/parse đọc các tín hiệu chính th�
   "splitRationale": "Đọc tín hiệu Orca (adapter, fixture thật) và đổi hành vi giám sát là hai việc có ranh giới rõ; tách ra để WP sau làm trên một giao diện tín hiệu đã verified bằng fixture 1.4.265, và mỗi phiên giữ ngữ cảnh nhỏ. Đây cũng là pilot Multi-WP tuần tự với Lead là bot.",
   "sharedPaths": [
     "src/runtime/orca/adapter.ts",
-    "src/runtime/orca/parse.ts"
+    "src/runtime/orca/parse.ts",
+    "src/ports/runtime.ts"
   ],
   "acceptanceMapping": [
     {

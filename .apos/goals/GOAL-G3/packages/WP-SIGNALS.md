@@ -1,23 +1,23 @@
-# WP-SIGNALS v1: Adapter Orca đọc các tín hiệu chính thức của Orca 1.4.265 về trạng thái agent thành một quan sát có kiểu, có fixture JSON bắt thật; hành vi giám sát chưa đổi.
+# WP-SIGNALS v2: Adapter Orca đọc các tín hiệu chính thức của Orca 1.4.265 về trạng thái agent thành một quan sát có kiểu, có fixture JSON bắt thật; hành vi giám sát chưa đổi. Bắt đầu bằng cách lấy lại commit c310ae5 (nhánh Kaiser1308/apos-goal-g3-wp-signals-7c2b4bb7: parse tín hiệu và fixture thật đã làm ở v1), rồi nối agent-signals@v1 vào RuntimeObservation/RuntimeAdapter.
 
 ```json
 {
   "id": "WP-SIGNALS",
   "goalId": "GOAL-G3",
-  "goalVersion": 1,
-  "version": 1,
+  "goalVersion": 2,
+  "version": 2,
   "owner": "worker",
-  "outcome": "Adapter Orca đọc các tín hiệu chính thức của Orca 1.4.265 về trạng thái agent thành một quan sát có kiểu, có fixture JSON bắt thật; hành vi giám sát chưa đổi.",
+  "outcome": "Adapter Orca đọc các tín hiệu chính thức của Orca 1.4.265 về trạng thái agent thành một quan sát có kiểu, có fixture JSON bắt thật; hành vi giám sát chưa đổi. Bắt đầu bằng cách lấy lại commit c310ae5 (nhánh Kaiser1308/apos-goal-g3-wp-signals-7c2b4bb7: parse tín hiệu và fixture thật đã làm ở v1), rồi nối agent-signals@v1 vào RuntimeObservation/RuntimeAdapter.",
   "scope": [
     "src/runtime/orca/adapter.ts",
     "src/runtime/orca/parse.ts",
-    "test và fixture tương ứng (src/runtime/fixtures/orca-1.4.265)"
+    "test và fixture tương ứng (src/runtime/fixtures/orca-1.4.265)",
+    "src/ports/runtime.ts (chỉ thêm trường quan sát vào RuntimeObservation/RuntimeAdapter)"
   ],
   "exclusions": [
     "không đổi src/app/supervision.ts, src/app/watch.ts, src/runtime/screens.ts (việc của WP-SUPERVISE)",
     "không đổi domain/transitions, gate-service, luật cổng Human",
-    "không thêm dependency",
-    "không sửa src/ports/runtime.ts; nếu cần thì hỏi Lead"
+    "không thêm dependency"
   ],
   "dependencies": [],
   "interfaces": [

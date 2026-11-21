@@ -42,7 +42,9 @@ export function requestFromController(store: GoalRepository, goalId: string, req
  * Carries out the Goal's queued requests, oldest first, with the same services the commands used to call. Each runs
  * once: its outcome or error is recorded on `controller-request-settled`, and an error reaches the Human as a notice.
  * Services that write an intent first (Lead start, handoff, resumes) are settled after they ran, so a crash in between
- * recovers by key on the next tick. A Lead wake has no intent: it is settled before it runs, so it never runs twice.
+ * recovers by key on the next tick, and a request whose work the log already shows done after it was queued (the
+ * controller stopped before settling it) is settled with that, never run again. A Lead wake has no intent: it is
+ * settled before it runs, so it never runs twice.
  */
 export async function runControllerRequests(
   store: GoalRepository,
@@ -54,6 +56,12 @@ export async function runControllerRequests(
   const done: string[] = [];
   const errors: string[] = [];
   for (const item of store.getGoal(goalId)?.requests ?? []) {
+    const finished = doneSince(store, goalId, item);
+    if (finished) {
+      store.append(newEvent(goalId, 'controller-request-settled', { key: item.key, result: finished }));
+      done.push(`${describeRequest(item.request)}: ${finished}`);
+      continue;
+    }
     const settleFirst = item.request.kind === 'lead-wake';
     if (settleFirst) store.append(newEvent(goalId, 'controller-request-settled', { key: item.key, taken: true }));
     try {
@@ -76,6 +84,44 @@ export async function runControllerRequests(
     }
   }
   return { done, errors };
+}
+
+/** The event that completes each kind of request, matched on what the request names. */
+const COMPLETES: Record<
+  ControllerRequest['kind'],
+  (type: string, data: Record<string, unknown>, request: ControllerRequest) => boolean
+> = {
+  'lead-start': type => type === 'lead-started',
+  'lead-wake': () => false, // settled before it runs: a later wake by the controller is not the Human's note
+  handoff: (type, data, request) =>
+    type === 'owner-handed-off' &&
+    JSON.stringify(data.target) === JSON.stringify((request as { target?: unknown }).target),
+  'lead-to-bot': type => type === 'lead-transferred',
+  'lead-to-apos': type => type === 'lead-returned',
+  'package-resume': (type, data, request) =>
+    type === 'package-resumed' && data.packageId === (request as { packageId?: string }).packageId,
+  'execution-resume': type => type === 'runtime-resumed',
+  'worker-answer': (type, data, request) =>
+    type === 'decision-logged' && data.answers === (request as { messageId?: string }).messageId,
+};
+
+/** The completing event recorded after this request was queued: the work was done and only the settlement is missing. */
+function doneSince(store: GoalRepository, goalId: string, item: PendingRequest): string | undefined {
+  const events = store.events(goalId);
+  const queued = events.findIndex(
+    event => event.type === 'controller-requested' && (event.data as { key?: string } | null)?.key === item.key,
+  );
+  if (queued < 0) return undefined;
+  const found = events
+    .slice(queued + 1)
+    .find(event =>
+      COMPLETES[item.request.kind](
+        event.type,
+        event.data && typeof event.data === 'object' ? (event.data as Record<string, unknown>) : {},
+        item.request,
+      ),
+    );
+  return found ? `already done (${found.type} ${found.id})` : undefined;
 }
 
 /** What the Human does after a failed request: a Lead start whose outcome is unknown is checked, never retried blind. */

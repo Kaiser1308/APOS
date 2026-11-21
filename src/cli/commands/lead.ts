@@ -164,11 +164,16 @@ export function registerLead(ctx: CliContext): void {
             `NOTICE ${id}: Lead chose Multi-WP (${notice.packages.length} packages, est. ${notice.estimatedCost?.spendUsd} USD / ${notice.estimatedCost?.wallMinutes} min): ${notice.splitRationale}`,
           );
           awaitController(`Accepted ${id}: the controller dispatches its ready packages at its next tick.`);
-        } else {
+        } else if (state.leadBot) {
           awaitController(
-            state.leadBot
-              ? `Accepted ${id}: the controller dispatches a Solo owner to deliver it at its next tick; you check, you do not write code.`
-              : `Accepted ${id}: you (Lead ${currentLeadRef(leadState).dispatchId}) are the Solo owner, as the controller records at its next tick. Deliver in this worktree and commit your report.`,
+            `Accepted ${id}: the controller dispatches a Solo owner to deliver it at its next tick; you check, you do not write code.`,
+          );
+        } else {
+          // The APOS Lead is the owner already running: recording that is a log entry, no Orca call, so it happens now
+          // and the Lead can checkpoint and deliver at once.
+          const ref = await new SoloService(journal, runtime).adopt(id);
+          write(
+            `Accepted ${id}: you (Lead ${ref.dispatchId}) are the Solo owner. Deliver in this worktree and commit your report.`,
           );
         }
       }),

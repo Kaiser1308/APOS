@@ -111,9 +111,10 @@ it('dispatches a Solo plan the Lead commits after Human Goal approval and select
     await invoke('lead', 'propose', '--file', proposalFile);
     await invoke('lead', 'commit', spec.id);
   });
-  expect(output.join('\n')).toMatch(
-    /you \(Lead ctx_1\) are the Solo owner, as the controller records at its next tick/,
-  );
+  expect(output.at(-1)).toMatch(/you \(Lead ctx_1\) are the Solo owner\. Deliver/);
+  // Recorded at once (a log entry, no Orca call), so the Lead can checkpoint before any tick.
+  await invoke('execution', 'status', spec.id);
+  expect(output.at(-1)).toContain('executing');
   await invoke('controller', 'tick');
   expect(starts).toBe(1); // the Solo owner is that Lead: no second session
   await invoke('execution', 'status', spec.id);

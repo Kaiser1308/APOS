@@ -74,6 +74,7 @@ export type GoalEventType =
   | 'integration-completed'
   | 'integration-gate-requested'
   | 'controller-requested'
+  | 'controller-request-attempted'
   | 'controller-request-settled'
   | 'package-added'
   | 'package-plan-added'
@@ -1337,6 +1338,9 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'controller-requested':
     case 'controller-request-settled':
       return applyControllerRequest(state, event);
+    case 'controller-request-attempted':
+      requireThat(event.data && typeof event.data === 'object', 'Request attempt details required');
+      return state;
     case 'lead-transferred':
     case 'lead-returned':
       return applyLeadTransfer(state, event);

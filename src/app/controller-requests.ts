@@ -43,8 +43,8 @@ export function requestFromController(store: GoalRepository, goalId: string, req
  * once: its outcome or error is recorded on `controller-request-settled`, and an error reaches the Human as a notice.
  * Services that write an intent first (Lead start, handoff, resumes) are settled after they ran, so a crash in between
  * recovers by key on the next tick, and a request whose work the log already shows done after it was queued (the
- * controller stopped before settling it) is settled with that, never run again. A Lead wake has no intent: it is
- * settled before it runs, so it never runs twice.
+ * controller stopped before settling it) is settled with that, never run again. A wake or reply whose attempt was
+ * interrupted is reported as uncertain instead of being silently lost or sent a second time.
  */
 export async function runControllerRequests(
   store: GoalRepository,
@@ -62,24 +62,55 @@ export async function runControllerRequests(
       done.push(`${describeRequest(item.request)}: ${finished}`);
       continue;
     }
-    const settleFirst = item.request.kind === 'lead-wake';
-    if (settleFirst) store.append(newEvent(goalId, 'controller-request-settled', { key: item.key, taken: true }));
+    const guarded = item.request.kind === 'lead-wake' || item.request.kind === 'worker-answer';
+    if (guarded) {
+      const events = store.events(goalId);
+      const attempted = events.some(
+        event => event.type === 'controller-request-attempted' && (event.data as { key?: string })?.key === item.key,
+      );
+      if (attempted) {
+        if (
+          !events.some(
+            event =>
+              event.type === 'human-notified' &&
+              (event.data as { kind?: string; key?: string })?.kind === 'request-uncertain' &&
+              (event.data as { key?: string }).key === item.key,
+          )
+        ) {
+          store.append(
+            newEvent(goalId, 'human-notified', {
+              kind: 'request-uncertain',
+              goalId,
+              key: item.key,
+              request: item.request,
+              note: `The controller stopped while attempting to ${describeRequest(item.request)}. Check Orca for delivery before requesting it again; it may or may not have been sent.`,
+            }),
+          );
+        }
+        store.append(newEvent(goalId, 'controller-request-settled', { key: item.key, error: 'delivery uncertain' }));
+        errors.push(`${describeRequest(item.request)}: delivery uncertain; Human notified`);
+        continue;
+      }
+      store.append(newEvent(goalId, 'controller-request-attempted', { key: item.key }));
+    }
     try {
       const result = await execute(store, runtime, profiles, goalId, repoPath, item);
-      if (!settleFirst) store.append(newEvent(goalId, 'controller-request-settled', { key: item.key, result }));
+      store.append(newEvent(goalId, 'controller-request-settled', { key: item.key, result }));
       done.push(`${describeRequest(item.request)}: ${result}`);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      if (!settleFirst) store.append(newEvent(goalId, 'controller-request-settled', { key: item.key, error: detail }));
       store.append(
         newEvent(goalId, 'human-notified', {
           kind: 'request-failed',
           goalId,
           key: item.key,
           request: item.request,
-          note: `the controller could not ${describeRequest(item.request)} for ${goalId}: ${detail}.${retryHint(store, goalId, item.request)}`,
+          note: guarded
+            ? `The controller could not confirm whether it managed to ${describeRequest(item.request)} for ${goalId}: ${detail}. Check Orca for delivery before requesting it again.`
+            : `the controller could not ${describeRequest(item.request)} for ${goalId}: ${detail}.${retryHint(store, goalId, item.request)}`,
         }),
       );
+      store.append(newEvent(goalId, 'controller-request-settled', { key: item.key, error: detail }));
       errors.push(`${describeRequest(item.request)}: ${detail}`);
     }
   }

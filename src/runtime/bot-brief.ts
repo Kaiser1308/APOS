@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import type { BotWakeInput } from '../ports/runtime.js';
 import { aposCommand, oneLine, roleSkill } from './brief.js';
 
+/** How long a wake may go without a Lead command from the bot before the controller tells the Human (`app/bot-wake-check.ts`). */
+export const WAKE_ACK_MINUTES = 10;
+
 /** Commands a Human keeps; APOS refuses each of them from the chat of a bot that holds a Lead. */
 export const HUMAN_ONLY = [
   'goal approve/select/appetite',
@@ -56,10 +59,11 @@ export function botLeadBrief(input: BotWakeInput): string {
   return [
     `${goal}: you are the APOS Lead of this Goal, as an Orca bot. You never write, commit or merge code yourself; every decision goes through an APOS command, run as ${apos} <command>, so it is recorded in the event log.`,
     ...home,
+    `First, before reading anything, run ${apos} lead ack ${goal}: it tells APOS this mail reached your Lead chat and records where APOS should expect the next one. With no Lead command within ${WAKE_ACK_MINUTES} minutes of a wake, the controller tells your owner and resends it once.`,
     where,
     ...mode,
     `These are Human decisions and APOS refuses them from your chat: ${HUMAN_ONLY.join(', ')}. When one is needed, say so to your owner.`,
-    'You have no worker_done: when this batch is handled, stop; reply to this mail only if your owner must decide something.',
+    `You have no worker_done. Never end the turn of an APOS wake with NO_REPLY: end it with one line your owner sees, saying what you did or what they must decide. If this chat is not the one holding the Lead of ${goal}, or you doubt where this mail landed, compare its to_handle in orca orchestration inbox --json --full with orca orchestration run-current --json from this chat, and tell your owner in this same turn; do not forward it with --chat, which can land back in this chat.`,
     'Events:',
     ...input.events.map((item, index) => `(${index + 1}) ${oneLine(item)}`),
   ].join('\n');

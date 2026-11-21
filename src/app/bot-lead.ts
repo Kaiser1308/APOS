@@ -1,5 +1,12 @@
 import { newEvent } from './events.js';
 import { writeLeadLog } from './lead-log.js';
+import {
+  WAKE_ACK_MINUTES,
+  checkWakeDestination,
+  noticeUnacked,
+  overdueWakes,
+  pendingEvents,
+} from './bot-wake-check.js';
 import { worktreePath } from '../runtime/orca/parse.js';
 import { UserError } from '../domain/errors.js';
 import type { GoalState } from '../domain/transitions.js';
@@ -43,6 +50,7 @@ export async function wakeBot(
   goalId: string,
   repoPath: string,
   events: string[],
+  now: () => number = Date.now,
 ): Promise<string[]> {
   const state = store.getGoal(goalId);
   const bot = state?.leadBot;
@@ -56,24 +64,83 @@ export async function wakeBot(
     if (!asked) store.append(newEvent(goalId, 'human-notified', { kind: 'lead-unreachable', goalId, events: fresh }));
     return [`Lead bot unreachable for: ${fresh.join('; ')}`];
   }
+  return sendWake(store, runtime, state, repoPath, fresh, now);
+}
+
+/** One wake mail, its `lead-woken` with the mailbox Orca stored it in, and check D on that mailbox. */
+async function sendWake(
+  store: GoalRepository,
+  runtime: RuntimeAdapter,
+  state: GoalState,
+  repoPath: string,
+  events: string[],
+  now: () => number,
+  resendOf?: string,
+): Promise<string[]> {
+  const goalId = state.spec.id;
+  const bot = state.leadBot!;
   const mode = phase(state);
   if (mode === 'multi') writeLeadLog(store, goalId, state.lead?.ref.worktreeId);
-  const sent = await runtime.wakeBot({
+  const sent = await runtime.wakeBot!({
     repoPath,
     goalId,
     bot: { id: bot.id, name: bot.name },
-    events: fresh,
+    events,
     mode,
     leadWorktree: worktreePath(state.lead?.ref.worktreeId),
   });
   store.append(
-    newEvent(goalId, 'lead-woken', {
-      events: fresh,
-      bot: bot.id,
-      ...(sent.messageId ? { messageId: sent.messageId } : {}),
-    }),
+    newEvent(
+      goalId,
+      'lead-woken',
+      {
+        events,
+        bot: bot.id,
+        ...(sent.messageId ? { messageId: sent.messageId } : {}),
+        ...(sent.toHandle ? { toHandle: sent.toHandle } : {}),
+        ...(resendOf ? { resendOf } : {}),
+      },
+      new Date(now()).toISOString(),
+    ),
   );
-  return [`woke bot ${bot.name}: ${fresh.join('; ')}`];
+  const misrouted = checkWakeDestination(store, goalId, bot, sent, now);
+  return [
+    `${resendOf ? 'resent' : 'woke'} bot ${bot.name}: ${events.join('; ')}`,
+    ...(misrouted ? [`Human notified: ${misrouted}`] : []),
+  ];
+}
+
+/**
+ * Check A: wakes the bot has run no Lead command after for ten minutes. The Human is told once, then the wakes are
+ * resent once, in that order, so a crash in between never resends twice. A resend usually lands where the first one
+ * did (Orca routes by the Run's coordinator), so the notice is what matters.
+ */
+async function chaseUnacked(
+  store: GoalRepository,
+  runtime: RuntimeAdapter,
+  state: GoalState,
+  repoPath: string,
+  now: () => number,
+): Promise<string[]> {
+  const bot = state.leadBot!;
+  const pending = overdueWakes(store, state.spec.id, bot.id, now);
+  if (!pending.length) return [];
+  const note = noticeUnacked(store, state.spec.id, bot, pending, now);
+  if (!runtime.wakeBot) return [`Human notified: ${note}`];
+  const first = pending[0]!.data as { messageId?: string };
+  const resent = await sendWake(
+    store,
+    runtime,
+    store.getGoal(state.spec.id)!,
+    repoPath,
+    [
+      `resent: APOS saw no Lead command from you within ${WAKE_ACK_MINUTES} minutes of wake ${first.messageId ?? pending[0]!.id}; run the ack first`,
+      ...pendingEvents(pending),
+    ],
+    now,
+    first.messageId ?? pending[0]!.id,
+  );
+  return [`Human notified: ${note}`, ...resent];
 }
 
 /**
@@ -98,12 +165,15 @@ export async function wakeBotLeads(
   runtime: RuntimeAdapter,
   repoPath: string,
   results: { goalId: string; supervised: string[]; errors: string[] }[],
+  now: () => number = Date.now,
 ): Promise<void> {
   for (const state of store.listGoals()) {
     if (!state.leadBot || ['closed', 'stopped', 'draft'].includes(state.status)) continue;
     const result = results.find(item => item.goalId === state.spec.id);
     try {
-      const actions = await wakeBot(store, runtime, state.spec.id, repoPath, botNotices(state));
+      result?.supervised.push(...(await chaseUnacked(store, runtime, state, repoPath, now)));
+      const current = store.getGoal(state.spec.id)!;
+      const actions = await wakeBot(store, runtime, state.spec.id, repoPath, botNotices(current), now);
       result?.supervised.push(...actions);
     } catch (error) {
       result?.errors.push(`bot lead: ${error instanceof Error ? error.message : String(error)}`);

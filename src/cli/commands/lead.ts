@@ -23,6 +23,7 @@ export function registerLead(ctx: CliContext): void {
     withJournal,
     withJournalAsync,
     assertHuman,
+    checkInBot,
     readJsonFile,
     requestDispatch,
     awaitController,
@@ -68,6 +69,26 @@ export function registerLead(ctx: CliContext): void {
       }),
     );
   lead
+    .command('ack')
+    .argument('<id>')
+    .description(
+      "bot Lead: run first on every APOS wake; it tells APOS the wake reached this chat and records the chat's mailbox",
+    )
+    .action((id: string) =>
+      withJournal(journal => {
+        const state = journal.getGoal(id);
+        if (!state) throw new UserError(`Goal does not exist: ${id}`);
+        if (!state.leadBot) throw new UserError(`No bot holds the Lead of ${id}; only a bot Lead acks wakes`);
+        assertLeadTerminal(state, process.env.ORCA_TERMINAL_HANDLE, 'lead ack', process.cwd(), () =>
+          runtime.callerBot?.(),
+        );
+        const { acked, mailbox } = checkInBot(journal, id, 'lead ack')!;
+        write(
+          `${id}: ${acked.length ? `acked wake ${acked.join(', ')}` : 'no wake waiting for an ack'}; APOS expects your wake mail in ${mailbox ?? 'an unknown mailbox (Orca did not name the mailbox of this chat)'}`,
+        );
+      }),
+    );
+  lead
     .command('propose')
     .requiredOption('--file <json>')
     .action(({ file }: { file: string }) =>
@@ -83,6 +104,7 @@ export function registerLead(ctx: CliContext): void {
           process.cwd(),
           () => runtime.callerBot?.(),
         );
+        checkInBot(journal, parsed.goalId, 'lead propose');
         // The gate compares against the commit the Lead's worktree was cut from: the code it actually read.
         if (parsed.baseCommit && parsed.baseCommit.toLowerCase() !== leadState.ref.baseCommit.toLowerCase())
           throw new Error(
@@ -124,6 +146,7 @@ export function registerLead(ctx: CliContext): void {
           process.cwd(),
           () => runtime.callerBot?.(),
         );
+        checkInBot(journal, id, 'lead commit');
         if (!state.proposal)
           throw new Error(
             `Current proposal required: ${id} has no proposal yet (run apos lead propose --file <execution.json> first)`,

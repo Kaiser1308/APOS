@@ -3,12 +3,17 @@ import type { BotIdentity, BotWakeInput } from '../../ports/runtime.js';
 import { botLeadBrief } from '../bot-brief.js';
 import { UserError } from '../../domain/errors.js';
 import { OrcaRefused } from './exec.js';
-import { object } from './parse.js';
 
 const botList = z.object({
   bots: z.array(z.object({ id: z.string().min(1), name: z.string().min(1), paused: z.boolean().optional() })),
 });
 const botChats = z.object({ bot: z.string().min(1) });
+const runCurrent = z.object({ runId: z.string().min(1).nullable().optional() });
+const sendReceipt = z.object({
+  message: z.object({ id: z.string().min(1).optional(), to_handle: z.string().min(1).optional() }).optional(),
+  id: z.string().min(1).optional(),
+  messageId: z.string().min(1).optional(),
+});
 
 /** `orca bot list --json`: every bot on this computer, by id and name. */
 export function parseBotList(value: unknown): BotIdentity[] {
@@ -18,6 +23,22 @@ export function parseBotList(value: unknown): BotIdentity[] {
 /** `orca bot chats --json` run from a bot's chat names that bot (seen live on Orca 1.4.265). */
 export function parseBotChats(value: unknown): string {
   return botChats.parse(value).bot;
+}
+
+/** `orca orchestration run-current --json`: the Run this session coordinates, or undefined when it has none. */
+export function parseRunCurrent(value: unknown): string | undefined {
+  return runCurrent.parse(value).runId ?? undefined;
+}
+
+/**
+ * The receipt of `orca orchestration send --json --full`. Only the full view names `to_handle`, the mailbox Orca
+ * stored the mail in (seen live on Orca 1.4.265: a mail to a session that coordinates a Run is stored as `run:<id>`).
+ */
+export function parseSendReceipt(value: unknown): { messageId?: string; toHandle?: string } {
+  const receipt = sendReceipt.parse(value);
+  const messageId = receipt.message?.id ?? receipt.id ?? receipt.messageId;
+  const toHandle = receipt.message?.to_handle;
+  return { ...(messageId ? { messageId } : {}), ...(toHandle ? { toHandle } : {}) };
 }
 
 /** A bot by its id, or by its name ignoring case; undefined when this computer has none. */
@@ -57,6 +78,21 @@ export function callerBot(
   return bot;
 }
 
+/**
+ * The mailbox Orca stores mail for this chat in: the Run it coordinates (`run:<id>`), else its own session. Mail to the
+ * bot that Orca stores under any other handle reaches another chat (seen live on 21/11: a chat that had lost its Run to
+ * another chat's `run-use` had its mail delivered to that chat). Undefined outside an Orca agent session.
+ */
+export function callerMailbox(
+  execute: (args: string[]) => Record<string, unknown>,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const session = env.ORCA_AGENT_SESSION_ID?.trim();
+  if (!session) return undefined;
+  const runId = parseRunCurrent(execute(['orchestration', 'run-current']));
+  return runId ? `run:${runId}` : `orca_session_id:${session}`;
+}
+
 /** Mails the bot by id (names hold spaces and can change): a `handoff` is a job it takes, a `status` only informs. */
 export function mailBot(
   execute: (args: string[]) => Record<string, unknown>,
@@ -64,27 +100,28 @@ export function mailBot(
   type: 'handoff' | 'status',
   subject: string,
   body: string,
-): { messageId?: string } {
-  const sent = execute([
-    'orchestration',
-    'send',
-    '--to',
-    `bot:${bot.id}`,
-    '--type',
-    type,
-    '--subject',
-    subject,
-    '--body',
-    body,
-  ]);
-  const id = object(sent.message).id ?? sent.id ?? sent.messageId;
-  return typeof id === 'string' ? { messageId: id } : {};
+): { messageId?: string; toHandle?: string } {
+  return parseSendReceipt(
+    execute([
+      'orchestration',
+      'send',
+      '--to',
+      `bot:${bot.id}`,
+      '--type',
+      type,
+      '--subject',
+      subject,
+      '--body',
+      body,
+      '--full',
+    ]),
+  );
 }
 
 export function wakeBot(
   execute: (args: string[]) => Record<string, unknown>,
   input: BotWakeInput,
-): { messageId?: string } {
+): { messageId?: string; toHandle?: string } {
   return mailBot(
     execute,
     input.bot,

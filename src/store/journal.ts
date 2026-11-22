@@ -140,6 +140,11 @@ export class ProjectJournal implements GoalRepository {
       );
     if (MILESTONES.has(event.type) && !this.createEvent)
       throw new Error('Controller event factory required to publish milestones');
+    if (event.type === 'goal-approved') {
+      const pinned = (event.data as { setupVersion?: number } | undefined)?.setupVersion;
+      if (pinned !== undefined && !this.projectLog.history().approvals.some(item => item.version === pinned))
+        throw new UserError(`Setup version ${pinned} was never approved: a Goal can only pin an approved setup`);
+    }
     const next = applyEvent(this.store.getGoal(event.goalId), event);
     this.log.append(event);
     this.store.append(event);

@@ -29,12 +29,19 @@ export class GoalRegistryService {
       this.store,
     ),
     confirmation?: unknown,
+    setupVersion?: number,
   ): void {
     this.assertAcyclic();
     const state = this.store.getGoal(goalId);
     if (currentSourceDigest && state && currentSourceDigest(goalId) !== state.spec.source.sha256)
       throw new Error(`Source snapshot for ${goalId} is missing or differs from the Goal sha256`);
-    this.store.append(newEvent(goalId, 'goal-approved', { appetite, confirmation }));
+    this.store.append(
+      newEvent(goalId, 'goal-approved', {
+        appetite,
+        confirmation,
+        ...(setupVersion === undefined ? {} : { setupVersion }),
+      }),
+    );
   }
 
   private isClosed(id: string): boolean {

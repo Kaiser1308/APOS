@@ -108,6 +108,8 @@ export type GoalState = {
   spec: GoalSpec;
   status: GoalStatus;
   approvedGoalVersion?: number;
+  /** The approved setup version this Goal was pinned to at `goal approve`; absent = no setup, guarantees that depend on one are off. */
+  setupVersion?: number;
   selected: boolean;
   /** When `goal select` happened: the time budget runs from here to `verified`. */
   selectedAt?: string;
@@ -292,13 +294,19 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.status === 'draft', 'Goal not awaiting approval');
       const blockers = goalApprovalBlockers(state.spec);
       requireThat(!blockers.length, `Goal not approvable: ${blockers.join('; ')}`);
-      const appetite = (event.data as { appetite?: unknown } | undefined)?.appetite;
-      requireThat(appetite, 'Goal approval must include the Human-approved appetite');
+      const data = event.data as { appetite?: unknown; setupVersion?: unknown } | undefined;
+      requireThat(data?.appetite, 'Goal approval must include the Human-approved appetite');
+      const setupVersion = data?.setupVersion;
+      requireThat(
+        setupVersion === undefined || (Number.isInteger(setupVersion) && (setupVersion as number) > 0),
+        'Goal approval setupVersion must be a positive integer',
+      );
       return {
         ...state,
         status: 'approved',
         approvedGoalVersion: state.spec.version,
-        appetite: parseAppetite(appetite),
+        appetite: parseAppetite(data?.appetite),
+        ...(setupVersion === undefined ? {} : { setupVersion: setupVersion as number }),
       };
     }
     case 'goal-selected':

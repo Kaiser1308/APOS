@@ -33,6 +33,8 @@ export type GoalRow = {
   legacy: boolean;
   legacyOutcome?: 'verified' | 'closed' | 'stopped';
   appetite?: Appetite;
+  /** The approved setup version the Goal is pinned to; absent = no setup. */
+  setupVersion?: number;
   /** Most red gate runs any one package has had; the limit is per package, not per Goal. */ attempts: number;
   /** Wall minutes since `goal select`. */ elapsedMinutes: number;
   lastEventAt?: string;
@@ -74,6 +76,7 @@ function row(repo: ReadOnlyJournal, state: GoalState, now: Date): GoalRow {
     legacy: state.status === 'legacy',
     ...(state.legacyOutcome ? { legacyOutcome: state.legacyOutcome } : {}),
     appetite: state.appetite,
+    ...(state.setupVersion === undefined ? {} : { setupVersion: state.setupVersion }),
     attempts: attemptsOf(state),
     elapsedMinutes: elapsedMinutes(events, state, now),
     lastEventAt: lastAt(events),

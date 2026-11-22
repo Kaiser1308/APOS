@@ -37,6 +37,8 @@ export type GateReport = {
   changedFiles?: string[];
   /** Things in the diff that deserve a human look (changed tests, shared paths, build files); they do not block. */
   warnings?: string[];
+  /** The setup version the Goal was pinned to when this gate ran; absent = the Goal has no setup. */
+  setupVersion?: number;
   /** `post-merge` reruns the checks on the merge commit at the target branch. */
   phase?: 'delivery' | 'post-merge';
   environment: GateEnvironment;

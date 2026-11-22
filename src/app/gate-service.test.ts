@@ -257,6 +257,17 @@ describe('controller gate on real commits', () => {
     expect(report.checks.find(item => item.checkId === 'APOS-PROTECTED')?.reason).toMatch(/.apos\/skills\/reviewer.md/);
   }, 60_000);
 
+  it('fails the gate when the delivery edits the approved setup (.apos/project.yaml), so a delivery cannot loosen its own checks', async () => {
+    const { dir, git, gate } = await project();
+    writeFileSync(join(dir, 'feature.js'), 'process.exit(0);');
+    writeFileSync(join(dir, '.apos', 'project.yaml'), '{"schemaVersion":2,"parts":{},"floor":{"submit":[]}}');
+    git('add', 'feature.js', '.apos/project.yaml');
+    git('-c', 'user.name=Owner', '-c', 'user.email=o@local.invalid', 'commit', '-qm', 'feature and a looser setup');
+    const report = gate.run(baseSpec.id, dir, { deliveryCommit: git('rev-parse', 'HEAD') });
+    expect(report.result).toBe('red');
+    expect(report.checks.find(item => item.checkId === 'APOS-PROTECTED')?.reason).toMatch(/.apos\/project.yaml/);
+  }, 60_000);
+
   it('gives the checks the main checkout node_modules when the lock is unchanged and records it in the log (seen live: GOAL-G3 CHK-2 "prettier is not recognized")', async () => {
     const { dir, commit, gate } = await project();
     const lock = `${JSON.stringify({ name: 'p', lockfileVersion: 3, requires: true, packages: {} })}\n`;

@@ -136,7 +136,8 @@ export class GateService {
         newFailures: [],
       });
     const changedFiles = this.inspector.files(repoPath, head, base);
-    const guard = protectedCheck(goalId, changedFiles);
+    // APOS's own milestone commits are legitimate changes under .apos/; anything else there is not.
+    const guard = protectedCheck(goalId, untrustedProtectedFiles(this.store, goalId, repoPath, head, changedFiles));
     if (guard) checks.push(guard);
     const report: GateReport = {
       gateId: `GATE-${randomUUID()}`,

@@ -9,5 +9,6 @@ Commands:
   add [options]
   remove [options] <goalId> <packageId>
   revise [options] <goalId>
+  submit [options] <goalId> <packageId>  Lead: gate this commit now; exits 0 green, 1 red, 3 needs a Human or could not be verified
   list <goalId>
   help [command]                         display help for command

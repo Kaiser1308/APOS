@@ -97,6 +97,17 @@ describe('entryViolations', () => {
       check(python, 'tests/acceptance/t.py', 'from . import helper\n', ['tests/acceptance/helper.py'], []),
     ).toHaveLength(1);
   });
+  it('python: a name that is a declared submodule is judged as that submodule, not through its package initializer', () => {
+    const files = ['pkg/__init__.py', 'pkg/api.py', 'pkg/internal.py'];
+    expect(check(python, 'tests/t.py', 'from pkg import api\n', files, ['pkg/api.py'])).toEqual([]);
+    // a name that is not a submodule is a symbol of the package: its initializer is what the test reaches
+    expect(check(python, 'tests/t.py', 'from pkg import helper\n', files, ['pkg/api.py'])).toEqual([
+      expect.stringContaining('imports "pkg" (pkg/__init__.py)') as unknown,
+    ]);
+    expect(check(python, 'tests/t.py', 'from pkg import api, internal\n', files, ['pkg/api.py'])).toEqual([
+      expect.stringContaining('imports "pkg.internal" (pkg/internal.py)') as unknown,
+    ]);
+  });
   it('python: a trailing comment is not part of the imported names', () => {
     const files = ['pkg/internal.py'];
     expect(check(python, 'tests/t.py', 'from pkg import internal  # needed for setup\n', files, [])).toEqual([

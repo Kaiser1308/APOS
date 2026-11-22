@@ -97,7 +97,7 @@ A test may call the code only through the entries the plan declares (`stubPaths`
 
 | Field | Meaning |
 | --- | --- |
-| `importPattern` | Regex matched on each line of an L2 test file; group 1 is the module imported (Python `^\s*(?:from\|import)\s+([\w.]+)`, TypeScript `from\s+['"]([^'"]+)['"]`). |
+| `importPatterns` | An array of regexes tried on each line of an L2 test file, anchored on the statement (so a comment or a sentence that says "from" matches nothing). Group 1 is the module (several, comma separated, for Python `import a, b`); the optional group 2 is the names of a `from <module> import <names>`: a name that is a submodule of the module is judged as that submodule, any other name as a symbol of the module itself. |
 | `allowImports` | Regexes on the module text: libraries and the standard library, never judged. A module that does not exist as a file in the repo is not judged either, so this list only matters for a repo file that shadows a library. |
 | `moduleSeparator` | `.` (Python) or `/` (TypeScript): what separates the parts of a module path. A leading `.` is relative to the test file. |
 | `moduleFiles` | The files a module may be, `{path}` standing for its path with `/`: `{path}.py`, `{path}/__init__.py`; `{path}.ts`, `{path}/index.ts`. |

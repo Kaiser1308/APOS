@@ -97,15 +97,23 @@ export function entryViolations(input: {
       .split(',')
       .map(item => item.replace(/\s+as\s+.*$/, '').trim())
       .filter(item => item && item !== '*');
-    const asked = new Set(modules);
-    for (const module of modules)
-      for (const name of names) asked.add(module.endsWith(sep) ? `${module}${name}` : `${module}${sep}${name}`);
+    // `from pkg import name` takes either a submodule of pkg (then that is what is judged, not pkg's initializer) or a
+    // symbol of pkg itself (then pkg is judged).
+    const filesOf = (module: string) =>
+      modulePaths(rule, module, input.file, input.partRoot)
+        .flatMap(path => rule.moduleFiles.map(template => template.replaceAll('{path}', path)))
+        .filter(path => input.exists(path));
+    const asked = new Set<string>();
+    for (const module of modules) {
+      if (!names.length) asked.add(module);
+      for (const name of names) {
+        const sub = module.endsWith(sep) ? `${module}${name}` : `${module}${sep}${name}`;
+        asked.add(filesOf(sub).length ? sub : module);
+      }
+    }
     for (const module of asked) {
       if (!module || allow.some(item => item.test(module))) continue;
-      const files = modulePaths(rule, module, input.file, input.partRoot).flatMap(path =>
-        rule.moduleFiles.map(template => template.replaceAll('{path}', path)),
-      );
-      const internal = files.filter(path => input.exists(path));
+      const internal = filesOf(module);
       if (!internal.length || internal.some(path => input.allowed(path))) continue;
       problems.push(
         `${input.file}:${index + 1}: imports "${module}" (${internal[0]}), an internal module that is not a declared entry: a test may call only the entries in stubPaths`,

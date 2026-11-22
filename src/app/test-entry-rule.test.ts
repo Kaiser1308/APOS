@@ -14,7 +14,7 @@ const withRule = (extra: object = {}) => {
         tests: {
           ...part.tests,
           entryRule: {
-            importPattern: '^use (\\S+)$',
+            importPatterns: ['^use (\\S+)$'],
             allowImports: ['^lib\\.'],
             moduleSeparator: '.',
             moduleFiles: ['{path}.txt'],

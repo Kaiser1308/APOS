@@ -14,8 +14,12 @@ const regexText = z.string().refine(value => {
  * copied into the setup: the core knows no language, it only applies the rule.
  */
 export const entryRuleSchema = z.object({
-  /** One line of a test file; group 1 is the module it imports. */
-  importPattern: regexText,
+  /**
+   * Regexes tried on each line of a test file; the first that matches says what the line imports: group 1 is the module
+   * (several, comma-separated, for `import a, b`), the optional group 2 the names a `from <module> import <names>` takes,
+   * which may be submodules. Anchored on the statement, so a comment or a sentence that says "from" matches nothing.
+   */
+  importPatterns: z.array(regexText).min(1),
   /** Modules that are libraries or the standard library: never judged. Regexes against the module text. */
   allowImports: z.array(regexText).default([]),
   /** What separates the parts of a module path in an import: `.` (Python) or `/` (TypeScript). */
@@ -78,21 +82,35 @@ export function entryViolations(input: {
   allowed: (path: string) => boolean;
   exists: (path: string) => boolean;
 }): string[] {
-  const { rule, file } = input;
-  const pattern = new RegExp(rule.importPattern);
+  const { rule } = input;
+  const patterns = rule.importPatterns.map(item => new RegExp(item));
   const allow = rule.allowImports.map(item => new RegExp(item));
+  const sep = rule.moduleSeparator;
   const problems: string[] = [];
   for (const [index, line] of input.text.split(/\r?\n/).entries()) {
-    const module = pattern.exec(line)?.[1];
-    if (!module || allow.some(item => item.test(module))) continue;
-    const files = modulePaths(rule, module, file, input.partRoot).flatMap(path =>
-      rule.moduleFiles.map(template => template.replaceAll('{path}', path)),
-    );
-    const internal = files.filter(path => input.exists(path));
-    if (!internal.length || internal.some(path => input.allowed(path))) continue;
-    problems.push(
-      `${file}:${index + 1}: imports "${module}" (${internal[0]}), an internal module that is not a declared entry: a test may call only the entries in stubPaths`,
-    );
+    const match = patterns.map(item => item.exec(line)).find(item => item !== null);
+    if (!match?.[1]) continue;
+    const modules = match[1].split(',').map(item => item.replace(/\s+as\s+.*$/, '').trim());
+    // `from pkg import name` may take a submodule of pkg: judge `pkg.name` too.
+    const names = (match[2] ?? '')
+      .replace(/[()]/g, '')
+      .split(',')
+      .map(item => item.replace(/\s+as\s+.*$/, '').trim())
+      .filter(item => item && item !== '*');
+    const asked = new Set(modules);
+    for (const module of modules)
+      for (const name of names) asked.add(module.endsWith(sep) ? `${module}${name}` : `${module}${sep}${name}`);
+    for (const module of asked) {
+      if (!module || allow.some(item => item.test(module))) continue;
+      const files = modulePaths(rule, module, input.file, input.partRoot).flatMap(path =>
+        rule.moduleFiles.map(template => template.replaceAll('{path}', path)),
+      );
+      const internal = files.filter(path => input.exists(path));
+      if (!internal.length || internal.some(path => input.allowed(path))) continue;
+      problems.push(
+        `${input.file}:${index + 1}: imports "${module}" (${internal[0]}), an internal module that is not a declared entry: a test may call only the entries in stubPaths`,
+      );
+    }
   }
   return problems;
 }

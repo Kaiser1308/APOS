@@ -66,7 +66,10 @@
   ],
   "notImplementedPatterns": ["NotImplementedError", "not implemented"],
   "entryRule": {
-    "importPattern": "^\\s*(?:from|import)\\s+([\\w.]+)",
+    "importPatterns": [
+      "^\\s*from\\s+([\\w.]+)\\s+import\\s+(.+)",
+      "^\\s*import\\s+([\\w.]+(?:\\s+as\\s+\\w+)?(?:\\s*,\\s*[\\w.]+(?:\\s+as\\s+\\w+)?)*)"
+    ],
     "allowImports": [
       "^(?:__future__|abc|argparse|collections|contextlib|copy|dataclasses|datetime|decimal|enum|functools|itertools|json|logging|math|os|pathlib|pytest|random|re|shutil|string|sys|tempfile|time|typing|unittest|uuid)(?:\\.|$)"
     ],

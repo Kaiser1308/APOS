@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { entryRuleSchema, entryViolations, type EntryRule } from './entry-rule.js';
 
 const python: EntryRule = entryRuleSchema.parse({
-  importPattern: '^\\s*(?:from|import)\\s+([\\w.]+)',
+  importPatterns: ['^\\s*from\\s+([\\w.]+)\\s+import\\s+(.+)', '^\\s*import\\s+([\\w.]+(?:\\s*,\\s*[\\w.]+)*)'],
   allowImports: ['^(?:pytest|unittest)(?:\\.|$)'],
   moduleSeparator: '.',
   moduleFiles: ['{path}.py', '{path}/__init__.py'],
 });
 const ts: EntryRule = entryRuleSchema.parse({
-  importPattern: 'from\\s+[\'"]([^\'"]+)[\'"]',
+  importPatterns: [
+    '^\\s*(?:import|export)\\b[^\'"\\n]*?\\bfrom\\s+[\'"]([^\'"]+)[\'"]',
+    '^\\s*\\}\\s*from\\s+[\'"]([^\'"]+)[\'"]',
+    '^\\s*import\\s+[\'"]([^\'"]+)[\'"]',
+  ],
   allowImports: ['^vitest$', '^node:'],
   moduleSeparator: '/',
   moduleFiles: ['{path}.ts', '{path}/index.ts'],
@@ -77,6 +81,44 @@ describe('entryViolations', () => {
     ]);
   });
   it('refuses a rule whose pattern does not compile', () => {
-    expect(() => entryRuleSchema.parse({ ...python, importPattern: '(' })).toThrow();
+    expect(() => entryRuleSchema.parse({ ...python, importPatterns: ['('] })).toThrow();
+  });
+  it('python: `from pkg import internal` takes a submodule of pkg, with or without a package __init__', () => {
+    const files = ['pkg/internal.py', 'pkg/okay.py'];
+    expect(check(python, 'tests/t.py', 'from pkg import internal\n', files, [])).toEqual([
+      expect.stringContaining('t.py:1: imports "pkg.internal" (pkg/internal.py)') as unknown,
+    ]);
+    expect(
+      check(python, 'tests/t.py', 'from pkg import okay as fine, internal\n', files, ['pkg/okay.py']),
+    ).toHaveLength(1);
+    expect(check(python, 'tests/t.py', 'from pkg import (okay)\n', files, ['pkg/okay.py'])).toEqual([]);
+    expect(check(python, 'tests/t.py', 'from pkg import *\n', files, [])).toEqual([]);
+    expect(
+      check(python, 'tests/acceptance/t.py', 'from . import helper\n', ['tests/acceptance/helper.py'], []),
+    ).toHaveLength(1);
+  });
+  it('python: `import a, b` judges every module', () => {
+    expect(
+      check(python, 'tests/t.py', 'import os, lib_a, lib_b as b\n', ['lib_a.py', 'lib_b.py'], ['lib_a.py']),
+    ).toEqual([expect.stringContaining('imports "lib_b"') as unknown]);
+  });
+  it('typescript: a comment or a sentence that says "from" imports nothing', () => {
+    const files = ['src/internal.ts'];
+    const text = [
+      '// derived from "./internal.js"',
+      ' * from "./internal.js"',
+      'const note = \'taken from "./internal.js"\';',
+      "it('x', () => {});",
+    ].join('\n');
+    expect(check(ts, 'src/a.test.ts', text, files, [])).toEqual([]);
+  });
+  it('typescript: export-from, a multi-line import and a side-effect import are imports', () => {
+    const files = ['src/internal.ts'];
+    for (const text of [
+      "export { x } from './internal.js';",
+      "import {\n  a,\n  b,\n} from './internal.js';",
+      "import './internal.js';",
+    ])
+      expect(check(ts, 'src/a.test.ts', text, files, []), text).toHaveLength(1);
   });
 });

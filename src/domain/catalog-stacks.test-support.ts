@@ -72,7 +72,11 @@ export const STACKS: CatalogEntry[] = [
     assertPatterns: ['\\bexpect\\s*\\(', '\\bassert(?:\\.\\w+)?\\s*\\(', '\\bexpectTypeOf\\s*\\('],
     notImplementedPatterns: ['[Nn]ot implemented', 'NotImplemented', 'TODO: implement'],
     entryRule: {
-      importPattern: 'from\\s+[\'"]([^\'"]+)[\'"]',
+      importPatterns: [
+        '^\\s*(?:import|export)\\b[^\'"\\n]*?\\bfrom\\s+[\'"]([^\'"]+)[\'"]',
+        '^\\s*\\}\\s*from\\s+[\'"]([^\'"]+)[\'"]',
+        '^\\s*import\\s+[\'"]([^\'"]+)[\'"]',
+      ],
       allowImports: ['^vitest$', '^node:', '^@vitest/'],
       moduleSeparator: '/',
       moduleFiles: ['{path}.ts', '{path}.tsx', '{path}/index.ts'],
@@ -148,7 +152,10 @@ export const STACKS: CatalogEntry[] = [
     ],
     notImplementedPatterns: ['NotImplementedError', 'not implemented'],
     entryRule: {
-      importPattern: '^\\s*(?:from|import)\\s+([\\w.]+)',
+      importPatterns: [
+        '^\\s*from\\s+([\\w.]+)\\s+import\\s+(.+)',
+        '^\\s*import\\s+([\\w.]+(?:\\s+as\\s+\\w+)?(?:\\s*,\\s*[\\w.]+(?:\\s+as\\s+\\w+)?)*)',
+      ],
       allowImports: [
         '^(?:__future__|abc|argparse|collections|contextlib|copy|dataclasses|datetime|decimal|enum|functools|itertools|json|logging|math|os|pathlib|pytest|random|re|shutil|string|sys|tempfile|time|typing|unittest|uuid)(?:\\.|$)',
       ],

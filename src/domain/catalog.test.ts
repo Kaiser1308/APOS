@@ -26,11 +26,14 @@ describe('first-wave catalog content', () => {
     expect(rules).toEqual({ typescript: true, python: true, 'java-gradle': false, 'java-maven': false });
     const read = (stack: string, line: string) => {
       const rule = STACKS.find(entry => entry.stack === stack)!.entryRule!;
-      return new RegExp(rule.importPattern).exec(line)?.[1];
+      return rule.importPatterns.map(pattern => new RegExp(pattern).exec(line)?.[1]).find(Boolean);
     };
     expect(read('python', 'from app.core import run')).toBe('app.core');
     expect(read('python', 'import app')).toBe('app');
+    expect(read('python', '# from app.core import run')).toBeUndefined();
     expect(read('typescript', "import { add } from './calc.js';")).toBe('./calc.js');
+    expect(read('typescript', '} from "./calc.js";')).toBe('./calc.js');
+    expect(read('typescript', "// derived from './calc.js'")).toBeUndefined();
   });
   it('gives every stack a strict floor and wave-3 patterns that match what they should', () => {
     for (const entry of STACKS) {

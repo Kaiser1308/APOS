@@ -72,7 +72,11 @@
   "assertPatterns": ["\\bexpect\\s*\\(", "\\bassert(?:\\.\\w+)?\\s*\\(", "\\bexpectTypeOf\\s*\\("],
   "notImplementedPatterns": ["[Nn]ot implemented", "NotImplemented", "TODO: implement"],
   "entryRule": {
-    "importPattern": "from\\s+['\"]([^'\"]+)['\"]",
+    "importPatterns": [
+      "^\\s*(?:import|export)\\b[^'\"\\n]*?\\bfrom\\s+['\"]([^'\"]+)['\"]",
+      "^\\s*\\}\\s*from\\s+['\"]([^'\"]+)['\"]",
+      "^\\s*import\\s+['\"]([^'\"]+)['\"]"
+    ],
     "allowImports": ["^vitest$", "^node:", "^@vitest/"],
     "moduleSeparator": "/",
     "moduleFiles": ["{path}.ts", "{path}.tsx", "{path}/index.ts"],

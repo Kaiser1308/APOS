@@ -69,6 +69,24 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | `maxSpendUsd` in an old budget | still parses | `contracts.test.ts` › still reads the budget an older APOS recorded |
 | Event type unknown to this build (rollback after a newer APOS wrote it) | ignored on replay; the Goal survives | `transitions.ts` reducer default branch |
 
+## Setup, catalog and result formats (phase 2)
+
+| Injected fault | Expected | Test |
+| --- | --- | --- |
+| Truncated, mismatched, empty or non-XML JUnit report | `unreadable` with a reason, never an exception, never "0 tests, green" | `results.test.ts` › junit › is unreadable …; `failures.test.ts` |
+| Check whose report file is missing or broken | check `unverifiable`, gate not green | `gate-service.test.ts` › checks that read a standard report |
+| Same test twice in one report | stable `#2` suffix, same ids every run | `results.test.ts` › junit › Surefire |
+| Setup edited after its probe | `approve` refused: no passing probe for that sha256 | `setup-probe.test.ts` › needs a passing probe of exactly this text; `setup-flow.test.ts` |
+| Approval without a passing probe, or a version that skips | refused when appended to the project log | `project-log.test.ts` |
+| Project log edited | reported as tampering; torn tail dropped | `project-log.test.ts` › detects an edited line |
+| `runOne` runs two tests, none, or another one | probe fails and names the test | `setup-probe.test.ts` › fails and names the test when runOne … |
+| Tool that does not exist, times out, or gives different results on two runs | probe fails with the reason | `setup-probe.test.ts` |
+| Part whose stack is not recognised | draft still produced, part empty, note `chưa nhận ra stack` | `setup-draft.test.ts` |
+| Delivery edits `.apos/project.yaml` | gate red, `APOS-PROTECTED` | `gate-service.test.ts` › fails the gate when the delivery edits the approved setup |
+| Goal pinned to a setup version that was never approved | refused | `goal-setup-pin.test.ts`; `journal.test.ts` |
+| Setup approved after a Goal was approved | the Goal keeps its pinned version | `goal-setup-pin.test.ts` |
+| Approving without a terminal and without `--on-behalf` | refused | `setup-flow.test.ts` |
+
 ## Cases dropped in phase 1 and why
 
 APOS v2 started, resumed, woke and watched agents through Orca (`controller watch`, Lead dispatch, `handoff`, role profiles, Runs). v3 does none of it: an orchestrator outside APOS does, and APOS only checks the commits it is handed. Every case below existed only because APOS drove agents, so it was removed together with the code it tested. The v2 table is in [`docs/archive/FINAL-DESIGN-v2.1.md`](archive/FINAL-DESIGN-v2.1.md) §8 and in git history.

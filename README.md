@@ -34,7 +34,7 @@
 4. [Quick start](#quick-start)
 5. [The Goal contract](#the-goal-contract)
 6. [Delivery flows](#delivery-flows)
-7. [Web UI](#web-ui)
+7. [Project setup](#project-setup) and [Web UI](#web-ui)
 8. [Configuration and state](#configuration-and-state)
 9. [Trust model](#trust-model)
 10. [CLI reference](#cli-reference)
@@ -249,6 +249,10 @@ Chosen by the Lead when one session is too small. `lead propose` then `package a
 
 `outcome close` needs the Goal `verified` **and** its verified commit to be the commit of the last green gate (the `WP-MAIN` gate for Solo, the integration gate for Multi-WP). A different commit, a red or missing gate: refused, `--on-behalf` included. `--merge-to <branch>` authorizes one merge of exactly that commit and reruns the gate on the merge; if that gate is red the Goal stays `verified`.
 
+## Project setup
+
+A project can carry a setup (`.apos/project.yaml`, schema version 2): the tools the gate may run, per part of the repo and per layer, with a strict floor. The Lead drafts it from the tool catalogue (`catalog/`: Python, Java with Gradle or Maven, TypeScript), APOS probes every command in clean worktrees, the Human approves it, and each Goal pins the approved version when it is approved. Tools report in one of four standard formats (JUnit XML, SARIF, a metric, APOS JSON) or by exit code alone. See [docs/setup.md](docs/setup.md) and [docs/catalog.md](docs/catalog.md). A repo without a setup still works: guarantees that depend on a setup are off.
+
 ## Web UI
 
 `apos ui [--port 4343]` serves a **read-only** web view of one project on `127.0.0.1`. It never writes controller state.
@@ -296,10 +300,14 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | --- | --- |
 | `init [--skills <dir>]` | Initialize `.apos` in a Git project. |
 | `migrate` | Import APOS v1 Goal histories into the controller log. |
+| `setup draft [--part <name>=<dir>[:<stack>]]... [--force]` | Write a draft `.apos/project.yaml` from the tool catalog (not committed). |
+| `setup probe [--commit <rev>]` | Run every tool of the committed setup in clean worktrees and record the result. |
+| `setup approve --commit <sha>` | **H.** Approve the probed setup as the next version. |
+| `setup show` | Print the latest approved setup version. |
 | `goal create --file <json> --source <path> [--origin <text>]` | Draft a Goal bound to a source snapshot. |
-| `goal list` | List Goals and their status. |
+| `goal list` | List Goals, their status and the setup version they are pinned to. |
 | `plan [--source <path>] [--json]` | Show the multi-Goal plan (including sketch and deferred Goals) and requirement coverage (`covered`, `planned`, `deferred`, `orphan`, `out-of-scope`). |
-| `goal approve <id> --size <S\|M\|L> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>]` | **Gate A (H).** |
+| `goal approve <id> --size <S\|M\|L> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>] [--setup-version <n\|latest>]` | **Gate A (H).** Pins the latest approved setup (or the version given). |
 | `goal appetite <id> --reason <text> [appetite flags]` | **H.** Change the budget, not the scope. |
 | `goal select <id>` | **Gate B (H).** Records the choice; starts nothing. |
 | `goal revise --file <json> --source <path>` | New Goal version; needs re-approval. |
@@ -365,7 +373,7 @@ Conventions and the dependency rules: [`AGENTS.md`](AGENTS.md), [`docs/architect
 
 Phase 1 (this version) removed the orchestration layer and put `package submit`, the confirmation on Human commands and the close-on-green-gate rule in place. The next phases, from the v3 design, are **not** in this version:
 
-2. Result formats (JUnit, SARIF, metric, JSON), a tool catalogue for Python, Java and TypeScript, and a project setup with draft, probe and approve.
+2. ~~Result formats, a tool catalogue and a project setup with draft, probe and approve~~ (done: see [Project setup](#project-setup)). The gate does not run the setup's layers yet.
 3. Locking the acceptance tests before the code is written, red-for-the-right-reason checks, test inventory and scope guards.
 4. Test layers L0 to L6 per stage, non-functional proofs and a per-Goal table of what the machine proves and what you confirmed by hand.
 5. Reviews and AI tools that can block only with a red test, and mutation testing.

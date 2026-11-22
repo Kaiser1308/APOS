@@ -72,7 +72,7 @@ it('drafts, probes and approves a setup; approval is a Human decision; a setup e
   git('commit', '-qm', 'setup');
   const first = git('rev-parse', 'HEAD');
 
-  await expect(invoke('setup', 'approve', '--commit', first)).rejects.toThrow(/No passing probe/);
+  await expect(invoke('setup', 'approve', '--commit', first)).rejects.toThrow(/Chưa probe ở commit này/);
   await invoke('setup', 'probe', '--commit', first);
   expect(out.join('\n')).toMatch(/ok {3}app.L1 t1: 1 tests, stable over 2 runs/);
   expect(out.join('\n')).toMatch(/probe passed/);
@@ -85,6 +85,6 @@ it('drafts, probes and approves a setup; approval is a Human decision; a setup e
   git('add', '-A');
   git('commit', '-qm', 'edit');
   await expect(invoke('setup', 'approve', '--commit', 'HEAD', '--on-behalf', 'item 3')).rejects.toThrow(
-    /No passing probe/,
+    /Chưa probe ở commit này/,
   );
 }, 120_000);

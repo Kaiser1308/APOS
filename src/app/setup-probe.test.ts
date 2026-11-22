@@ -166,12 +166,40 @@ describe('probeSetup', () => {
 });
 
 describe('approving a probed setup', () => {
+  it('judges by the latest probe at this commit, not by a probe of the same text elsewhere', async () => {
+    const { dir, git, commit: a } = await repoWith({ L1: [junit('ok')] });
+    git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '--allow-empty', '-qm', 'same setup, later');
+    const b = git('rev-parse', 'HEAD');
+    const { journal, close } = ProjectJournal.open(dir, temp('apos-probe-home-'), newEvent);
+    try {
+      const sha256 = (await probeSetup(dir, a, deps())).sha256;
+      const failed = (layer: string, reason: string) => ({
+        sha256,
+        ok: false,
+        results: [{ part: 'app', layer, tool: 't', ok: false, reason }],
+      });
+      recordProbe(journal, a, failed('L1', 'empty at A'));
+      expect(() => prepareApproval(journal, dir, b, jsonCodec)).toThrow(/Chưa probe ở commit này/);
+      recordProbe(journal, b, failed('L2', 'runOne at B'));
+      expect(() => prepareApproval(journal, dir, b, jsonCodec)).toThrow(/runOne at B/);
+      expect(() => prepareApproval(journal, dir, b, jsonCodec)).not.toThrow(/empty at A/);
+      // A passing probe at A does not approve B, and a later failing probe at A cancels A's earlier pass.
+      recordProbe(journal, a, { sha256, ok: true, results: [] });
+      expect(() => prepareApproval(journal, dir, b, jsonCodec)).toThrow(/runOne at B/);
+      expect(prepareApproval(journal, dir, a, jsonCodec).commit).toBe(a);
+      recordProbe(journal, a, failed('L1', 'broke again'));
+      expect(() => prepareApproval(journal, dir, a, jsonCodec)).toThrow(/broke again/);
+    } finally {
+      close();
+    }
+  }, 90_000);
+
   const open = (dir: string) => ProjectJournal.open(dir, temp('apos-probe-home-'), newEvent);
   it('needs a passing probe of exactly this text; an edit after the probe is refused', async () => {
     const { dir, git, commit } = await repoWith({ L1: [junit('ok')] });
     const { journal, close } = open(dir);
     try {
-      expect(() => prepareApproval(journal, dir, commit, jsonCodec)).toThrow(/No passing probe/);
+      expect(() => prepareApproval(journal, dir, commit, jsonCodec)).toThrow(/Chưa probe ở commit này/);
       recordProbe(journal, commit, await probeSetup(dir, commit, deps()));
       const pending = prepareApproval(journal, dir, commit, jsonCodec);
       expect(pending).toMatchObject({ commit, version: 1 });
@@ -185,7 +213,7 @@ describe('approving a probed setup', () => {
       );
       git('add', '-A');
       git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'edit after probe');
-      expect(() => prepareApproval(journal, dir, 'HEAD', jsonCodec)).toThrow(/changed after the probe/);
+      expect(() => prepareApproval(journal, dir, 'HEAD', jsonCodec)).toThrow(/Chưa probe ở commit này/);
 
       recordApproval(journal, pending, { by: 'on-behalf', onBehalf: 'item 7' });
       expect(journal.setupHistory().latest).toMatchObject({
@@ -203,7 +231,9 @@ describe('approving a probed setup', () => {
     const { journal, close } = open(dir);
     try {
       recordProbe(journal, commit, await probeSetup(dir, commit, deps()));
-      expect(() => prepareApproval(journal, dir, commit, jsonCodec)).toThrow(/probe of this setup failed.*unreadable/);
+      expect(() => prepareApproval(journal, dir, commit, jsonCodec)).toThrow(
+        /latest probe of this setup.*failed.*unreadable/,
+      );
       expect(() => prepareApproval(journal, dir, 'nope', jsonCodec)).toThrow(/not a commit/);
     } finally {
       close();

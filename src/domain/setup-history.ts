@@ -40,8 +40,13 @@ export function applyProjectEvent(history: SetupHistory, event: ProjectEvent): S
       return { ...history, probes: [...history.probes, probedData.parse(event.data)] };
     case 'setup-approved': {
       const data = approvedData.parse(event.data);
-      if (!history.probes.some(probe => probe.ok && probe.sha256 === data.sha256))
-        throw new InvariantError(`setup ${data.sha256.slice(0, 12)} was approved without a passing probe`);
+      const probe = [...history.probes]
+        .reverse()
+        .find(item => item.sha256 === data.sha256 && item.commit === data.commit);
+      if (!probe?.ok)
+        throw new InvariantError(
+          `setup ${data.sha256.slice(0, 12)} was approved without a passing probe at ${data.commit.slice(0, 12)}`,
+        );
       const expected = history.approvals.length + 1;
       if (data.version !== expected)
         throw new InvariantError(`setup approval must be version ${expected}, not ${data.version}`);

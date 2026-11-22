@@ -35,17 +35,19 @@ export function prepareApproval(
   const history = journal.setupHistory();
   if (history.latest?.sha256 === parsed.sha256)
     throw new UserError(`This setup is already approved as version ${history.approvals.length}`);
-  if (!history.probes.some(probe => probe.ok && probe.sha256 === parsed.sha256)) {
-    const failed = history.probes.find(probe => probe.sha256 === parsed.sha256);
+  // Only the latest probe of this exact text at this exact commit counts: a probe elsewhere says nothing here.
+  const probe = [...history.probes].reverse().find(item => item.sha256 === parsed.sha256 && item.commit === commit);
+  if (!probe)
     throw new UserError(
-      failed
-        ? `The probe of this setup failed (${failed.results
-            .filter(r => !r.ok)
-            .map(r => `${r.part}.${r.layer} ${r.tool}: ${r.reason}`)
-            .join('; ')}); fix it and probe again`
-        : `No passing probe for this setup text (sha256 ${parsed.sha256.slice(0, 12)}): it was changed after the probe, or never probed. Run apos setup probe --commit ${commit.slice(0, 12)}`,
+      `Chưa probe ở commit này (${commit.slice(0, 12)}): the setup text (sha256 ${parsed.sha256.slice(0, 12)}) was changed after its probe, or never probed here. Run apos setup probe --commit ${commit.slice(0, 12)}`,
     );
-  }
+  if (!probe.ok)
+    throw new UserError(
+      `The latest probe of this setup at ${commit.slice(0, 12)} failed (${probe.results
+        .filter(r => !r.ok)
+        .map(r => `${r.part}.${r.layer} ${r.tool}: ${r.reason}`)
+        .join('; ')}); fix it and probe again`,
+    );
   return { commit, sha256: parsed.sha256, version: history.approvals.length + 1 };
 }
 

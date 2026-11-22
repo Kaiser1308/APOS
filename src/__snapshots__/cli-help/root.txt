@@ -1,6 +1,6 @@
 Usage: apos [options] [command]
 
-Local AI Project Orchestration System
+Assurance layer for AI-built software: fixed checks on exact commits
 
 Options:
   -V, --version    output the version number

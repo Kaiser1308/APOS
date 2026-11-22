@@ -1,3 +1,5 @@
+import { UserError } from '../../domain/errors.js';
+import { withGateLease } from '../../store/lease.js';
 import { GateService } from '../../app/gate-service.js';
 import { PackageService } from '../../app/package-service.js';
 import { parseWorkPackage } from '../../domain/packages.js';
@@ -51,7 +53,12 @@ export function registerPackage(ctx: CliContext): void {
       withJournalAsync(async journal => {
         const gate = new GateService(journal, { inspector: options.inspector, ...options.gate });
         const service = new PackageService(journal, { gate, repoPath: repo(), inspector: options.inspector });
-        const outcome = await service.submit(goalId, packageId, flags.commit, flags.by);
+        const held = await withGateLease(ctx.home(), () => service.submit(goalId, packageId, flags.commit, flags.by));
+        if (!held.ran)
+          throw new UserError(
+            `Another gate is running for this project (pid ${held.holder}): wait for it, then submit again`,
+          );
+        const outcome = held.value;
         const state = journal.getGoal(goalId);
         process.exitCode = outcome.result === 'green' ? 0 : outcome.result === 'red' ? 1 : 3;
         if (flags.json) {

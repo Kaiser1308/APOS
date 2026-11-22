@@ -15,7 +15,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   const program = new Command();
   program
     .name('apos')
-    .description('Local AI Project Orchestration System')
+    .description('Assurance layer for AI-built software: fixed checks on exact commits')
     .version('0.1.0')
     .option('--repo <path>', 'managed Git project', process.cwd());
   const ctx = createContext(program, options);

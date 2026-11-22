@@ -84,7 +84,7 @@ export function registerGoal(ctx: CliContext): void {
         write(`Appetite for ${id} updated`);
       }),
     );
-  // Gate B: the Human picks which approved Goal is worked next. Nothing is dispatched; the Lead plans on its own.
+  // Gate B: the Human picks which approved Goal is worked next. Nothing is started; the Lead plans on its own.
   goal
     .command('select')
     .argument('<id>')

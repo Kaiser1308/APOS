@@ -133,7 +133,7 @@ export function evaluateManualCheck(
 /**
  * Files under `.apos/` are the controller's contract and skills; a delivery may add only its own
  * evidence and review files. Anything else in the diff fails the gate, so an owner cannot rewrite the
- * skills, Goal documents or sources that briefs, reviewers and future dispatches trust.
+ * skills, Goal documents or sources that the Lead and reviewers trust.
  */
 export function protectedChanges(goalId: string, changedFiles: string[]): string[] {
   return changedFiles.filter(

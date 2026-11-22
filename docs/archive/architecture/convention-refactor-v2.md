@@ -1,3 +1,5 @@
+> **Lưu trữ (lịch sử).** Kế hoạch tái cấu trúc của APOS v2 (có `runtime/orca`, supervisor, `ports/runtime`). Các chuẩn còn hiệu lực nằm ở [`../../architecture/conventions.md`](../../architecture/conventions.md).
+
 # Kiến trúc: thống nhất convention và dọn code APOS
 
 Trạng thái: Đã duyệt (2026-11-14) · Đã triển khai (2026-11-16)

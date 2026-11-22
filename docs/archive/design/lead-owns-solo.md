@@ -1,3 +1,5 @@
+> **Lưu trữ (lịch sử).** Thiết kế Lead tự làm Solo, dựa trên việc APOS dispatch và wake agent qua Orca. Không mô tả APOS v3 hiện hành; thiết kế v3: [`../../superpowers/specs/2026-11-22-apos-v3-design.md`](../../superpowers/specs/2026-11-22-apos-v3-design.md).
+
 # Lead tự làm owner ở Solo
 
 Trạng thái: Đã duyệt (2026-11-14)

@@ -1,3 +1,5 @@
+> **Lưu trữ (lịch sử).** Danh sách việc cho UI v1, gồm tick của controller và telemetry; đã bỏ ở v3 đợt 1. Không mô tả APOS v3 hiện hành; thiết kế v3: [`../../superpowers/specs/2026-11-22-apos-v3-design.md`](../../superpowers/specs/2026-11-22-apos-v3-design.md).
+
 # [TASK] APOS UI: bảng điều khiển web local chỉ xem
 
 Trạng thái: Ready — làm được ngay: BE-1, BE-2, BE-3, BE-4, FE-1, QA-1 (theo thứ tự phụ thuộc ở mục 5). Ba câu hỏi còn mở đều **không chặn**.

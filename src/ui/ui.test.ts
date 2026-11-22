@@ -454,3 +454,18 @@ it('splits a Multi-WP story per package and keeps Lead-level notes apart', async
   expect(story.lead).toMatchObject({ mode: 'multi-wp', whySplit: 'two modules are independent' });
   expect(story.lead!.modeLabel).toMatch(/Chia nhiều/);
 });
+
+it('shows a Goal an older APOS recorded as read-only, and has no agent, terminal or token view left', () => {
+  const fixture = join(import.meta.dirname, '..', 'store', 'fixtures', 'replay', 'legacy-solo');
+  const snapshot = buildSnapshot(new ReadOnlyJournal(fixture));
+  expect(snapshot.goals.map(item => [item.id, item.status, item.legacy, item.legacyOutcome, item.holder])).toEqual([
+    ['GOAL-SMOKE-R', 'legacy', true, 'closed', 'done'],
+    ['GOAL-SMOKE-V2', 'legacy', true, 'closed', 'done'],
+  ]);
+  expect(snapshot).not.toHaveProperty('tickRunning');
+  expect(snapshot.inbox).toEqual([]);
+  expect(PAGE).toContain('chỉ đọc – APOS cũ');
+  for (const gone of ['telemetry', 'Telemetry', 'activity', 'Tokens', 'tick running', 'dispatches'])
+    expect(PAGE, gone).not.toContain(gone);
+  expect(route(fixture, new URL('/api/goals/GOAL-SMOKE-V2/activity/ctx_1', 'http://localhost')).status).toBe(404);
+});

@@ -1,3 +1,5 @@
+> **Lưu trữ (lịch sử).** Thiết kế vai agent (Lead, Worker, Reviewer, bot) do APOS dispatch. Không mô tả APOS v3 hiện hành; thiết kế v3: [`../../superpowers/specs/2026-11-22-apos-v3-design.md`](../../superpowers/specs/2026-11-22-apos-v3-design.md).
+
 # Mỗi vai một agent: Claude, Codex, agy
 
 Trạng thái: Bản nháp (2026-11-14), chờ anh duyệt

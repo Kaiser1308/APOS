@@ -1,3 +1,5 @@
+> **Lưu trữ (lịch sử).** Thiết kế xem hoạt động agent từ transcript; tab này đã bị bỏ ở v3 đợt 1. Không mô tả APOS v3 hiện hành; thiết kế v3: [`../../superpowers/specs/2026-11-22-apos-v3-design.md`](../../superpowers/specs/2026-11-22-apos-v3-design.md).
+
 # APOS UI v2: "Câu chuyện" của một Goal (Lead hiểu gì, quyết gì; Worker làm gì)
 
 Trạng thái: Đã duyệt (2026-11-12)

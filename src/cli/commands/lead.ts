@@ -34,7 +34,7 @@ export function registerLead(ctx: CliContext): void {
       }),
     );
 
-  // No Human gate on HOW: the Lead commits its plan, the controller machine-checks it and dispatches.
+  // No Human gate on HOW: the Lead commits its plan and APOS machine-checks it.
   // A Multi-WP plan only notifies the Human.
   lead
     .command('commit')

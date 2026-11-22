@@ -1,0 +1,26 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": { "driver": { "name": "ESLint", "rules": [{ "id": "no-unused-vars" }, { "id": "eqeqeq" }] } },
+      "results": [
+        {
+          "ruleId": "no-unused-vars",
+          "level": "error",
+          "message": { "text": "'x' is defined but never used." },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "src/a.ts" }, "region": { "startLine": 3 } } }
+          ]
+        },
+        {
+          "ruleIndex": 1,
+          "level": "warning",
+          "message": { "text": "Expected '===' and instead saw '=='." },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "src/b.ts" }, "region": { "startLine": 9 } } }
+          ]
+        }
+      ]
+    }
+  ]
+}

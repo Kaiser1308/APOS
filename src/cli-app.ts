@@ -13,7 +13,8 @@ import type { CliOptions } from './cli/options.js';
 
 export type { CliOptions };
 
-export async function runCli(argv: string[], options: CliOptions = {}): Promise<void> {
+/** The whole command tree, registered but not run: `runCli` parses with it, and tests read it. */
+export function buildProgram(options: CliOptions = {}): Command {
   const program = new Command();
   program
     .name('apos')
@@ -30,5 +31,9 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   registerIntegration(ctx);
   registerChecks(ctx);
   registerOutcome(ctx);
-  await program.parseAsync(argv, { from: 'user' });
+  return program;
+}
+
+export async function runCli(argv: string[], options: CliOptions = {}): Promise<void> {
+  await buildProgram(options).parseAsync(argv, { from: 'user' });
 }

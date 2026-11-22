@@ -374,17 +374,17 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `goal list` | List Goals, their status and the setup version they are pinned to. |
 | `plan [--source <path>] [--json]` | Show the multi-Goal plan (including sketch and deferred Goals) and requirement coverage (`covered`, `planned`, `deferred`, `orphan`, `out-of-scope`). |
 | `goal approve <id> --size <S\|M\|L> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>] [--setup-version <n\|latest>]` | **Gate A (H).** Pins the latest approved setup (or the version given). |
-| `goal appetite <id> --reason <text> [appetite flags]` | **H.** Change the budget, not the scope. |
+| `goal appetite <id> --reason <text> [--size <S\|M\|L>] [--max-minutes <n>] [--max-attempts <n>] [--overrun <stop\|ask>]` | **H.** Change the budget, not the scope. |
 | `goal select <id>` | **Gate B (H).** Records the choice; starts nothing. |
-| `goal revise --file <json> --source <path>` | New Goal version; needs re-approval. |
-| `lead propose --file <json>` | Submit an execution proposal (`baseCommit` required). |
+| `goal revise --file <json> --source <path> [--origin <text>]` | New Goal version; needs re-approval. |
+| `lead propose --file <json> [--by <name>]` | Submit an execution proposal (`baseCommit` required). |
 | `lead commit <id> [--by <name>]` | Accept the plan. Solo gets `WP-MAIN`. A Goal pinned to a setup with test paths goes to `testing` first. |
 | `tests submit <goalId> --commit <sha> [--by <name>]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
 | `tests revise <goalId> --commit <sha> --reason <text> [--by <name>]` | Replace the lock. Exit 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception. |
 | `tests show <goalId>` | The locked commit, tests per layer, the criterion-to-test map. |
 | `exception approve <goalId> --kind <kind> --ref <ref> --reason <text> (--by agent:<name> \| --human)` | An agent, or the Human (**H** with `--human`), approves a sensitive-file change, weakened locked tests, a change to test infrastructure, or cutting a floor layer. |
 | `goal show <id>` | Status, pinned setup, locked tests and the [assurance table](#the-assurance-table) of one Goal. |
-| `package add --file <json> --reason <text>`, `package revise <goalId> --file <json> --reason <text>`, `package remove <goalId> <packageId> --reason <text>`, `package list <goalId>` | Plan the packages of a Multi-WP Goal. |
+| `package add --file <json> --reason <text> [--by <name>]`, `package revise <goalId> --file <json> --reason <text> [--by <name>]`, `package remove <goalId> <packageId> --reason <text> [--by <name>]`, `package list <goalId>` | Plan the packages of a Multi-WP Goal. |
 | `package submit <goalId> <packageId> --commit <sha> [--by <name>] [--json]` | Gate a commit now. Exit 0 green, 1 red, 3 needs-human or unverifiable. |
 | `integration gate <goalId> --commit <sha> --reason <text> [--by <name>]` | Gate the integration commit. |
 | `integration prepare <goalId>`, `integration complete <goalId> --commit <sha> [--conflict-resolution <text>]`, `integration merge <goalId> --source <commit> --target <branch>` | Multi-WP integration: check, record, merge. |

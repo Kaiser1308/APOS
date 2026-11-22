@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import { registerChecks } from './cli/commands/checks.js';
-import { registerController } from './cli/commands/controller.js';
 import { registerGoal } from './cli/commands/goal.js';
 import { registerIntegration } from './cli/commands/integration.js';
 import { registerLead } from './cli/commands/lead.js';
@@ -25,7 +24,6 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   registerLead(ctx);
   registerPackage(ctx);
   registerIntegration(ctx);
-  registerController(ctx);
   registerChecks(ctx);
   registerOutcome(ctx);
   await program.parseAsync(argv, { from: 'user' });

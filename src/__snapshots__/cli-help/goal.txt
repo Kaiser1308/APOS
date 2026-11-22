@@ -8,7 +8,6 @@ Commands:
   list
   approve [options] <id>
   appetite [options] <id>
-  select <id>
+  select [options] <id>
   revise [options]
-  wait [options] <id>
   help [command]           display help for command

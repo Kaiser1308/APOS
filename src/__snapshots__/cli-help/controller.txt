@@ -1,9 +1,0 @@
-Usage: apos controller [options] [command]
-
-Options:
-  -h, --help       display help for command
-
-Commands:
-  tick
-  watch [options]
-  help [command]   display help for command

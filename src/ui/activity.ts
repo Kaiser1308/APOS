@@ -2,7 +2,8 @@ import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { GoalEvent } from '../domain/transitions.js';
-import { worktreePath } from '../runtime/orca/parse.js';
+const worktreePath = (worktreeId: string | undefined): string | undefined =>
+  worktreeId?.includes('::') ? worktreeId.slice(worktreeId.indexOf('::') + 2) : undefined;
 import { findAntigravity } from './activity-antigravity.js';
 import {
   MAX_ITEMS,

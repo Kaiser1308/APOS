@@ -1,56 +1,10 @@
-import { readFileSync } from 'node:fs';
 import { PackageService } from '../../app/package-service.js';
 import { parseWorkPackage } from '../../domain/packages.js';
-import { newEvent } from '../../app/events.js';
 import type { CliContext } from '../context.js';
-import { UserError } from '../../domain/errors.js';
 
 export function registerPackage(ctx: CliContext): void {
-  const {
-    program,
-    write,
-    packageRuntime,
-    withJournal,
-    withJournalAsync,
-    readJsonFile,
-    assertHuman,
-    assertLead,
-    requestDispatch,
-    awaitController,
-  } = ctx;
-  const assertLeadOrHuman = (journal: Parameters<typeof assertHuman>[0], goalId: string, command: string) => {
-    try {
-      assertHuman(journal, command);
-    } catch {
-      assertLead(journal, goalId, `${command} (Lead or Human only)`);
-    }
-  };
-  const packages = program.command('package');
-  packages
-    .command('answer')
-    .argument('<goalId>')
-    .argument('<packageId>')
-    .requiredOption('--message-id <id>', "the Orca message id of the Worker's question, as the wake names it")
-    .requiredOption('--text-file <file>', 'your answer, sent to the Worker as written')
-    .requiredOption('--reason <text>', 'why, for the log')
-    .description("Lead: answer a Worker's question; the controller sends it on the package's Run at its next tick")
-    .action((goalId: string, packageId: string, flags: { messageId: string; textFile: string; reason: string }) =>
-      withJournal(journal => {
-        assertLead(journal, goalId, 'package answer');
-        const text = readFileSync(flags.textFile, 'utf8').replace(/^﻿/, '').trim();
-        if (!text) throw new UserError('The answer is empty');
-        if (!flags.reason.trim()) throw new UserError('An answer needs a reason');
-        if (!journal.getGoal(goalId)?.packages?.[packageId]?.runtimeRef)
-          throw new UserError(`${packageId} of ${goalId} has no Worker to answer`);
-        requestDispatch(journal, goalId, {
-          kind: 'worker-answer',
-          packageId,
-          messageId: flags.messageId,
-          text,
-          reason: flags.reason,
-        });
-      }),
-    );
+  const { program, write, withJournal, readJsonFile } = ctx;
+  const packages = program.command('package').description('the Lead plans packages; delivery goes through `submit`');
   packages
     .command('add')
     .requiredOption('--file <json>')
@@ -58,8 +12,7 @@ export function registerPackage(ctx: CliContext): void {
     .action(({ file, reason }: { file: string; reason: string }) =>
       withJournal(journal => {
         const spec = parseWorkPackage(readJsonFile(file));
-        assertLead(journal, spec.goalId, 'package add');
-        new PackageService(journal, packageRuntime()).add(spec.goalId, spec, reason);
+        new PackageService(journal).add(spec.goalId, spec, reason);
         write(`Drafted ${spec.id}`);
       }),
     );
@@ -69,120 +22,9 @@ export function registerPackage(ctx: CliContext): void {
     .argument('<packageId>')
     .requiredOption('--reason <text>')
     .action((goalId: string, packageId: string, { reason }: { reason: string }) =>
-      withJournalAsync(async journal => {
-        assertLead(journal, goalId, 'package remove');
-        const item = journal.getGoal(goalId)?.packages?.[packageId];
-        if (item?.runtimeRef && !journal.getGoal(goalId)?.settlements?.[item.runtimeRef.dispatchId]) {
-          const outcome = await packageRuntime().inspectPackage?.(item.runtimeRef);
-          if (outcome !== 'completed' && outcome !== 'failed')
-            throw new UserError('Worker must be settled before package removal');
-          journal.append(newEvent(goalId, 'worker-settled', { dispatchId: item.runtimeRef.dispatchId, outcome }));
-        }
-        new PackageService(journal, packageRuntime()).remove(goalId, packageId, reason);
+      withJournal(journal => {
+        new PackageService(journal).remove(goalId, packageId, reason);
         write(`Removed ${packageId}`);
-      }),
-    );
-  for (const decision of ['approve', 'hold'] as const) {
-    packages
-      .command(decision)
-      .argument('<goalId>')
-      .argument('<packageId>')
-      .requiredOption('--reason <text>')
-      .action((goalId: string, packageId: string, { reason }: { reason: string }) =>
-        withJournal(journal => {
-          assertLead(journal, goalId, `package ${decision}`);
-          const service = new PackageService(journal, packageRuntime());
-          if (decision === 'approve') service.approveDispatch(goalId, packageId, reason);
-          else service.holdDispatch(goalId, packageId, reason);
-          write(`${decision}: ${packageId}`);
-        }),
-      );
-  }
-  packages
-    .command('approval-policy')
-    .argument('<goalId>')
-    .argument('<enabled>', 'on or off')
-    .requiredOption('--reason <text>')
-    .action((goalId: string, enabled: string, { reason }: { reason: string }) =>
-      withJournal(journal => {
-        assertLead(journal, goalId, 'package approval-policy');
-        if (!['on', 'off'].includes(enabled)) throw new UserError('Use on or off');
-        new PackageService(journal, packageRuntime()).setApprovalPolicy(goalId, enabled === 'on', reason);
-        write(`Approval policy ${enabled}`);
-      }),
-    );
-  packages
-    .command('decide-failure')
-    .argument('<goalId>')
-    .argument('<packageId>')
-    .argument('<decision>', 'retry, hold, or escalate')
-    .requiredOption('--reason <text>')
-    .action((goalId: string, packageId: string, decision: string, { reason }: { reason: string }) =>
-      withJournal(journal => {
-        assertLead(journal, goalId, 'package decide-failure');
-        if (decision !== 'retry' && decision !== 'hold' && decision !== 'escalate')
-          throw new UserError('Use retry, hold, or escalate');
-        new PackageService(journal, packageRuntime()).decideFailure(goalId, packageId, decision, reason);
-        write(`${decision}: ${packageId}`);
-      }),
-    );
-  packages
-    .command('list')
-    .argument('<goalId>')
-    .action((goalId: string) =>
-      withJournal(journal => {
-        write(JSON.stringify(journal.getGoal(goalId)?.packages ?? {}));
-      }),
-    );
-  packages
-    .command('ready')
-    .argument('<goalId>')
-    .action((goalId: string) =>
-      withJournal(journal => {
-        write(JSON.stringify(new PackageService(journal, packageRuntime()).ready(goalId).map(item => item.id)));
-      }),
-    );
-  packages
-    .command('dispatch')
-    .argument('<goalId>')
-    .description('the controller dispatches every ready package at its next tick; this lists them')
-    .action((goalId: string) =>
-      withJournal(journal => {
-        const ready = new PackageService(journal, packageRuntime()).ready(goalId).map(item => item.id);
-        awaitController(
-          `${goalId}: the controller dispatches ready packages at its next tick (ready now: ${ready.join(', ') || 'none'}).`,
-        );
-      }),
-    );
-  packages
-    .command('reconcile')
-    .argument('<goalId>')
-    .action((goalId: string) =>
-      withJournalAsync(async journal => {
-        write(JSON.stringify(await new PackageService(journal, packageRuntime()).reconcile(goalId)));
-      }),
-    );
-  packages
-    .command('evidence')
-    .argument('<goalId>')
-    .requiredOption('--file <json>')
-    .action((goalId: string, { file }: { file: string }) =>
-      withJournal(journal => {
-        assertLeadOrHuman(journal, goalId, 'package evidence');
-        const evidence = new PackageService(journal, packageRuntime()).submitEvidence(goalId, readJsonFile(file));
-        write(`Recorded ${evidence.packageId} ${evidence.acceptanceId}`);
-      }),
-    );
-  packages
-    .command('verify')
-    .argument('<goalId>')
-    .argument('<packageId>')
-    .action((goalId: string, packageId: string) =>
-      withJournalAsync(async journal => {
-        assertLeadOrHuman(journal, goalId, 'package verify');
-        const service = new PackageService(journal, packageRuntime());
-        await service.verify(goalId, packageId);
-        awaitController(`Verified ${packageId}; the controller dispatches the packages it unblocks at its next tick.`);
       }),
     );
   packages
@@ -192,48 +34,16 @@ export function registerPackage(ctx: CliContext): void {
     .requiredOption('--reason <text>')
     .action((goalId: string, { file, reason }: { file: string; reason: string }) =>
       withJournal(journal => {
-        assertLead(journal, goalId, 'package revise');
-        const spec = new PackageService(journal, packageRuntime()).revise(goalId, readJsonFile(file), reason);
+        const spec = new PackageService(journal).revise(goalId, readJsonFile(file), reason);
         write(`Revised ${spec.id} v${spec.version}`);
       }),
     );
   packages
-    .command('block')
+    .command('list')
     .argument('<goalId>')
-    .argument('<packageId>')
-    .requiredOption('--kind <kind>')
-    .requiredOption('--note <text>')
-    .action(
-      (
-        goalId: string,
-        packageId: string,
-        { kind, note }: { kind: 'technical' | 'product' | 'external'; note: string },
-      ) =>
-        withJournal(journal => {
-          new PackageService(journal, packageRuntime()).recordBlocker(goalId, packageId, kind, note);
-          write(`Blocked ${packageId}`);
-        }),
-    );
-  packages
-    .command('unblock')
-    .argument('<goalId>')
-    .argument('<packageId>')
-    .requiredOption('--resolution <text>')
-    .action((goalId: string, packageId: string, { resolution }: { resolution: string }) =>
+    .action((goalId: string) =>
       withJournal(journal => {
-        new PackageService(journal, packageRuntime()).unblock(goalId, packageId, resolution);
-        write(`Unblocked ${packageId}`);
-      }),
-    );
-  packages
-    .command('resume')
-    .argument('<goalId>')
-    .argument('<packageId>')
-    .action((goalId: string, packageId: string) =>
-      withJournal(journal => {
-        if (journal.getGoal(goalId)?.packages?.[packageId]?.status !== 'stale')
-          throw new UserError(`${packageId} is not a stale package of ${goalId}`);
-        requestDispatch(journal, goalId, { kind: 'package-resume', packageId });
+        write(JSON.stringify(journal.getGoal(goalId)?.packages ?? {}));
       }),
     );
 }

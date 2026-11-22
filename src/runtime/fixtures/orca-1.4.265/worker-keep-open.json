@@ -1,9 +1,0 @@
-{
-  "ok": true,
-  "result": {
-    "dispatchId": "ctx_f62261e513b3",
-    "state": "retained",
-    "reason": "user_requested",
-    "processAction": "none"
-  }
-}

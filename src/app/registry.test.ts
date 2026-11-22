@@ -17,7 +17,7 @@ const fixture = () => {
   return SqliteStore.open(join(dir, 'state.sqlite'));
 };
 
-it('recommends and selects only Goals whose dependencies have closed', () => {
+it('selects only Goals whose dependencies have closed', () => {
   const store = fixture();
   let n = 0;
   const add = (goalId: string, type: GoalEventType, data?: unknown) =>
@@ -28,7 +28,6 @@ it('recommends and selects only Goals whose dependencies have closed', () => {
   const registry = new GoalRegistryService(store);
   registry.approve(spec.id, approval.appetite);
   registry.approve(second.id, approval.appetite);
-  expect(registry.recommend()?.spec.id).toBe(spec.id);
   expect(() => registry.select(second.id)).toThrow(/dependencies not closed/);
   registry.select(spec.id);
   add(spec.id, 'proposal-drafted', proposal);
@@ -36,7 +35,6 @@ it('recommends and selects only Goals whose dependencies have closed', () => {
   add(spec.id, 'execution-started', { runId: 'run_1' });
   add(spec.id, 'verified');
   add(spec.id, 'outcome-accepted');
-  expect(registry.recommend()?.spec.id).toBe(second.id);
   registry.select(second.id);
   expect(store.getGoal(second.id)?.selected).toBe(true);
   store.close();

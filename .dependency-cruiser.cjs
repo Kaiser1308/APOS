@@ -45,10 +45,17 @@ module.exports = {
     },
     {
       name: 'ui-read-only',
-      comment: 'ui không import app và runtime, trừ app/inbox và runtime/orca (ngoại lệ vĩnh viễn, O10).',
+      comment: 'ui không import app và runtime, trừ app/inbox.',
       severity: 'error',
       from: { path: '^src/ui/', pathNot: NOT_TEST },
-      to: { path: '^src/(app|runtime)/', pathNot: ['^src/app/inbox[.]ts$', '^src/runtime/orca/parse[.]ts$'] },
+      to: { path: '^src/(app|runtime)/', pathNot: ['^src/app/inbox[.]ts$'] },
+    },
+    {
+      name: 'no-orchestration',
+      comment: 'APOS v3 không điều phối agent: không import runtime/orca hay ports/runtime (đã bị xoá ở đợt 1).',
+      severity: 'error',
+      from: { pathNot: NOT_TEST },
+      to: { path: '^src/(runtime/orca/|ports/runtime[.]ts$)' },
     },
   ],
   options: {

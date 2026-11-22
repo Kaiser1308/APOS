@@ -2,13 +2,12 @@ import { IntegrationService } from '../../app/integration.js';
 import { MergeService } from '../../app/merge.js';
 import { GateService } from '../../app/gate-service.js';
 import { newEvent } from '../../app/events.js';
-import { assertBotIntegrationCommit } from '../../app/bot-lead.js';
 import { UserError } from '../../domain/errors.js';
 import { integrationGateProblem } from '../../domain/integration-gate.js';
 import type { CliContext } from '../context.js';
 
 export function registerIntegration(ctx: CliContext): void {
-  const { program, options, write, repo, withJournal, assertLead } = ctx;
+  const { program, options, write, repo, withJournal } = ctx;
   const integration = program.command('integration');
   integration
     .command('gate')
@@ -18,11 +17,9 @@ export function registerIntegration(ctx: CliContext): void {
     .description('Lead: ask the controller to gate the integration commit; the request is an event with its reason')
     .action((goalId: string, { commit, reason }: { commit: string; reason: string }) =>
       withJournal(journal => {
-        assertLead(journal, goalId, 'integration gate');
         const state = journal.getGoal(goalId)!;
         const problem = integrationGateProblem(state, commit, reason);
         if (problem) throw new UserError(problem);
-        assertBotIntegrationCommit(state, commit);
         journal.append(
           newEvent(goalId, 'integration-gate-requested', {
             commit,
@@ -52,8 +49,6 @@ export function registerIntegration(ctx: CliContext): void {
     .action((goalId: string, { commit, conflictResolution }: { commit: string; conflictResolution?: string }) =>
       withJournal(journal => {
         const input = { commitRef: commit, conflictResolution };
-        const state = journal.getGoal(goalId);
-        if (state) assertBotIntegrationCommit(state, commit);
         const current = journal.getGoal(goalId)?.gate;
         // The controller gates the integration commit itself; a red result wakes the Lead on the next tick.
         if (current?.deliveryCommit !== input.commitRef || current.result !== 'green') {

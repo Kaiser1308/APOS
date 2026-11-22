@@ -256,7 +256,10 @@ export class GateService {
     return report;
   }
 
-  confirmManual(goalId: string, input: { checkId: string; deliveryCommit: string; by: string; note: string }): void {
+  confirmManual(
+    goalId: string,
+    input: { checkId: string; deliveryCommit: string; by: string; note: string; confirmation?: unknown },
+  ): void {
     const state = this.store.getGoal(goalId);
     const owner = state?.runtimeRef?.owner;
     if (owner && input.by.trim().toLowerCase() === owner.toLowerCase())

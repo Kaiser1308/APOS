@@ -54,9 +54,9 @@ export class VerificationService {
     return { passed: true, acceptanceIds: state.spec.acceptance.map(item => item.id), deliveryCommit: gated };
   }
 
-  recordOutcome(goalId: GoalId, decision: 'close' | 'revise' | 'stop'): void {
+  recordOutcome(goalId: GoalId, decision: 'close' | 'revise' | 'stop', confirmation?: unknown): void {
     // Orphaned deferred requirements are not journaled: the inbox recomputes them from the Goal specs on every read.
     const type = { close: 'outcome-accepted', revise: 'outcome-revised', stop: 'outcome-stopped' } as const;
-    this.record(goalId, type[decision]);
+    this.record(goalId, type[decision], confirmation ? { confirmation } : undefined);
   }
 }

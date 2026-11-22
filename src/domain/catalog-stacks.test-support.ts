@@ -153,7 +153,7 @@ export const STACKS: CatalogEntry[] = [
     notImplementedPatterns: ['NotImplementedError', 'not implemented'],
     entryRule: {
       importPatterns: [
-        '^\\s*from\\s+([\\w.]+)\\s+import\\s+(.+)',
+        '^\\s*from\\s+([\\w.]+)\\s+import\\s+([^#]+)',
         '^\\s*import\\s+([\\w.]+(?:\\s+as\\s+\\w+)?(?:\\s*,\\s*[\\w.]+(?:\\s+as\\s+\\w+)?)*)',
       ],
       allowImports: [

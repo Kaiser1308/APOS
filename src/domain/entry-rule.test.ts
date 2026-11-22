@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { entryRuleSchema, entryViolations, type EntryRule } from './entry-rule.js';
 
 const python: EntryRule = entryRuleSchema.parse({
-  importPatterns: ['^\\s*from\\s+([\\w.]+)\\s+import\\s+(.+)', '^\\s*import\\s+([\\w.]+(?:\\s*,\\s*[\\w.]+)*)'],
+  importPatterns: ['^\\s*from\\s+([\\w.]+)\\s+import\\s+([^#]+)', '^\\s*import\\s+([\\w.]+(?:\\s*,\\s*[\\w.]+)*)'],
   allowImports: ['^(?:pytest|unittest)(?:\\.|$)'],
   moduleSeparator: '.',
   moduleFiles: ['{path}.py', '{path}/__init__.py'],
@@ -96,6 +96,13 @@ describe('entryViolations', () => {
     expect(
       check(python, 'tests/acceptance/t.py', 'from . import helper\n', ['tests/acceptance/helper.py'], []),
     ).toHaveLength(1);
+  });
+  it('python: a trailing comment is not part of the imported names', () => {
+    const files = ['pkg/internal.py'];
+    expect(check(python, 'tests/t.py', 'from pkg import internal  # needed for setup\n', files, [])).toEqual([
+      expect.stringContaining('imports "pkg.internal"') as unknown,
+    ]);
+    expect(check(python, 'tests/t.py', '# from pkg import internal\n', files, [])).toEqual([]);
   });
   it('python: `import a, b` judges every module', () => {
     expect(

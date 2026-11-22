@@ -245,7 +245,15 @@ export class GateService {
       ...(state.setupVersion === undefined ? {} : { setupVersion: state.setupVersion }),
       phase,
       changedFiles,
-      warnings: phase === 'delivery' ? gateWarnings({ spec: state.spec, proposal: state.proposal, changedFiles }) : [],
+      warnings:
+        phase === 'delivery'
+          ? gateWarnings({
+              spec: state.spec,
+              proposal: state.proposal,
+              changedFiles,
+              testLocked: Boolean(state.testLock),
+            })
+          : [],
       environment,
       checks,
       result: summarizeGate(checks),

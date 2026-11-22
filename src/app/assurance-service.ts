@@ -6,7 +6,6 @@ import {
   scopeCheck,
   testSetOf,
   INVENTORY_CHECK,
-  LOCKED_CHECK,
   type TestSet,
 } from '../domain/assurance.js';
 import { rootedGlobs } from '../domain/glob.js';
@@ -91,16 +90,15 @@ export class AssuranceService {
         }),
       );
       checks.push(
-        delivery.problems.length
-          ? unverifiable(LOCKED_CHECK, `the delivery layers did not run: ${delivery.problems.join('; ')}`)
-          : lockedTestsCheck({
-              lock,
-              deliveryFiles,
-              delivery: delivery.set,
-              criteria: item.spec.acceptance.flatMap(criterion =>
-                criterion.goalAcceptanceId ? [criterion.goalAcceptanceId] : [],
-              ),
-            }),
+        lockedTestsCheck({
+          lock,
+          deliveryFiles,
+          delivery: delivery.set,
+          runProblems: delivery.problems,
+          criteria: item.spec.acceptance.flatMap(criterion =>
+            criterion.goalAcceptanceId ? [criterion.goalAcceptanceId] : [],
+          ),
+        }),
       );
     }
     const problems = [...delivery.problems, ...atBase.problems];

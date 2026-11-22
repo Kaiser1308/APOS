@@ -115,3 +115,24 @@ describe('summarizeGate with needs-human', () => {
     expect(summarizeGate([check('pass')])).toBe('green');
   });
 });
+
+describe('lockedTestsCheck when the layers did not run', () => {
+  it('a changed locked file is red even if the delivery also broke the runner; unchanged files give unverifiable', () => {
+    const run = {
+      lock,
+      delivery: {},
+      criteria: ['AC-1'],
+      runProblems: ['app.L2 acceptance: command not found: pytest'],
+    };
+    const changed = lockedTestsCheck({
+      ...run,
+      deliveryFiles: { 'tests/a.t': 'f'.repeat(64), 'tests/b.t': 'b'.repeat(64) },
+    });
+    expect(changed.status).toBe('fail');
+    expect(changed.reason).toBe('locked test modified: tests/a.t');
+    expect(lockedTestsCheck({ ...run, deliveryFiles: same })).toMatchObject({
+      status: 'unverifiable',
+      reason: 'the delivery layers did not run: app.L2 acceptance: command not found: pytest',
+    });
+  });
+});

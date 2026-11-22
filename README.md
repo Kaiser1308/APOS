@@ -240,7 +240,7 @@ The **appetite** (`size`, `maxWallMinutes`, `maxAttempts`, `overrun`) is kept on
 
 The wall-clock budget runs from `goal select` to `verified`. Past it, `package submit` refuses: with `--overrun ask` the Goal is blocked and the Human decides (raise it with `goal appetite`), with `--overrun stop` the submission is refused and nothing is written. Ending the Goal stays the Human's call (`outcome stop`).
 
-With locked tests (see [Locked tests](#locked-tests)) the gate adds three checks, `APOS-LOCKED`, `APOS-INVENTORY` and `APOS-SCOPE`, and the base of the package is the commit that locked the tests.
+For a Goal pinned to a setup the gate adds up to three checks next to the Goal's own: `APOS-LOCKED` (only when the Goal has locked tests), `APOS-INVENTORY` (L1 of every part, plus the locked layers; the setup's `forbid` patterns on added lines) and `APOS-SCOPE` (only when the plan names `paths`). With locked tests (see [Locked tests](#locked-tests)) the base of the package is the commit that locked them. A Goal pinned to no setup gets none of these.
 
 A green gate also prints **warnings** (`needs attention: ...`) when the diff changes tests or oracles, shared paths or the files the checks run. They block nothing and also appear in `apos inbox` and the UI. See [Limits](#limits).
 

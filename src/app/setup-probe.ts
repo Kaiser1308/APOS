@@ -165,7 +165,9 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
         : `${patterns.length} patterns compile; tests under ${setup.tests.paths.join(', ')}`,
     });
   }
-  return { sha256: parsed.sha256, ok: results.length > 0 && results.every(item => item.ok), results };
+  // The pattern rows say nothing about a tool: a setup with no tool at all still proves nothing.
+  const hasTool = results.some(item => item.layer !== 'tests');
+  return { sha256: parsed.sha256, ok: hasTool && results.every(item => item.ok), results };
 }
 
 /** Records the probe in the project log. */

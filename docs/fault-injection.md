@@ -92,7 +92,7 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 
 ## Locked tests, inventory and scope (phase 3)
 
-Every case is a test with a real git repo and a fake test tool (`test-lock.test-support.ts`); the end-to-end cases also run real pytest and vitest (`locked-flow.test.ts`, skipped when the runner is absent).
+`APOS-INVENTORY` and `APOS-SCOPE` apply to every Goal pinned to a setup (the inventory against the plan base when there is no lock; the scope when the plan names `paths`); `APOS-LOCKED` only to a Goal with locked tests. A Goal pinned to no setup gets none of them. Every case is a test with a real git repo and a fake test tool (`test-lock.test-support.ts`); the end-to-end cases also run real pytest and vitest (`locked-flow.test.ts`, skipped when the runner is absent).
 
 | Injected fault | Expected | Test |
 | --- | --- | --- |
@@ -104,6 +104,7 @@ Every case is a test with a real git repo and a fake test tool (`test-lock.test-
 | Two runs of the same commit disagree | refused: flaky | `test-lock.test.ts` › refuses when two runs … disagree |
 | Package branched from the old base, without the locked commit (review focus 3) | `package submit` refused: rebase onto the lock commit | `assurance-gate.test.ts` › refuses a package branched from the old base …; `test-lock.test.ts` › … does not contain the plan base |
 | Locked test edited by one space, or deleted (review focus 5) | gate red `locked test modified: <path>` | `assurance-gate.test.ts` › is red when the worker changes a locked test …; `assurance.test.ts`; `locked-flow.test.ts` |
+| Locked test edited and the runner broken in the same commit | still red (`locked test modified`), not `unverifiable` | `assurance-gate.test.ts` › a locked test edited while the runner is also broken is red …; `assurance.test.ts` |
 | Locked test still failing on the delivery | gate red naming the test | `assurance-gate.test.ts` › is red when a locked test still fails |
 | Unit test deleted, or turned into a skip | gate red `test missing` / `test now skipped` | `assurance-gate.test.ts` › is red when a test that existed … |
 | Forbidden pattern (`@skip`, `.only`, `# type: ignore`) in an added line | gate red | `assurance-gate.test.ts` › is red for a forbidden pattern … |

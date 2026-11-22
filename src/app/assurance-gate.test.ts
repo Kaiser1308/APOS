@@ -97,6 +97,29 @@ describe('package gate with locked tests', () => {
 });
 
 describe('the Goal-level gate (Multi-WP integration reads the diff from the plan base)', () => {
+  it('does not warn about changed tests on a locked Goal either', async () => {
+    const p = await lockedProject();
+    const commit = p.commit({ 'src/impl.txt': 'add\n', 'tests/unit/new.t': 'case two pass\n' }, 'more tests');
+    expect(p.gate.run(p.goalId, p.dir, { deliveryCommit: commit }).warnings?.join('\n') ?? '').not.toMatch(
+      /tests or oracles/,
+    );
+  }, 120_000);
+
+  it('a locked test edited while the runner is also broken is red, not unverifiable', async () => {
+    const p = await lockedProject();
+    const commit = p.commit(
+      {
+        'src/impl.txt': 'add\n',
+        'runner.js': 'process.exit(2);\n',
+        'tests/acceptance/calc.t': 'case add needs add \n',
+      },
+      'edit and break',
+    );
+    const result = await p.submit(commit);
+    expect(result.result).toBe('red');
+    expect(result.reasons.join('\n')).toContain('APOS-LOCKED fail: locked test modified: tests/acceptance/calc.t');
+  }, 120_000);
+
   it('trusts tests.json while it is the blob that was locked, and no longer once it changes', async () => {
     const p = await lockedProject();
     const ok = p.commit({ 'src/impl.txt': 'add\n' }, 'work');

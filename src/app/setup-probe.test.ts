@@ -98,6 +98,16 @@ describe('probeSetup test patterns', () => {
       reason: expect.stringContaining('assert(') as unknown,
     });
   }, 90_000);
+  it('does not count the pattern row as a tool: a part with tests and no layer still proves nothing', async () => {
+    const { dir, commit } = await repoWith(
+      {},
+      {},
+      { tests: { paths: ['tests/**'], assertPatterns: [], notImplementedPatterns: [], loadErrorPatterns: [] } },
+    );
+    const report = await probeSetup(dir, commit, deps());
+    expect(report.results.map(item => item.layer)).toEqual(['tests']);
+    expect(report.ok).toBe(false);
+  }, 90_000);
   it('passes patterns that compile and says where the tests are', async () => {
     const { dir, commit } = await repoWith(
       { L1: [junit('ok')] },

@@ -73,3 +73,22 @@ describe('exception approve', () => {
     );
   }, 120_000);
 });
+
+it('refuses a needs-human package that waits for something else (a manual check, a flaky check): approving would change nothing', () => {
+  const commit = 'a'.repeat(40);
+  const state = {
+    spec: { id: 'GOAL-1' },
+    status: 'executing',
+    packages: {
+      'WP-A': {
+        status: 'needs-human',
+        submission: { commit },
+        gate: { checks: [{ checkId: 'CHK-M', status: 'manual-pending' }] },
+      },
+    },
+  };
+  const store = { getGoal: () => state } as unknown as ConstructorParameters<typeof ExceptionService>[0];
+  expect(() =>
+    new ExceptionService(store).approve('GOAL-1', { kind: 'needs-human', ref: 'WP-A', reason: 'r', by: 'agent:x' }),
+  ).toThrow(/waits for something an exception does not settle/);
+});

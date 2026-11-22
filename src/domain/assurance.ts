@@ -40,12 +40,18 @@ export function lockedTestsCheck(input: {
   delivery: TestSet;
   /** The Goal criteria this package answers for. */
   criteria: string[];
+  /** Why the layers could not run on the delivery. A changed locked file is red all the same, whatever else broke. */
+  runProblems?: string[];
 }): CheckResult {
   const problems: string[] = [];
   for (const [path, hash] of Object.entries(input.lock.files)) {
     const now = input.deliveryFiles[path];
     if (now !== hash) problems.push(`locked test modified: ${path}${now === undefined ? ' (deleted)' : ''}`);
   }
+  if (input.runProblems?.length)
+    return problems.length
+      ? result(LOCKED_CHECK, 'fail', problems.join('; '))
+      : result(LOCKED_CHECK, 'unverifiable', `the delivery layers did not run: ${input.runProblems.join('; ')}`);
   for (const entry of input.lock.map) {
     if (!input.criteria.includes(entry.acceptanceId)) continue;
     for (const id of entry.testIds) {

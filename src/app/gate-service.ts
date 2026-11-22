@@ -271,6 +271,13 @@ export class GateService {
     const first = evaluateCommandCheck(check, base, this.runMany(check, repoPath, commit, 'delivery', artifacts));
     if (first.status !== 'fail' || check.expect !== 'no-new-failures' || !first.newFailures.length) return first;
     const [again] = this.runMany({ ...check, runs: 1 }, repoPath, commit, 'recheck', artifacts);
+    if (again?.reportProblem)
+      return {
+        ...first,
+        delivery: [...first.delivery, again],
+        status: 'unverifiable',
+        reason: `the recheck of the new failure(s) has an unusable report: ${again.reportProblem}`,
+      };
     const seen = new Set(again && !again.timedOut ? again.failures : first.newFailures);
     const persistent = first.newFailures.filter(item => seen.has(item));
     const delivery = again ? [...first.delivery, again] : first.delivery;

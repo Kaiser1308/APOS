@@ -31,6 +31,12 @@ const skip = n => tc(n, '<skipped/>');
 let cases;
 if (mode === 'broken') cases = '<testcase';
 else if (mode === 'empty') cases = '';
+else if (mode === 'second-broken' || mode === 'second-missing') {
+  const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
+  fs.writeFileSync(counter, String(n + 1));
+  if (n >= 1 && mode === 'second-missing') process.exit(0);
+  cases = n >= 1 ? '<testcase' : tc('a') + tc('b');
+}
 else if (mode === 'allerr') cases = '<testcase classname="tests.acceptance.test_calc" name="tests.acceptance.test_calc"><error message="collection failure"/></testcase>';
 else if (mode === 'loaderr') cases = tc('a') + '<testcase classname="m" name="mod"><error message="ImportError while importing test module"/></testcase>';
 else if (name) {
@@ -43,7 +49,7 @@ else if (name) {
   fs.writeFileSync(counter, String(n + 1));
   cases = tc('a', n % 2 ? '<failure message="x"/>' : '') + tc('b');
 } else cases = tc('a') + tc('b');
-fs.writeFileSync(out, mode === 'broken' ? '<testsuite>' + cases : '<testsuite name="suite">' + cases + '</testsuite>');
+fs.writeFileSync(out, mode === 'broken' || (mode === 'second-broken' && cases === '<testcase') ? '<testsuite>' + cases : '<testsuite name="suite">' + cases + '</testsuite>');
 `;
 
 async function repoWith(
@@ -118,6 +124,15 @@ describe('probeSetup', () => {
     expect(report.ok).toBe(false);
     expect(report.results[0]?.reason).toMatch(/flaky/);
   }, 90_000);
+  it('fails when the second run of L1 gives an unreadable or missing report, even with the same exit code', async () => {
+    for (const mode of ['second-broken', 'second-missing']) {
+      const counter = join(temp('apos-probe-counter-'), 'n').replaceAll('\\', '/');
+      const { dir, commit } = await repoWith({ L1: [junit(`${mode} - ${counter}`)] });
+      const report = await probeSetup(dir, commit, deps());
+      expect(report.ok, mode).toBe(false);
+      expect(report.results[0]?.reason, mode).toMatch(/second run report unusable/);
+    }
+  }, 120_000);
   it('fails when the command does not exist or times out', async () => {
     const { dir, commit } = await repoWith({
       L1: [{ id: 'ghost', command: 'apos-no-such-command-xyz --junit {report}', format: 'junit' }],

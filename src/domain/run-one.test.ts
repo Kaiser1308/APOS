@@ -32,3 +32,10 @@ it('checks templates: unknown modifier, unknown placeholder, none at all', () =>
   expect(runOneProblem('run {nam}')).toMatch(/unknown placeholder \{nam\}/);
   expect(runOneProblem('run it')).toMatch(/needs a placeholder/);
 });
+
+it('inserts values literally: replacement tokens such as $& and $1 in a test name are not expanded', () => {
+  expect(fillRunOne('run -t "{name}" {id}', { id: 'suite::cost $& $1 $$' }, 'win32')).toBe(
+    'run -t "cost $& $1 $$" suite::cost $& $1 $$',
+  );
+  expect(fillRunOne('run "{name}"', { id: 'suite::cost $&' }, 'linux')).toBe('run "cost \\$&"');
+});

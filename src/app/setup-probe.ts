@@ -131,6 +131,13 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
     }
     if (layer === 'L1' || layer === 'L2') {
       const again = run(tool, tool.command, root);
+      const againProblem = notRunnable(again.exec);
+      if (againProblem) return { ok: false, reason: `second run ${againProblem}: ${tool.command}` };
+      if (report.kind === 'tests' && again.report?.kind !== 'tests')
+        return {
+          ok: false,
+          reason: `second run report unusable: ${again.report?.kind === 'unreadable' ? again.report.reason : 'no test report'}`,
+        };
       const same =
         again.report?.kind === 'tests' && report.kind === 'tests'
           ? signature(again.report.tests) === signature(report.tests)

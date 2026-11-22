@@ -91,6 +91,9 @@ async function project(goalSpec: GoalSpec = spec) {
 /** Writes a JUnit report to the path in argv[2] (or to reports/ when it has none): fails the tests named in fail.txt. */
 const junitRunner =
   "const fs=require('fs');const f=fs.existsSync('fail.txt')?fs.readFileSync('fail.txt','utf8').split(/\\r?\\n/).filter(Boolean):[];if(fs.existsSync('norep.txt'))process.exit(f.length?1:0);const all=['a','b','c'].concat(f.filter(x=>!['a','b','c'].includes(x)));const cases=all.map(n=>'<testcase classname=\"suite\" name=\"'+n+'\">'+(f.includes(n)?'<failure message=\"boom\"/>':'')+'</testcase>').join('');const xml=fs.existsSync('broken.txt')?'<testsuite><testcase':'<testsuite name=\"suite\">'+cases+'</testsuite>';const out=process.argv[2]||'reports/junit.xml';fs.mkdirSync(require('path').dirname(out),{recursive:true});fs.writeFileSync(out,xml);process.exit(f.length?1:0);";
+/** Like junitRunner, but the third call (base, delivery, then the recheck) writes a broken report; argv[3] counts calls. */
+const countingRunner =
+  "const fs=require('fs');const [out,counter]=process.argv.slice(2);const n=fs.existsSync(counter)?Number(fs.readFileSync(counter,'utf8')):0;fs.writeFileSync(counter,String(n+1));const f=fs.existsSync('fail.txt')?fs.readFileSync('fail.txt','utf8').split(/\\r?\\n/).filter(Boolean):[];const cases=['a'].concat(f).map(x=>'<testcase classname=\"suite\" name=\"'+x+'\">'+(f.includes(x)?'<failure message=\"boom\"/>':'')+'</testcase>').join('');fs.writeFileSync(out,n>=2?'<testsuite><testcase':'<testsuite name=\"suite\">'+cases+'</testsuite>');process.exit(f.length?1:0);";
 const junitSpec = (command: string, report?: string): GoalSpec => ({
   ...baseSpec,
   checks: [
@@ -132,6 +135,17 @@ describe('checks that read a standard report', () => {
     const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery, baseCommit: withOld });
     expect(regression(report).status).toBe('pass');
     expect(regression(report).reason).toMatch(/already present on base/);
+  }, 60_000);
+  it('is unverifiable, not green, when the recheck of a new failure has an unusable report', async () => {
+    const counter = join(mkdtempSync(join(tmpdir(), 'apos-recheck-')), 'n').replaceAll('\\', '/');
+    dirs.push(join(counter, '..'));
+    const made = await project(junitSpec(`node counting-runner.js {report} ${counter}`));
+    const runnerCommit = made.commit({ 'counting-runner.js': countingRunner, 'fail.txt': '' }, 'runner');
+    const delivery = made.commit({ 'feature.js': 'process.exit(0);', 'fail.txt': 'new-one\n' }, 'feature');
+    const report = made.gate.run(baseSpec.id, made.dir, { deliveryCommit: delivery, baseCommit: runnerCommit });
+    expect(regression(report).status).toBe('unverifiable');
+    expect(regression(report).reason).toMatch(/recheck .* unusable report/);
+    expect(report.result).toBe('unverifiable');
   }, 60_000);
   it('reads a report the command writes at a relative path', async () => {
     const { dir, commit, gate, runnerCommit } = await setup('node junit-runner.js', 'reports/junit.xml');

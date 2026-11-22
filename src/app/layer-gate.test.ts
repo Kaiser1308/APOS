@@ -112,6 +112,23 @@ describe('layers at the submit stage', () => {
     expect(result.reasons.join('\n')).toContain('1 finding(s) at error or above');
   }, 240_000);
 
+  it('with two tools in one layer a locked test that vanishes from its own tool is red, whatever the other tool reports', async () => {
+    const second = { id: 'extra', command: 'node runner.js {report} tests/extra', format: 'junit' };
+    const first = setupDocument.parts.app.layers.L2[0]!;
+    const p = await project({
+      layers: { L2: [first, second] },
+      files: { 'tests/extra/x.t': 'case x pass\n', 'tests/acceptance/keep.t': 'case keep pass\n' },
+    });
+    // The locked test is edited out of its file (the file's own lock check is APOS-LOCKED's); the layer check says it is gone.
+    const result = await p.submit(p.commit({ ...work, 'tests/acceptance/calc.t': 'case other pass\n' }));
+    expect(result.result).toBe('red');
+    expect(checkOf(p, 'app.L2.acceptance')).toMatchObject({ status: 'fail' });
+    expect(checkOf(p, 'app.L2.acceptance')?.reason).toContain(
+      'locked test tests.acceptance.calc::add is not in the report',
+    );
+    expect(checkOf(p, 'app.L2.extra')?.status).toBe('pass');
+  }, 120_000);
+
   it('a layer the Lead adds runs at submit and is judged like the floor', async () => {
     const p = await project({
       layers: { L3: [lint('node -e "process.exit(0)"')] },

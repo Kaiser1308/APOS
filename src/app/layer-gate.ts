@@ -206,9 +206,10 @@ export class LayerGate {
       head.push(got.tests);
     }
     const atBase = input.base ? runner.layerTests(input.base, run.part, root, run.layer, [tool]) : undefined;
-    const inReport = new Set((head[0] ?? []).map(test => test.id));
-    // With two tools in one layer a locked test lives in only one of them: this tool answers for the ones it reports.
+    // With two tools in one layer a locked test belongs to the tool that reported it when the tests were locked (the base),
+    // not to whichever report it shows up in now: a locked test that vanishes from its own tool's report is red.
     const shared = (setup.parts[run.part]?.layers[run.layer]?.length ?? 0) > 1;
+    const owned = atBase && !atBase.problems.length ? new Set(atBase.tests.map(test => test.id)) : undefined;
     // A package answers for the locked tests of its own criteria; at the later stages the Goal answers for all of them.
     const mine = state.packages?.[input.scope];
     const answersFor = (acceptanceId: string) =>
@@ -216,7 +217,7 @@ export class LayerGate {
     const locked = (state.testLock?.map ?? [])
       .filter(entry => entry.part === run.part && entry.layer === run.layer && answersFor(entry.acceptanceId))
       .flatMap(entry => entry.testIds)
-      .filter(id => !shared || inReport.has(id));
+      .filter(id => !shared || !owned || owned.has(id));
     const verdict = judgeTests({
       label,
       head,

@@ -12,6 +12,7 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | Owner claims `pass`, gate red | not verified | › rejects a red gate even when the owner reported pass |
 | Gate `unverifiable` (flaky, hung, baseline cannot run) | never green | `verification.test.ts` › rejects an unverifiable gate; `gate.test.ts` (domain) › is unverifiable when repeated runs disagree or a run times out |
 | Wrong log / artifact | the gate writes its own logs and hashes them outside the repo; owner artifacts are never read as proof | `gate-service.test.ts` › goes green … with logs hashed outside the repo |
+| An AI tool wired into the setup that gives a different answer each run | the probe fails (`flaky`), the setup cannot be approved; a stable one passes | `setup-probe.test.ts` › fails an AI tool that writes different tests every time it runs, and passes one that is stable |
 | Stale commit: gate on X, verify or merge of Y | refused | `verification.test.ts` › rejects a green gate that ran on a different commit; `merge.test.ts` › merges only the gated commit |
 | A gate that finishes after its package moved on | rejected | `verification.test.ts` › rejects a gate that finishes after its package moved on |
 | Plan revised after a gate | the gate is dropped | `verification.test.ts` › drops the gate when the Lead revises its plan |

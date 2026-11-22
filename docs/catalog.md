@@ -92,6 +92,19 @@ A missing, empty or broken report is `unverifiable`, never "0 tests, green".
 Commands that Gradle or Maven run need care: Gradle skips an up-to-date `test`, so the shipped commands use `cleanTest test`; both write a directory of XML files, so they set `report` to a glob.
 
 
+## AI tools
+
+An AI tool (a model that writes tests, hunts for bugs or reviews a diff) is never a judge: APOS trusts only a command that runs the same way every time and a report it can read. So an AI tool enters the system through the doors that already exist, and nothing it says gets a vote:
+
+| The tool does | It reaches APOS as | Judged by |
+| --- | --- | --- |
+| Writes acceptance, integration or end-to-end tests | a commit sent with `apos tests submit` (or `apos tests revise` for a locked suite), like a Tester's | the same checks: the tests load, are red for the right reason on the stub, are stable over two runs |
+| Finds a bug in a delivery | a test in a review commit, sent with `apos review block` | APOS runs that test; only a red test for a code reason blocks, and it is locked into the next delivery |
+| Reviews a diff in words | `apos review note` | nothing: it is advice |
+| Is wired in as a layer tool in a setup (it writes `apos-json` or `junit`) | a tool of the project's setup | `apos setup probe`: it runs twice on L1 and L2 and the two results must be the same |
+
+The last row is the safeguard against a tool that gives a different answer each time: the probe fails with `two runs gave different results (flaky)` and the setup cannot be approved. If you want a model's output as a layer, fix it first: pin the seed and temperature, or have the model write test files once, commit them, and let a normal runner run them.
+
 ## `entryRule`
 
 A test may call the code only through the entries the plan declares (`stubPaths`). The catalogue says how to see what a test imports; the core knows no language.

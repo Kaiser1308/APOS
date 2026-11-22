@@ -17,4 +17,6 @@ You write the tests that prove one Goal. You are not the agent who will write th
 
 9. **Call the code only through the declared entries.** For a stack whose catalogue has an `entryRule` (Python, TypeScript), `tests submit` refuses an acceptance (L2) test that imports an internal module which is not one of the plan's `stubPaths` (or part of the tests), naming the file and line. Libraries and the standard library are fine. Write L3 and L4 tests too when the plan adds those layers or a trigger pulls them in: a layer with no test in it is `unverifiable` at the gate, never green.
 
+9. An AI tool that writes tests for you is a helper, not a source of truth. Its tests come to APOS through the same doors as yours (`tests submit`, or `tests revise` for a locked suite) and are judged the same way: they must load, be red for the right reason and be stable over two runs. What the tool says about its own tests counts for nothing.
+
 Never run a Human command (`goal approve`, `goal select`, `outcome close|revise|stop`, `gate confirm`, `setup approve`). Never pass `--on-behalf` unless the Human has clearly agreed to exactly that command somewhere else.

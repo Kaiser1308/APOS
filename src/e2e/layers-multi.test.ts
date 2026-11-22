@@ -151,6 +151,7 @@ describe.each([
         'merge of WP-A and WP-B',
       );
       expect(red.text).toContain(`Integration gate red on ${broken}`);
+      expect(red.text).toMatch(/app\.L3\.\S+ fail: app\.L3 \S+: 1 new failure\(s\) vs the base/);
       const gate = p.state(spec.id).gate;
       expect(gate?.layers?.stage).toBe('integrate');
       expect(gate?.layers?.runs.map(run => `${run.part}.${run.layer}`)).toEqual(['app.L1', 'app.L2', 'app.L3']);

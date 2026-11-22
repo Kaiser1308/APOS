@@ -71,6 +71,13 @@ export const STACKS: CatalogEntry[] = [
     ],
     assertPatterns: ['\\bexpect\\s*\\(', '\\bassert(?:\\.\\w+)?\\s*\\(', '\\bexpectTypeOf\\s*\\('],
     notImplementedPatterns: ['[Nn]ot implemented', 'NotImplemented', 'TODO: implement'],
+    entryRule: {
+      importPattern: 'from\\s+[\'"]([^\'"]+)[\'"]',
+      allowImports: ['^vitest$', '^node:', '^@vitest/'],
+      moduleSeparator: '/',
+      moduleFiles: ['{path}.ts', '{path}.tsx', '{path}/index.ts'],
+      stripExtension: '\\.(?:js|jsx|ts|tsx|mjs|cjs)$',
+    },
     forbid: [
       '\\b(?:it|test|describe)\\.(?:skip|only|todo|fails)\\b',
       '\\b(?:xit|xtest|xdescribe|fit|fdescribe)\\s*\\(',
@@ -140,6 +147,14 @@ export const STACKS: CatalogEntry[] = [
       '\\bpytest\\.warns\\s*\\(',
     ],
     notImplementedPatterns: ['NotImplementedError', 'not implemented'],
+    entryRule: {
+      importPattern: '^\\s*(?:from|import)\\s+([\\w.]+)',
+      allowImports: [
+        '^(?:__future__|abc|argparse|collections|contextlib|copy|dataclasses|datetime|decimal|enum|functools|itertools|json|logging|math|os|pathlib|pytest|random|re|shutil|string|sys|tempfile|time|typing|unittest|uuid)(?:\\.|$)',
+      ],
+      moduleSeparator: '.',
+      moduleFiles: ['{path}.py', '{path}/__init__.py'],
+    },
     forbid: [
       '@pytest\\.mark\\.(?:skip|skipif|xfail)',
       '\\bpytest\\.(?:skip|xfail)\\s*\\(',

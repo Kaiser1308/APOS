@@ -49,6 +49,7 @@ function partFrom(entry: CatalogEntry, root: string): PartSetup {
             assertPatterns: [...entry.assertPatterns],
             notImplementedPatterns: [...entry.notImplementedPatterns],
             loadErrorPatterns: [...entry.loadErrorPatterns],
+            ...(entry.entryRule ? { entryRule: structuredClone(entry.entryRule) } : {}),
           },
         }
       : {}),

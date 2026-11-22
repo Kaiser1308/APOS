@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { entryRuleSchema } from './entry-rule.js';
 import { runOneProblem } from './run-one.js';
 import type { ResultFormat } from './results/types.js';
 
@@ -62,6 +63,8 @@ export const catalogEntrySchema = z.object({
   notImplementedPatterns: z.array(regex),
   /** Regexes that recognise a test that never loaded (collection, import or class-init error), matched on the failure message. */
   loadErrorPatterns: z.array(regex).default([]),
+  /** How to tell which module a test imports, so a test can be held to the declared entries. Absent: the stack's tests are not checked that way and the assurance table says so. */
+  entryRule: entryRuleSchema.optional(),
   /** Regexes forbidden in added diff lines: the strict floor a draft starts with. */
   forbid: z.array(regex),
   /** Globs of sensitive files that need a Human. */

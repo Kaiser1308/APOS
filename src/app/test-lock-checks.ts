@@ -1,3 +1,4 @@
+import { entryViolations } from '../domain/entry-rule.js';
 import { matchesAny, rootedGlobs } from '../domain/glob.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 import { acceptanceProof, needsTest } from '../domain/test-plan.js';
@@ -176,6 +177,7 @@ export function inspectTests(input: InspectInput): Inspection {
   // The files that hold the mapped tests are locked even when the tester did not change them (a stays-green test).
   const treeFiles = filesAt(repo, commit);
   const holders = new Set(testFiles);
+  const acceptanceHolders = new Map<string, string>();
   if (ran)
     for (const outcome of outcomes) {
       const where = setup.parts[outcome.part]!;
@@ -187,13 +189,33 @@ export function inspectTests(input: InspectInput): Inspection {
           const test = outcome.tests.find(item => item.id === id);
           if (!test) continue;
           const holder = holderOf(candidates, where.root, test);
-          if (holder) holders.add(holder);
-          else
+          if (holder) {
+            holders.add(holder);
+            if (entry.layer === 'L2') acceptanceHolders.set(holder, outcome.part);
+          } else
             problems.push(
               `${entry.acceptanceId} ${entry.part}.${entry.layer} ${id}: cannot tell which file holds this test, so it cannot be locked`,
             );
         }
     }
+  // Acceptance tests go through the declared entries only, for the stacks whose catalog says how to read an import.
+  const present = new Set(treeFiles);
+  for (const [file, partName] of acceptanceHolders) {
+    const where = setup.parts[partName]!;
+    const rule = where.tests?.entryRule;
+    const text = fileAt(repo, commit, file);
+    if (!rule || !text) continue;
+    problems.push(
+      ...entryViolations({
+        rule,
+        file,
+        text: text.toString('utf8'),
+        partRoot: where.root,
+        exists: path => present.has(path),
+        allowed: path => matchesAny(path, stubs) || matchesAny(path, rootedGlobs(where.root, where.tests?.paths ?? [])),
+      }),
+    );
+  }
   for (const file of holders) {
     const content = fileAt(repo, commit, file);
     if (!content) {

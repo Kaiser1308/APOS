@@ -71,6 +71,13 @@
   ],
   "assertPatterns": ["\\bexpect\\s*\\(", "\\bassert(?:\\.\\w+)?\\s*\\(", "\\bexpectTypeOf\\s*\\("],
   "notImplementedPatterns": ["[Nn]ot implemented", "NotImplemented", "TODO: implement"],
+  "entryRule": {
+    "importPattern": "from\\s+['\"]([^'\"]+)['\"]",
+    "allowImports": ["^vitest$", "^node:", "^@vitest/"],
+    "moduleSeparator": "/",
+    "moduleFiles": ["{path}.ts", "{path}.tsx", "{path}/index.ts"],
+    "stripExtension": "\\.(?:js|jsx|ts|tsx|mjs|cjs)$"
+  },
   "forbid": [
     "\\b(?:it|test|describe)\\.(?:skip|only|todo|fails)\\b",
     "\\b(?:xit|xtest|xdescribe|fit|fdescribe)\\s*\\(",

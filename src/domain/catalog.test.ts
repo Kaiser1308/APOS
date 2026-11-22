@@ -21,6 +21,17 @@ describe('first-wave catalog content', () => {
       expect(entry.layers.L2?.[0]?.runOne, entry.stack).toBeDefined();
     }
   });
+  it('tells Python and TypeScript how to read an import; Java has no rule yet, and the table says "chưa kiểm"', () => {
+    const rules = Object.fromEntries(STACKS.map(entry => [entry.stack, entry.entryRule !== undefined]));
+    expect(rules).toEqual({ typescript: true, python: true, 'java-gradle': false, 'java-maven': false });
+    const read = (stack: string, line: string) => {
+      const rule = STACKS.find(entry => entry.stack === stack)!.entryRule!;
+      return new RegExp(rule.importPattern).exec(line)?.[1];
+    };
+    expect(read('python', 'from app.core import run')).toBe('app.core');
+    expect(read('python', 'import app')).toBe('app');
+    expect(read('typescript', "import { add } from './calc.js';")).toBe('./calc.js');
+  });
   it('gives every stack a strict floor and wave-3 patterns that match what they should', () => {
     for (const entry of STACKS) {
       expect(entry.forbid.length, entry.stack).toBeGreaterThan(0);

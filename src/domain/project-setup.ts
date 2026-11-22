@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { catalogToolSchema } from './catalog.js';
 import { UserError } from './errors.js';
+import { entryRuleSchema } from './entry-rule.js';
 import { thresholdSchema } from './threshold.js';
 import type { SetupCodec } from './setup-codec.js';
 import { LAYER_IDS, type LayerId } from './layers.js';
@@ -67,6 +68,8 @@ const testsSchema = z.object({
   assertPatterns: z.array(z.string()).default([]),
   notImplementedPatterns: z.array(z.string()).default([]),
   loadErrorPatterns: z.array(z.string()).default([]),
+  /** Copied from the catalog at draft time. Absent: tests are not held to the declared entries ("chưa kiểm"). */
+  entryRule: entryRuleSchema.optional(),
 });
 export type PartTests = z.infer<typeof testsSchema>;
 

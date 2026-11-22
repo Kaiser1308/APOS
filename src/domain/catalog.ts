@@ -52,9 +52,11 @@ export const catalogEntrySchema = z.object({
     contains: z.record(z.string(), z.string().min(1)).optional(),
   }),
   layers: z.partialRecord(catalogLayerId, z.array(catalogToolSchema).min(1)),
-  /** Regexes that count an assertion in a test file (wave 3). */
+  /** Globs, relative to the part's root, of the files that hold tests: what a tester may commit and what gets locked. */
+  testPaths: z.array(z.string().min(1)).default([]),
+  /** Regexes that count an assertion in a test file, line by line. A rough count, not a parse. */
   assertPatterns: z.array(regex),
-  /** Regexes that recognise "not implemented yet" in a failing test's message (wave 3). */
+  /** Regexes that recognise "not implemented yet" in a failing test's message . */
   notImplementedPatterns: z.array(regex),
   /** Regexes that recognise a test that never loaded (collection, import or class-init error), matched on the failure message. */
   loadErrorPatterns: z.array(regex).default([]),

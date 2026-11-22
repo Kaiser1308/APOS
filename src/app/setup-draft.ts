@@ -35,7 +35,23 @@ function partFrom(entry: CatalogEntry, root: string): PartSetup {
     const first = layer === 'L6' ? undefined : entry.layers[layer]?.[0];
     if (first) layers[layer] = [first];
   }
-  return { root, stack: entry.stack, layers, needsHuman: [...entry.needsHuman], forbid: [...entry.forbid] };
+  return {
+    root,
+    stack: entry.stack,
+    layers,
+    needsHuman: [...entry.needsHuman],
+    forbid: [...entry.forbid],
+    ...(entry.testPaths.length
+      ? {
+          tests: {
+            paths: [...entry.testPaths],
+            assertPatterns: [...entry.assertPatterns],
+            notImplementedPatterns: [...entry.notImplementedPatterns],
+            loadErrorPatterns: [...entry.loadErrorPatterns],
+          },
+        }
+      : {}),
+  };
 }
 
 const slug = (dir: string) => {

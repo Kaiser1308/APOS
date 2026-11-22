@@ -56,6 +56,7 @@
     "ModuleNotFoundError",
     "SyntaxError"
   ],
+  "testPaths": ["tests/**", "**/test_*.py", "**/*_test.py"],
   "assertPatterns": [
     "^\\s*assert\\b",
     "\\bself\\.assert\\w+\\s*\\(",

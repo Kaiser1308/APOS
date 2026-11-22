@@ -60,6 +60,7 @@
     "SyntaxError",
     "Transform failed"
   ],
+  "testPaths": ["**/*.test.ts", "**/*.spec.ts", "tests/**"],
   "assertPatterns": ["\\bexpect\\s*\\(", "\\bassert(?:\\.\\w+)?\\s*\\(", "\\bexpectTypeOf\\s*\\("],
   "notImplementedPatterns": ["[Nn]ot implemented", "NotImplemented", "TODO: implement"],
   "forbid": [

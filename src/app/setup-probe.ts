@@ -164,6 +164,31 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
         const outcome = probeTool(tool, layer, root, patterns);
         results.push({ part, layer, tool: tool.id, ...outcome });
       }
+  for (const [part, setup] of Object.entries(parsed.setup.parts)) {
+    if (!setup.tests) continue;
+    const patterns = [
+      ...setup.tests.assertPatterns,
+      ...setup.tests.notImplementedPatterns,
+      ...setup.tests.loadErrorPatterns,
+    ];
+    const bad = patterns.filter(pattern => {
+      try {
+        new RegExp(pattern, 'm');
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    results.push({
+      part,
+      layer: 'tests',
+      tool: 'patterns',
+      ok: bad.length === 0,
+      reason: bad.length
+        ? `not a valid regular expression: ${bad.join(', ')}`
+        : `${patterns.length} patterns compile; tests under ${setup.tests.paths.join(', ')}`,
+    });
+  }
   return { sha256: parsed.sha256, ok: results.length > 0 && results.every(item => item.ok), results };
 }
 

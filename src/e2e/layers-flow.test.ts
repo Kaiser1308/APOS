@@ -189,7 +189,7 @@ describe.each([
 
       const shown = await p.invoke('goal', 'show', spec.id);
       await expect(
-        shown.text.replace(/\r\n/g, '\n').replaceAll(fast, '<commit>').replaceAll(locked, '<commit>'),
+        shown.text.replace(/\r\n/g, '\n').trimEnd().replaceAll(fast, '<commit>').replaceAll(locked, '<commit>'),
       ).toMatchFileSnapshot(`./__snapshots__/layers-solo-${label}.txt`);
     },
     900_000,

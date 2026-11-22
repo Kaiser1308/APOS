@@ -1,9 +1,19 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { runCli } from '../cli.js';
 import { jsonCodec } from '../domain/setup-codec.js';
+import { controllerHome } from '../store/event-log.js';
 import { ProjectJournal } from '../store/journal.js';
 import type { GoalState } from '../domain/transitions.js';
 
@@ -101,7 +111,7 @@ export const typescript: Stack = {
   },
   modules: {
     a: {
-      check: 'npx vitest run src/adder.acceptance.test.ts',
+      check: 'npx vitest run adder.acceptance',
       stub: 'src/adder.ts',
       red: "export const add = (a: number, b: number): number => {\n  throw new Error('not implemented');\n};\n",
       done: 'export const add = (a: number, b: number): number => a + b;\n',
@@ -111,7 +121,7 @@ export const typescript: Stack = {
       testId: 'src/adder.acceptance.test.ts::adds',
     },
     b: {
-      check: 'npx vitest run src/suber.acceptance.test.ts',
+      check: 'npx vitest run suber.acceptance',
       stub: 'src/suber.ts',
       red: "export const sub = (a: number, b: number): number => {\n  throw new Error('not implemented');\n};\n",
       done: 'export const sub = (a: number, b: number): number => a - b;\n',
@@ -165,6 +175,16 @@ export function openProject(stack: Stack, cleanup: string[]) {
   };
   /** Runs one command and says what it printed and which exit code it left; a refusal is a code of 1 and its message. */
   const invoke = async (...args: string[]): Promise<Said> => {
+    const said = await run(...args);
+    // APOS_E2E_TRANSCRIPT=<file> keeps what every command printed, for a reader of the real run.
+    if (process.env.APOS_E2E_TRANSCRIPT)
+      appendFileSync(
+        process.env.APOS_E2E_TRANSCRIPT,
+        `$ apos ${args.join(' ').replaceAll(dir, '<repo>')}  # exit ${said.code ?? 0}\n${said.text.replaceAll(dir, '<repo>')}\n`,
+      );
+    return said;
+  };
+  const run = async (...args: string[]): Promise<Said> => {
     if (BIN) {
       const done = spawnSync(process.execPath, [BIN, '--repo', dir, ...args], {
         encoding: 'utf8',
@@ -191,7 +211,8 @@ export function openProject(stack: Stack, cleanup: string[]) {
     return { code, text: out.join('\n') };
   };
   const state = (goalId: string): GoalState => {
-    const opened = ProjectJournal.open(dir, home);
+    // The built binary keeps its state under `<APOS_HOME>/projects/<key>`, the in-process run directly in `home`.
+    const opened = ProjectJournal.open(dir, BIN ? controllerHome(dir, home) : home);
     try {
       return opened.journal.getGoal(goalId)!;
     } finally {

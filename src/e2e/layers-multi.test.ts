@@ -175,7 +175,7 @@ describe.each([
 
       const shown = await p.invoke('goal', 'show', spec.id);
       await expect(
-        shown.text.replace(/\r\n/g, '\n').replaceAll(fixed, '<commit>').replaceAll(locked, '<commit>'),
+        shown.text.replace(/\r\n/g, '\n').trimEnd().replaceAll(fixed, '<commit>').replaceAll(locked, '<commit>'),
       ).toMatchFileSnapshot(`./__snapshots__/layers-multi-${label}.txt`);
     },
     900_000,

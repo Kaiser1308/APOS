@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseSetupObject, setupSha256 } from './project-setup.js';
+import { parseProjectSetup, parseSetupObject, setupSha256 } from './project-setup.js';
+import { jsonCodec } from './setup-codec.js';
 import { UserError } from './errors.js';
 
 const tool = { id: 'vitest', command: 'npx vitest run --reporter=junit --outputFile={report}', format: 'junit' };
@@ -95,5 +96,22 @@ describe('setupSha256', () => {
     expect(setupSha256('a: 1\r\nb: 2\r\n')).toBe(setupSha256('a: 1\nb: 2\n'));
     expect(setupSha256('a: 1\n')).not.toBe(setupSha256('a: 2\n'));
     expect(setupSha256('a')).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('parseProjectSetup', () => {
+  it('reads the text with the codec: v1 legacy text, v2 JSON with a hash of the text, and refuses garbage', () => {
+    expect(parseProjectSetup('schemaVersion: 1\n', jsonCodec)).toEqual({ version: 1 });
+    const text = jsonCodec.stringify(valid);
+    const parsed = parseProjectSetup(text, jsonCodec);
+    expect(parsed).toMatchObject({ version: 2, sha256: setupSha256(text) });
+    expect(() => parseProjectSetup('{ nope', jsonCodec)).toThrow(/cannot be read/);
+    expect(() => parseProjectSetup('{"schemaVersion":9}', jsonCodec)).toThrow(UserError);
+    expect(parseProjectSetup('', jsonCodec)).toEqual({ version: 1 });
+  });
+  it('round-trips what a codec writes', () => {
+    const parsed = parseSetupObject(valid);
+    if (parsed.version !== 2) throw new Error('v2 expected');
+    expect(parseSetupObject(jsonCodec.parse(jsonCodec.stringify(parsed.setup)))).toEqual(parsed);
   });
 });

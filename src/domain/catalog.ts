@@ -56,5 +56,7 @@ export const catalogEntrySchema = z.object({
   forbid: z.array(regex),
   /** Globs of sensitive files that need a Human. */
   needsHuman: z.array(z.string().min(1)),
+  /** Free text for humans: which tool versions the commands were checked against, and what was not. */
+  notes: z.array(z.string()).optional(),
 });
 export type CatalogEntry = z.infer<typeof catalogEntrySchema>;

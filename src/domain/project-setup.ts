@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { catalogToolSchema } from './catalog.js';
 import { UserError } from './errors.js';
+import type { SetupCodec } from './setup-codec.js';
 import { LAYER_IDS, type LayerId } from './layers.js';
 
 export type { LayerId } from './layers.js';
@@ -116,3 +117,19 @@ export function parseSetupObject(value: unknown): ParsedSetup {
 /** sha256 of the setup text with line endings normalised, so Windows and Linux checkouts agree. */
 export const setupSha256 = (text: string): string =>
   createHash('sha256').update(text.replace(/\r\n?/g, '\n')).digest('hex');
+
+export type ParsedSetupText = { version: 1 } | { version: 2; setup: ProjectSetup; sha256: string };
+
+/** Reads the text of `.apos/project.yaml` with the injected codec; `sha256` is of the text, as committed. */
+export function parseProjectSetup(text: string, codec: SetupCodec): ParsedSetupText {
+  let value: unknown;
+  try {
+    value = codec.parse(text);
+  } catch (error) {
+    throw new UserError(
+      `.apos/project.yaml cannot be read: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+    );
+  }
+  const parsed = parseSetupObject(value);
+  return parsed.version === 1 ? parsed : { ...parsed, sha256: setupSha256(text) };
+}

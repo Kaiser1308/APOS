@@ -12,6 +12,9 @@ import type { CatalogEntry } from './catalog.js';
 export const STACKS: CatalogEntry[] = [
   {
     stack: 'typescript',
+    notes: [
+      'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc.',
+    ],
     detect: { files: ['package.json'], contains: { 'package.json': '"vitest"' } },
     layers: {
       // `tsc` and `eslint` are two tools on one layer: the first is the default a draft picks.
@@ -71,6 +74,7 @@ export const STACKS: CatalogEntry[] = [
   },
   {
     stack: 'python',
+    notes: ['verified: pytest 9.0.2 (--junitxml). Not verified: ruff (--output-format sarif), mypy, bandit.'],
     detect: { files: ['pyproject.toml'] },
     layers: {
       L0: [
@@ -130,6 +134,7 @@ export const STACKS: CatalogEntry[] = [
   },
   {
     stack: 'java-gradle',
+    notes: ['Not verified on this machine: Gradle (cleanTest test --tests, report directory build/test-results/test).'],
     detect: { files: ['gradlew'] },
     layers: {
       L0: [{ id: 'compile', command: './gradlew compileJava compileTestJava', format: 'exit' }],
@@ -182,6 +187,7 @@ export const STACKS: CatalogEntry[] = [
   },
   {
     stack: 'java-maven',
+    notes: ['Not verified on this machine: Maven Surefire (-Dtest, -Dsurefire.failIfNoSpecifiedTests).'],
     detect: { files: ['pom.xml'] },
     layers: {
       L0: [{ id: 'compile', command: 'mvn -B -q test-compile', format: 'exit' }],

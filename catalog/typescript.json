@@ -1,0 +1,74 @@
+{
+  "stack": "typescript",
+  "notes": [
+    "verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc."
+  ],
+  "detect": {
+    "files": ["package.json"],
+    "contains": {
+      "package.json": "\"vitest\""
+    }
+  },
+  "layers": {
+    "L0": [
+      {
+        "id": "tsc",
+        "command": "npx tsc --noEmit",
+        "format": "exit"
+      },
+      {
+        "id": "eslint",
+        "command": "npx eslint . --format @microsoft/eslint-formatter-sarif --output-file {report}",
+        "format": "sarif"
+      }
+    ],
+    "L1": [
+      {
+        "id": "vitest",
+        "command": "npx vitest run --reporter=junit --outputFile={report} --exclude \"**/*.{acceptance,integration}.test.ts\"",
+        "format": "junit"
+      }
+    ],
+    "L2": [
+      {
+        "id": "vitest-acceptance",
+        "command": "npx vitest run acceptance.test --reporter=junit --outputFile={report}",
+        "format": "junit",
+        "runOne": "npx vitest run {classname} --reporter=junit --outputFile={report} -t \"{name}\""
+      }
+    ],
+    "L3": [
+      {
+        "id": "vitest-integration",
+        "command": "npx vitest run integration.test --reporter=junit --outputFile={report}",
+        "format": "junit",
+        "runOne": "npx vitest run {classname} --reporter=junit --outputFile={report} -t \"{name}\""
+      }
+    ],
+    "L5": [
+      {
+        "id": "semgrep",
+        "command": "semgrep scan --config auto --sarif-output={report} .",
+        "format": "sarif"
+      }
+    ]
+  },
+  "assertPatterns": ["\\bexpect\\s*\\(", "\\bassert(?:\\.\\w+)?\\s*\\(", "\\bexpectTypeOf\\s*\\("],
+  "notImplementedPatterns": ["[Nn]ot implemented", "NotImplemented", "TODO: implement"],
+  "forbid": [
+    "\\b(?:it|test|describe)\\.(?:skip|only|todo|fails)\\b",
+    "\\b(?:xit|xtest|xdescribe|fit|fdescribe)\\s*\\(",
+    "@ts-(?:ignore|nocheck)",
+    "eslint-disable"
+  ],
+  "needsHuman": [
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "tsconfig*.json",
+    "eslint.config.*",
+    "vitest.config.*",
+    ".github/**"
+  ]
+}

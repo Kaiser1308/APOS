@@ -6,6 +6,10 @@ import { newEvent } from './events.js';
 import { initProject } from './init-project.js';
 import { ToolRunner } from './layer-runner.js';
 import { TestLockService } from './test-lock.js';
+import { AssuranceService } from './assurance-service.js';
+import { GateService } from './gate-service.js';
+import { GitCommitInspector } from './integration.js';
+import { PackageService } from './package-service.js';
 import { loadPinnedSetup } from './pinned-setup.js';
 import { jsonCodec } from '../domain/setup-codec.js';
 import { setupSha256 } from '../domain/project-setup.js';
@@ -62,7 +66,7 @@ export const setupDocument = {
         L2: [{ id: 'acceptance', command: 'node runner.js {report} tests/acceptance', format: 'junit' }],
       },
       needsHuman: ['pyproject.toml'],
-      forbid: [],
+      forbid: ['@skip'],
       tests: {
         paths: ['tests/**'],
         assertPatterns: ['^case\\b'],
@@ -155,7 +159,7 @@ export async function testingProject(
       ...proposal,
       rationale: 'one owner',
       baseCommit: base,
-      paths: ['src/**'],
+      paths: ['src/**', 'tests/unit/**'],
       stubPaths: ['src/stub.txt'],
     }),
   );
@@ -187,3 +191,22 @@ export const goodTests = (goalId: string): Record<string, string> => ({
   'src/stub.txt': 'stub\n',
   [`.apos/goals/${goalId}/tests.json`]: mapFor(goalId),
 });
+
+/** A project whose tests are locked on top of the base: ready for a worker commit to be gated. */
+export async function lockedProject(options: Parameters<typeof testingProject>[0] = {}) {
+  const goal = options.goal ?? { ...spec, checks: [{ ...spec.checks[0]!, command: 'node -e "process.exit(0)"' }] };
+  const p = await testingProject({ ...options, goal });
+  const lockCommit = p.commit(goodTests(p.goalId), 'tests');
+  const locked = await p.service.submit(p.goalId, lockCommit, 'tester');
+  if (!locked.ok) throw new Error(`fixture tests were refused: ${locked.problems.join('; ')}`);
+  const assurance = new AssuranceService({
+    repo: p.dir,
+    runner: p.runner,
+    inspector: new GitCommitInspector(),
+    loadSetup: p.loadSetup,
+  });
+  const gate = new GateService(p.journal, { artifactRoot: p.artifacts, assurance });
+  const packages = new PackageService(p.journal, { gate, repoPath: p.dir });
+  const submit = (commit: string, packageId = 'WP-MAIN') => packages.submit(p.goalId, packageId, commit, 'worker');
+  return { ...p, lockCommit, gate, packages, submit };
+}

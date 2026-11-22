@@ -30,6 +30,7 @@ import type { CommitInspector } from '../ports/commit-inspector.js';
 import { untrustedProtectedFiles } from './protected-milestones.js';
 import { ShellExecutor, type CommandExecutor } from './shell-executor.js';
 import { GitWorktreeFactory, type WorkspaceFactory } from './gate-workspace.js';
+import type { AssuranceService } from './assurance-service.js';
 
 export type { CommandExecutor, ExecResult } from './shell-executor.js';
 export { ShellExecutor } from './shell-executor.js';
@@ -56,6 +57,8 @@ export type GateOptions = {
   /** Logs live outside the managed repo so owners cannot edit or commit them. */
   artifactRoot?: string;
   sourceDigest?: (repoPath: string, goalId: string) => string | undefined;
+  /** The locked-tests, inventory and scope checks of a package gate; without it a gate runs the Goal's checks only. */
+  assurance?: Pick<AssuranceService, 'checks'>;
   now?: () => string;
 };
 
@@ -66,6 +69,7 @@ export class GateService {
   private readonly artifactRoot: string;
   private readonly digest: (repoPath: string, goalId: string) => string | undefined;
   private readonly now: () => string;
+  private readonly assurance?: Pick<AssuranceService, 'checks'>;
 
   constructor(
     private readonly store: GoalRepository,
@@ -85,6 +89,7 @@ export class GateService {
         ? (_repo: string, goalId: string) => store.currentSourceDigest!(goalId)
         : committedSourceDigest);
     this.now = options.now ?? (() => new Date().toISOString());
+    this.assurance = options.assurance;
   }
 
   /** Reruns the Goal's checks on the merge commit, against the target head the merge was made on. */
@@ -141,6 +146,7 @@ export class GateService {
     // APOS's own milestone commits are legitimate changes under .apos/; anything else there is not.
     const guard = protectedCheck(goalId, untrustedProtectedFiles(this.store, goalId, repoPath, head, changedFiles));
     if (guard) checks.push(guard);
+    checks.push(...(this.assurance?.checks(state, item, head, base, changedFiles) ?? []));
     const report: GateReport = {
       gateId: `GATE-${randomUUID()}`,
       goalId,
@@ -152,7 +158,12 @@ export class GateService {
       ...(state.setupVersion === undefined ? {} : { setupVersion: state.setupVersion }),
       phase: 'delivery',
       changedFiles,
-      warnings: gateWarnings({ spec: state.spec, proposal: state.proposal, changedFiles }),
+      warnings: gateWarnings({
+        spec: state.spec,
+        proposal: state.proposal,
+        changedFiles,
+        testLocked: Boolean(state.testLock),
+      }),
       environment: { platform: process.platform, shell: this.executor.shell, node: process.version },
       checks,
       result: summarizeGate(checks),

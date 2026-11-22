@@ -61,9 +61,12 @@ describe('findings and review warnings', () => {
     );
     expect(state).toMatchObject({ status: 'blocked', blocker: { kind: 'product' } });
   });
-  it('warns when the gated diff changes tests, even with no declared risk, and says tests are not locked yet', () => {
+  it('warns when the gated diff changes tests, even with no declared risk, and says the Goal has no locked tests', () => {
     const input = { spec, proposal, changedFiles: ['src/checkin.ts', 'src/checkin.test.ts'] };
-    expect(reviewReasons(input)).toEqual(['tests or oracles changed: src/checkin.test.ts (not locked before phase 3)']);
+    expect(reviewReasons(input)).toEqual([
+      'tests or oracles changed: src/checkin.test.ts (not locked: this Goal has no locked tests)',
+    ]);
+    expect(reviewReasons({ ...input, testLocked: true })).toEqual([]);
     expect(gateWarnings(input)[0]).toMatch(/^needs attention: tests or oracles changed/);
     expect(reviewReasons({ ...input, changedFiles: ['src/checkin.ts'] })).toEqual([]);
   });

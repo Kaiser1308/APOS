@@ -1,5 +1,4 @@
-import { join } from 'node:path';
-import { matchesAny } from '../domain/glob.js';
+import { matchesAny, rootedGlobs } from '../domain/glob.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 import { acceptanceProof, needsTest } from '../domain/test-plan.js';
 import {
@@ -40,10 +39,6 @@ export type InspectInput = {
   runner: ToolRunner;
 };
 
-/** Globs of one part's tests, made relative to the repo. */
-const partGlobs = (root: string, paths: string[]) =>
-  paths.map(path => (root === '.' ? path : join(root, path).replaceAll('\\', '/')));
-
 /**
  * Looks at one commit of tests the way `apos tests submit` and `revise` both need: what it touches, whether the map
  * covers every criterion, whether every test loads and is red (or green) for the right reason, whether two runs agree.
@@ -66,7 +61,7 @@ export function inspectTests(input: InspectInput): Inspection {
   const mapPath = testMapPath(goalId);
   const changed = inspector.files(repo, commit, from);
   const owner = (file: string) =>
-    testParts.find(([, part]) => matchesAny(file, partGlobs(part.root, part.tests!.paths)));
+    testParts.find(([, part]) => matchesAny(file, rootedGlobs(part.root, part.tests!.paths)));
   const foreign = untrustedProtectedFiles(input.store, goalId, repo, commit, changed);
   const testFiles: string[] = [];
   for (const file of changed) {

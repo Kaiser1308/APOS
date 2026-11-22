@@ -82,11 +82,17 @@ export class PackageService {
         `${packageId} is ${item.status}: only a pending, red or needs-human package can be submitted`,
       );
     if (!/^[0-9a-fA-F]{40,64}$/.test(commit)) throw new UserError('Submit the full commit sha');
-    const base = state.proposal?.baseCommit;
+    // With locked tests every package is gated on top of the commit that locked them.
+    const planBase = state.proposal?.baseCommit;
+    const base = state.testLock?.commit ?? planBase;
     if (!base) throw new UserError(`${goalId} has no proposal.baseCommit to gate against`);
     if (!inspector.exists(repoPath, commit)) throw new UserError(`Commit ${commit} does not exist in this repository`);
     if (!inspector.contains(repoPath, base, commit))
-      throw new UserError(`Commit ${commit} does not contain the base ${base} of ${packageId}`);
+      throw new UserError(
+        state.testLock
+          ? `Commit ${commit} does not contain the commit that locked the tests (${base}): rebase ${packageId} onto it, then submit again`
+          : `Commit ${commit} does not contain the base ${base} of ${packageId}`,
+      );
 
     const notGreen = item.spec.dependencies.filter(dep => state.packages?.[dep]?.status !== 'green');
     if (notGreen.length)

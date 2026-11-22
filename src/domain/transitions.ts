@@ -643,7 +643,10 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           FULL_SHA.test(gate.baseCommit ?? ''),
         'Gate report for current Goal version and full commits required',
       );
-      requireThat(['green', 'red', 'unverifiable', 'pending'].includes(gate.result), 'Gate result required');
+      requireThat(
+        ['green', 'red', 'unverifiable', 'needs-human', 'pending'].includes(gate.result),
+        'Gate result required',
+      );
       requireThat(gate.attemptKey === attemptKey(state), 'Gate was started for an earlier package attempt; rerun it');
       return { ...state, gate };
     }

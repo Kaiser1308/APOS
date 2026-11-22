@@ -29,3 +29,7 @@ export function globsOverlap(a: string, b: string): boolean {
   const [x, y] = [normal(a), normal(b)];
   return x === y || globToRegExp(x).test(y) || globToRegExp(y).test(x);
 }
+
+/** Globs written relative to a part's `root`, made relative to the repo. */
+export const rootedGlobs = (root: string, globs: string[]): string[] =>
+  globs.map(glob => (root === '.' ? glob : `${root}/${glob}`.replaceAll('//', '/')));

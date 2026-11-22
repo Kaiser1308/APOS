@@ -1,5 +1,7 @@
 import { join } from 'node:path';
 import { loadPinnedSetup } from '../app/pinned-setup.js';
+import { AssuranceService } from '../app/assurance-service.js';
+import { GitCommitInspector } from '../app/integration.js';
 import { ToolRunner } from '../app/layer-runner.js';
 import { TestLockService } from '../app/test-lock.js';
 import { UserError } from '../domain/errors.js';
@@ -12,14 +14,28 @@ export function pinnedSetupOf(ctx: CliContext, journal: ProjectJournal, setupVer
   return loadPinnedSetup(ctx.repo(), journal.setupHistory(), setupVersion, ctx.options.codec ?? jsonCodec);
 }
 
-/** Wires the test-lock service to the repo, the Goal's pinned setup and a runner whose logs stay outside the repo. */
-export function testLockService(ctx: CliContext, journal: ProjectJournal, goalId: string): TestLockService {
+const runnerFor = (ctx: CliContext, journal: ProjectJournal, goalId: string, dir: string) => {
   const gate = ctx.options.gate;
-  const runner = new ToolRunner(ctx.repo(), {
-    artifactRoot: join(gate?.artifactRoot ?? journal.artifactRoot(), goalId, 'tests'),
+  return new ToolRunner(ctx.repo(), {
+    artifactRoot: join(gate?.artifactRoot ?? journal.artifactRoot(), goalId, dir),
     workspaces: gate?.workspaces,
     executor: gate?.executor,
   });
+};
+
+/** The locked-tests, inventory and scope checks of a package gate, wired to the Goal's pinned setup. */
+export function assuranceService(ctx: CliContext, journal: ProjectJournal, goalId: string): AssuranceService {
+  return new AssuranceService({
+    repo: ctx.repo(),
+    runner: runnerFor(ctx, journal, goalId, 'gate-runs'),
+    inspector: ctx.options.inspector ?? new GitCommitInspector(),
+    loadSetup: state => pinnedSetupOf(ctx, journal, state.setupVersion),
+  });
+}
+
+/** Wires the test-lock service to the repo, the Goal's pinned setup and a runner whose logs stay outside the repo. */
+export function testLockService(ctx: CliContext, journal: ProjectJournal, goalId: string): TestLockService {
+  const runner = runnerFor(ctx, journal, goalId, 'tests');
   return new TestLockService(journal, {
     repoPath: ctx.repo(),
     runner,

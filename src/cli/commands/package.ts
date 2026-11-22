@@ -3,6 +3,7 @@ import { withGateLease } from '../../store/lease.js';
 import { GateService } from '../../app/gate-service.js';
 import { PackageService } from '../../app/package-service.js';
 import { parseWorkPackage } from '../../domain/packages.js';
+import { assuranceService } from '../test-lock-wiring.js';
 import type { CliContext } from '../context.js';
 
 export function registerPackage(ctx: CliContext): void {
@@ -54,7 +55,11 @@ export function registerPackage(ctx: CliContext): void {
     .description('Lead: gate this commit now; exits 0 green, 1 red, 3 needs a Human or could not be verified')
     .action((goalId: string, packageId: string, flags: { commit: string; by: string; json?: boolean }) =>
       withJournalAsync(async journal => {
-        const gate = new GateService(journal, { inspector: options.inspector, ...options.gate });
+        const gate = new GateService(journal, {
+          inspector: options.inspector,
+          ...options.gate,
+          assurance: assuranceService(ctx, journal, goalId),
+        });
         const service = new PackageService(journal, { gate, repoPath: repo(), inspector: options.inspector });
         const held = await withGateLease(ctx.home(), () => service.submit(goalId, packageId, flags.commit, flags.by));
         if (!held.ran)

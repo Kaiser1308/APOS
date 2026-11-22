@@ -18,6 +18,8 @@ Commands:
   tests            the tester submits acceptance tests; APOS checks and locks
                    them
   package          the Lead plans packages; delivery goes through `submit`
+  exception        approve what the gate cannot decide: a sensitive file
+                   changed, or locked tests weakened
   integration
   gate             controller-run checks on exact commits; owner claims are not
                    evidence

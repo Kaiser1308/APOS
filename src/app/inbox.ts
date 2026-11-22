@@ -1,3 +1,4 @@
+import { hasException } from '../domain/exceptions.js';
 import { orphanRequirements } from '../domain/plan.js';
 import { effectiveStatus, type GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
@@ -66,7 +67,11 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
             ? (state.manualConfirmations ?? []).some(c => c.checkId === check.checkId && c.deliveryCommit === commit)
               ? `manual check ${check.checkId} is confirmed on ${commit}: submit again`
               : `manual check ${check.checkId} awaits confirmation on ${commit} (apos gate confirm), then submit again`
-            : `${check.checkId} ${check.status}: ${check.reason}`,
+            : check.status === 'needs-human'
+              ? hasException(state, 'needs-human', packageId, commit)
+                ? `exception approved for ${packageId} on ${commit}: submit again with the same commit`
+                : `${check.checkId} needs-human: ${check.reason}. Approve with: apos exception approve ${goalId} --kind needs-human --ref ${packageId} --reason <why> (--by agent:<name> | --human)`
+              : `${check.checkId} ${check.status}: ${check.reason}`,
         );
       items.push({
         goalId,
@@ -75,6 +80,22 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
         at: item.gate.at,
       });
     }
+    if (
+      state.pendingRevision &&
+      !hasException(state, 'tests-weakened', state.pendingRevision.commit, state.pendingRevision.commit)
+    )
+      items.push({
+        goalId,
+        kind: 'needs-decision',
+        detail: JSON.stringify({
+          why: 'tests-revision-pending',
+          commit: state.pendingRevision.commit,
+          reason: state.pendingRevision.reason,
+          problems: state.pendingRevision.problems,
+          approve: `apos exception approve ${goalId} --kind tests-weakened --ref ${state.pendingRevision.commit} --reason <why> (--by agent:<name> | --human)`,
+        }),
+        at: lastOf('tests-revision-pending') ?? events.at(-1)?.at,
+      });
     const answered = new Set(
       events
         .filter(item => item.type === 'decision-logged')

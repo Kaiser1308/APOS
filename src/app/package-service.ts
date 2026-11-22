@@ -3,7 +3,9 @@ import { newEvent } from './events.js';
 import { minutesOverBudget, type GoalEventType, type GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
-import type { GateResult } from '../domain/gate.js';
+import { summarizeGate, type GateReport, type GateResult } from '../domain/gate.js';
+import { SCOPE_CHECK } from '../domain/assurance.js';
+import { randomUUID } from 'node:crypto';
 import { UserError } from '../domain/errors.js';
 import type { GateService } from './gate-service.js';
 import { GitCommitInspector } from './integration.js';
@@ -59,6 +61,42 @@ export class PackageService {
   }
 
   /**
+   * A package that needed a human on this very commit and has an approved exception for it is judged again from the
+   * gate that already ran, with the sensitive-file decision marked approved: nothing is run twice for the same commit.
+   */
+  private approvedReport(state: GoalState, packageId: string, commit: string): GateReport | undefined {
+    const item = state.packages?.[packageId];
+    const prior = item?.gate;
+    if (!item || item.status !== 'needs-human' || prior?.result !== 'needs-human') return undefined;
+    if (prior.deliveryCommit.toLowerCase() !== commit.toLowerCase()) return undefined;
+    const approval = [...(state.exceptions ?? [])]
+      .reverse()
+      .find(
+        entry =>
+          entry.kind === 'needs-human' &&
+          entry.ref === packageId &&
+          entry.commit.toLowerCase() === commit.toLowerCase(),
+      );
+    if (!approval) return undefined;
+    const checks = prior.checks.map(check =>
+      check.checkId === SCOPE_CHECK && check.status === 'needs-human'
+        ? {
+            ...check,
+            status: 'pass' as const,
+            reason: `${check.reason} — approved by ${approval.by}: ${approval.reason}`,
+          }
+        : check,
+    );
+    return {
+      ...prior,
+      gateId: `GATE-${randomUUID()}`,
+      checks,
+      result: summarizeGate(checks),
+      at: new Date().toISOString(),
+    };
+  }
+
+  /**
    * Runs the gate on `commit` right now and records the outcome. The commit is checked first and the gate runs
    * before anything is written, so an invalid commit or an interrupted gate leaves the log as it was. A solo
    * package that goes green also verifies the Goal.
@@ -100,7 +138,8 @@ export class PackageService {
     const checkedAt = new Date().toISOString();
     this.enforceTimeBudget(goalId, state, checkedAt);
 
-    const report = gate.runPackage(goalId, packageId, repoPath, commit, base);
+    const approved = this.approvedReport(state, packageId, commit);
+    const report = approved ?? gate.runPackage(goalId, packageId, repoPath, commit, base);
     // Stamped with the time of the budget check above, so a long gate cannot push the submission past the budget.
     const submitted = newEvent(
       goalId,

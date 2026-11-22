@@ -1,0 +1,75 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ExceptionService } from './exceptions.js';
+import { cleanProjects, lockedProject } from './test-lock.test-support.js';
+
+afterEach(cleanProjects);
+
+async function needsHuman() {
+  const p = await lockedProject();
+  const commit = p.commit({ 'src/impl.txt': 'add\n', 'pyproject.toml': '[project]\n' }, 'deps');
+  const first = await p.submit(commit);
+  expect(first.result).toBe('needs-human');
+  return { p, commit, service: new ExceptionService(p.journal) };
+}
+
+describe('exception approve', () => {
+  it("an agent's approval makes the same commit green on resubmit without running the gate again, and is logged as agent:<name>", async () => {
+    const { p, commit, service } = await needsHuman();
+    service.approve(p.goalId, {
+      kind: 'needs-human',
+      ref: 'WP-MAIN',
+      reason: 'lockfile bump reviewed',
+      by: 'agent:lead',
+    });
+    expect(p.state().exceptions).toMatchObject([{ kind: 'needs-human', ref: 'WP-MAIN', commit, by: 'agent:lead' }]);
+    const run = vi.spyOn(p.gate, 'runPackage');
+    const again = await p.submit(commit);
+    expect(run).not.toHaveBeenCalled();
+    expect(again.result).toBe('green');
+    expect(p.state().status).toBe('verified');
+    const scope = p.state().packages?.['WP-MAIN']?.gate?.checks.find(check => check.checkId === 'APOS-SCOPE');
+    expect(scope).toMatchObject({
+      status: 'pass',
+      reason: expect.stringContaining('approved by agent:lead: lockfile bump reviewed') as unknown,
+    });
+  }, 180_000);
+
+  it('does not carry to another commit: the gate runs and asks again', async () => {
+    const { p, service } = await needsHuman();
+    service.approve(p.goalId, { kind: 'needs-human', ref: 'WP-MAIN', reason: 'ok', by: 'agent:lead' });
+    const other = p.commit({ 'pyproject.toml': '[project]\nname = "x"\n' }, 'another change');
+    const run = vi.spyOn(p.gate, 'runPackage');
+    expect((await p.submit(other)).result).toBe('needs-human');
+    expect(run).toHaveBeenCalledOnce();
+  }, 240_000);
+
+  it('records the Human with their confirmation', async () => {
+    const { p, service } = await needsHuman();
+    service.approve(p.goalId, {
+      kind: 'needs-human',
+      ref: 'WP-MAIN',
+      reason: 'ok',
+      by: 'human',
+      confirmation: { by: 'on-behalf', onBehalf: 'item 3' },
+    });
+    expect(p.state().exceptions?.[0]).toMatchObject({ by: 'human', confirmation: { by: 'on-behalf' } });
+  }, 120_000);
+
+  it('refuses what is not waiting: a green package, an unknown kind, a bad approver, floor-reduced, an empty reason', async () => {
+    const p = await lockedProject();
+    const service = new ExceptionService(p.journal);
+    const ask = (over: object) => () =>
+      service.approve(p.goalId, { kind: 'needs-human', ref: 'WP-MAIN', reason: 'r', by: 'agent:lead', ...over });
+    expect(ask({})).toThrow(/WP-MAIN is pending: only a package that needs a human/);
+    expect(ask({ kind: 'nope' })).toThrow(/--kind is one of/);
+    expect(ask({ by: 'lead' })).toThrow(/--by is agent:<name>/);
+    expect(ask({ kind: 'floor-reduced' })).toThrow(/reserved for phase 4/);
+    expect(ask({ reason: ' ' })).toThrow(/--reason is required/);
+    expect(ask({ kind: 'tests-weakened', ref: 'a'.repeat(40) })).toThrow(
+      /revision waiting for approval: there is none/,
+    );
+    expect(() => service.approve('GOAL-NOPE', { kind: 'needs-human', ref: 'x', reason: 'r', by: 'agent:x' })).toThrow(
+      /Goal not found/,
+    );
+  }, 120_000);
+});

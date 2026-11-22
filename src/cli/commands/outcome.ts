@@ -7,6 +7,7 @@ import { DEFAULT_UI_PORT, startUi } from '../../ui/server.js';
 import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
 import { controllerHome } from '../../store/event-log.js';
+import { closeProblems } from '../../domain/transitions.js';
 import { UserError } from '../../domain/errors.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
@@ -28,6 +29,9 @@ export function registerOutcome(ctx: CliContext): void {
         const state = journal.getGoal(id);
         if (decision === 'close') {
           if (state?.status !== 'verified') throw new Error('Verified Goal required before closing');
+          // Before any merge: a close that is going to be refused must not have merged anything first.
+          const problems = closeProblems(state);
+          if (problems.length) throw new UserError(problems.join('; '));
           if (flags.mergeTo) {
             const merges = new MergeService(journal);
             merges.authorize(id, flags.mergeTo, flags.by ?? 'human');

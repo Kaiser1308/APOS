@@ -1,3 +1,5 @@
+> **Lưu trữ (lịch sử).** Kế hoạch của APOS v2, mô tả tầng điều phối agent đã bị bỏ ở v3 đợt 1. Không mô tả code hiện hành.
+
 # GitHub Issues #2–#13 Fix Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

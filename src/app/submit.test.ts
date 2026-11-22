@@ -160,9 +160,9 @@ describe('package submit', () => {
 
   it.each([
     ['ask', 'blocked', /is blocked: time budget exhausted/],
-    ['stop', 'stopped', /stopped: time budget exhausted/],
+    ['stop', 'executing', /overrun policy is stop/],
   ] as const)(
-    'with overrun %s, refuses a submission past the approved minutes and leaves it %s',
+    'with overrun %s, refuses a submission past the approved minutes and leaves the Goal %s',
     async (policy, status, message) => {
       const { commit, service, journal, types } = await project(3, undefined, {
         selectedAgoMinutes: 300,
@@ -172,6 +172,7 @@ describe('package submit', () => {
       await expect(service.submit(spec.id, 'WP-MAIN', good, 'lead')).rejects.toThrow(message);
       expect(journal.getGoal(spec.id)?.status).toBe(status);
       expect(types()).not.toContain('package-submitted');
+      expect(types()).not.toContain('outcome-stopped');
     },
     60_000,
   );

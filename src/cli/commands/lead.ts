@@ -10,7 +10,8 @@ export function registerLead(ctx: CliContext): void {
   lead
     .command('propose')
     .requiredOption('--file <json>')
-    .action(({ file }: { file: string }) =>
+    .option('--by <name>', 'who proposes, for the log', 'lead')
+    .action(({ file, by }: { file: string; by: string }) =>
       withJournal(journal => {
         const parsed = parseExecutionProposal(readJsonFile(file));
         assertProposalRationale(parsed);
@@ -29,7 +30,9 @@ export function registerLead(ctx: CliContext): void {
         const mapped = new Set(proposal.acceptanceMapping.map(item => item.acceptanceId));
         if (state.spec.acceptance.some(item => !mapped.has(item.id)))
           throw new Error('Every Goal acceptance criterion needs a verification mapping');
-        journal.append(newEvent(proposal.goalId, state.proposal ? 'proposal-revised' : 'proposal-drafted', proposal));
+        journal.append(
+          newEvent(proposal.goalId, state.proposal ? 'proposal-revised' : 'proposal-drafted', { ...proposal, by }),
+        );
         write(`Proposed ${proposal.id}`);
       }),
     );

@@ -23,35 +23,36 @@ export class PackageService {
     this.store.append(newEvent(goalId, type, data));
   }
 
-  add(goalId: string, value: unknown, reason?: string): WorkPackageSpec {
+  add(goalId: string, value: unknown, reason?: string, by = 'lead'): WorkPackageSpec {
     const spec = parseWorkPackage(value);
     const state = this.store.getGoal(goalId);
     const drafting = state?.status === 'planned' && reason === undefined;
-    this.record(goalId, drafting ? 'package-added' : 'package-plan-added', drafting ? spec : { spec, reason });
+    this.record(goalId, drafting ? 'package-added' : 'package-plan-added', drafting ? spec : { spec, reason, by });
     return spec;
   }
 
-  remove(goalId: string, packageId: string, reason: string): void {
-    this.record(goalId, 'package-removed', { packageId, reason });
+  remove(goalId: string, packageId: string, reason: string, by = 'lead'): void {
+    this.record(goalId, 'package-removed', { packageId, reason, by });
   }
 
-  revise(goalId: string, value: unknown, reason: string): WorkPackageSpec {
+  revise(goalId: string, value: unknown, reason: string, by = 'lead'): WorkPackageSpec {
     const spec = parseWorkPackage(value);
-    this.record(goalId, 'package-revised', { spec, reason });
+    this.record(goalId, 'package-revised', { spec, reason, by });
     return spec;
   }
 
-  /** Past the approved minutes, nothing more is gated: the Human decides (`ask`) or the Goal stops (`stop`). */
-  private enforceTimeBudget(goalId: string, state: GoalState): void {
-    const over = minutesOverBudget(state, new Date().toISOString());
+  /**
+   * Past the approved minutes nothing more is gated. `ask` blocks the Goal so the Human sees it in the inbox; `stop`
+   * only refuses (and writes nothing): ending a Goal stays the Human's decision, and raising the budget
+   * (`goal appetite`) lets submissions continue.
+   */
+  private enforceTimeBudget(goalId: string, state: GoalState, at: string): void {
+    const over = minutesOverBudget(state, at);
     if (!over) return;
-    const policy = state.appetite?.overrun ?? 'ask';
-    if (policy === 'stop') {
-      this.store.append(
-        newEvent(goalId, 'outcome-stopped', { by: 'budget', reason: `time budget exhausted: ${over}` }),
+    if ((state.appetite?.overrun ?? 'ask') === 'stop')
+      throw new UserError(
+        `${goalId}: time budget exhausted (${over}) and the overrun policy is stop: no more submissions. Raise the budget with \`apos goal appetite\` or stop the Goal`,
       );
-      throw new UserError(`${goalId} stopped: time budget exhausted (${over}); overrun policy is stop`);
-    }
     this.store.append(newEvent(goalId, 'blocked', { kind: 'external', note: `time budget exhausted: ${over}` }));
     throw new UserError(
       `${goalId} is blocked: time budget exhausted (${over}). Raise it with \`apos goal appetite\` and resolve the blocker, or stop the Goal`,
@@ -82,21 +83,26 @@ export class PackageService {
         `${packageId} is ${item.status}: only a pending, red or needs-human package can be submitted`,
       );
     if (!/^[0-9a-fA-F]{40,64}$/.test(commit)) throw new UserError('Submit the full commit sha');
-    this.enforceTimeBudget(goalId, state);
     const base = state.proposal?.baseCommit;
     if (!base) throw new UserError(`${goalId} has no proposal.baseCommit to gate against`);
     if (!inspector.exists(repoPath, commit)) throw new UserError(`Commit ${commit} does not exist in this repository`);
     if (!inspector.contains(repoPath, base, commit))
       throw new UserError(`Commit ${commit} does not contain the base ${base} of ${packageId}`);
 
+    const notGreen = item.spec.dependencies.filter(dep => state.packages?.[dep]?.status !== 'green');
+    if (notGreen.length)
+      throw new UserError(`${packageId} depends on ${notGreen.join(', ')}, which must be green first`);
+    const checkedAt = new Date().toISOString();
+    this.enforceTimeBudget(goalId, state, checkedAt);
+
     const report = gate.runPackage(goalId, packageId, repoPath, commit, base);
-    const submitted = newEvent(goalId, 'package-submitted', {
-      packageId,
-      version: item.spec.version,
-      commit,
-      base,
-      by,
-    });
+    // Stamped with the time of the budget check above, so a long gate cannot push the submission past the budget.
+    const submitted = newEvent(
+      goalId,
+      'package-submitted',
+      { packageId, version: item.spec.version, commit, base, by },
+      checkedAt,
+    );
     this.store.append(submitted);
     this.store.append(
       newEvent(goalId, 'package-gate-recorded', {

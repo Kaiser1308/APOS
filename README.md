@@ -233,7 +233,7 @@ The **appetite** (`size`, `maxWallMinutes`, `maxAttempts`, `overrun`) is kept on
 3. Records `package-submitted` and `package-gate-recorded` **after** the gate finishes. A Ctrl-C or a timeout leaves the log untouched and the package submittable again.
 4. **Green:** the package is `green`; for Solo the Goal becomes `verified` in the same command. **Red:** the attempt is counted; past `--max-attempts` the Goal is `blocked` and only the Human can go on. **`unverifiable`** (flaky, hung or unrunnable checks, a manual check waiting) leaves the package `needs-human` and no attempt is spent; after the Human acts (`gate confirm`), submit again.
 
-The wall-clock budget runs from `goal select` to `verified`. Past it, `package submit` refuses: with `--overrun ask` the Goal is blocked and the Human decides (raise it with `goal appetite`), with `--overrun stop` the Goal is stopped.
+The wall-clock budget runs from `goal select` to `verified`. Past it, `package submit` refuses: with `--overrun ask` the Goal is blocked and the Human decides (raise it with `goal appetite`), with `--overrun stop` the submission is refused and nothing is written. Ending the Goal stays the Human's call (`outcome stop`).
 
 A green gate also prints **warnings** (`needs attention: ...`) when the diff changes tests or oracles, shared paths or the files the checks run. They block nothing and also appear in `apos inbox` and the UI. See [Limits](#limits).
 

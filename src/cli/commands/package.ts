@@ -12,10 +12,11 @@ export function registerPackage(ctx: CliContext): void {
     .command('add')
     .requiredOption('--file <json>')
     .requiredOption('--reason <text>')
-    .action(({ file, reason }: { file: string; reason: string }) =>
+    .option('--by <name>', 'who plans, for the log', 'lead')
+    .action(({ file, reason, by }: { file: string; reason: string; by: string }) =>
       withJournal(journal => {
         const spec = parseWorkPackage(readJsonFile(file));
-        new PackageService(journal).add(spec.goalId, spec, reason);
+        new PackageService(journal).add(spec.goalId, spec, reason, by);
         write(`Drafted ${spec.id}`);
       }),
     );
@@ -24,9 +25,10 @@ export function registerPackage(ctx: CliContext): void {
     .argument('<goalId>')
     .argument('<packageId>')
     .requiredOption('--reason <text>')
-    .action((goalId: string, packageId: string, { reason }: { reason: string }) =>
+    .option('--by <name>', 'who plans, for the log', 'lead')
+    .action((goalId: string, packageId: string, { reason, by }: { reason: string; by: string }) =>
       withJournal(journal => {
-        new PackageService(journal).remove(goalId, packageId, reason);
+        new PackageService(journal).remove(goalId, packageId, reason, by);
         write(`Removed ${packageId}`);
       }),
     );
@@ -35,9 +37,10 @@ export function registerPackage(ctx: CliContext): void {
     .argument('<goalId>')
     .requiredOption('--file <json>')
     .requiredOption('--reason <text>')
-    .action((goalId: string, { file, reason }: { file: string; reason: string }) =>
+    .option('--by <name>', 'who plans, for the log', 'lead')
+    .action((goalId: string, { file, reason, by }: { file: string; reason: string; by: string }) =>
       withJournal(journal => {
-        const spec = new PackageService(journal).revise(goalId, readJsonFile(file), reason);
+        const spec = new PackageService(journal).revise(goalId, readJsonFile(file), reason, by);
         write(`Revised ${spec.id} v${spec.version}`);
       }),
     );

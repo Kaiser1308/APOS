@@ -43,7 +43,7 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | Crash between the two writes of a submission | the package is `submitted`; submitting again finishes it | `submit.test.ts` › can finish a submission whose gate record was lost … |
 | Gate for another commit or attempt, or none submitted | rejected | `transitions.test.ts` › rejects a gate for another commit or attempt … |
 | Unverifiable gate | package `needs-human`, no attempt spent | `transitions.test.ts` › sends an unverifiable gate to a Human … |
-| Past the approved minutes | `ask`: Goal blocked; `stop`: Goal stopped; nothing is gated | `submit.test.ts` › with overrun ask / stop …; `transitions.test.ts` › refuses a submission after the approved minutes |
+| Past the approved minutes | `ask`: Goal blocked; `stop`: refused, nothing written; nothing is gated | `submit.test.ts` › with overrun ask / stop …; `transitions.test.ts` › refuses a submission after the approved minutes |
 | Solo Goal verified without a green package | refused | `transitions.test.ts` › refuses to verify a Solo Goal whose package is not green |
 | Two packages, integration gate | verified only on a green integration gate that contains every package commit | `integration.test.ts`; `v3-flow.test.ts` › runs two packages, an integration gate … |
 

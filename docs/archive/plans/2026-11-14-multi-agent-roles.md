@@ -1,3 +1,5 @@
+> **Lưu trữ (lịch sử).** Kế hoạch của APOS v2, mô tả tầng điều phối agent đã bị bỏ ở v3 đợt 1. Không mô tả code hiện hành.
+
 # Mỗi vai một agent: kế hoạch triển khai
 
 > **Cho agent thực thi:** BẮT BUỘC dùng superpowers:subagent-driven-development (khuyên dùng) hoặc superpowers:executing-plans để làm từng task. Các bước dùng checkbox (`- [ ]`).

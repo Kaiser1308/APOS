@@ -64,7 +64,8 @@ Design: [`docs/superpowers/specs/2026-11-22-apos-v3-design.md`](docs/superpowers
 | **PM + Human** | WHAT: which Goals, outcome, acceptance, budget | `goal create --source`, **gate A** `goal approve` |
 | **Human** | Which approved Goal is worked next | **gate B** `goal select` |
 | **Lead** (agent or person) | HOW: Solo or Multi-WP, packages, base commit. No Human approval | `lead propose`, `package add`, `lead commit` |
-| **Whoever writes the code** | Commits on top of the plan's base commit | their own tools; APOS is not involved |
+| **Tester** (a separate agent) | Acceptance tests and stubs before any code, for a Goal pinned to a setup that says where tests are | `tests submit`, `tests revise` |
+| **Whoever writes the code** | Commits on top of the commit that locked the tests (or the plan's base commit) | their own tools; APOS is not involved |
 | **APOS** (no LLM) | Machine checks of the plan, the gate on each submitted commit, verification, budget | `package submit`, `integration gate`, `integration complete` |
 | **Human** | Whether to close (and merge) | **gate D** `outcome close [--merge-to <branch>]`, `revise`, `stop` |
 
@@ -80,7 +81,8 @@ flowchart TD
     subgraph Lead["Lead (outside APOS)"]
         D --> E[lead propose<br/>Solo or Multi-WP, baseCommit]
         E --> F[lead commit<br/>APOS checks the plan]
-        F --> G[code is written on a commit<br/>that contains baseCommit]
+        F --> T[tester: tests + stubs<br/>tests submit: red for the right reason, then locked]
+        T --> G[code is written on a commit<br/>that contains the locked commit]
     end
     subgraph Apos["APOS"]
         G --> I{package submit<br/>gate in a fresh checkout}
@@ -140,7 +142,10 @@ apos goal select GOAL-001
 
 # 4. The Lead proposes a plan, naming the commit the work starts from, and commits it. APOS checks the plan.
 apos lead propose --file execution.json     # execution.json carries "baseCommit": "<git rev-parse HEAD>"
-apos lead commit GOAL-001
+apos lead commit GOAL-001                   # a Goal pinned to a setup with tests.paths goes to "testing"
+
+# 4b. A tester (another agent) commits acceptance tests, stubs that raise "not implemented", and .apos/goals/GOAL-001/tests.json.
+apos tests submit GOAL-001 --commit <sha>   # exit 1 lists every problem; exit 0 locks the tests
 
 # 5. Get the code written on a commit that contains baseCommit, then submit it. The gate runs inside the command.
 apos package submit GOAL-001 WP-MAIN --commit <sha>      # exit 0 green (Goal verified), 1 red, 3 needs a Human / unverifiable
@@ -235,6 +240,8 @@ The **appetite** (`size`, `maxWallMinutes`, `maxAttempts`, `overrun`) is kept on
 
 The wall-clock budget runs from `goal select` to `verified`. Past it, `package submit` refuses: with `--overrun ask` the Goal is blocked and the Human decides (raise it with `goal appetite`), with `--overrun stop` the submission is refused and nothing is written. Ending the Goal stays the Human's call (`outcome stop`).
 
+With locked tests (see [Locked tests](#locked-tests)) the gate adds three checks, `APOS-LOCKED`, `APOS-INVENTORY` and `APOS-SCOPE`, and the base of the package is the commit that locked the tests.
+
 A green gate also prints **warnings** (`needs attention: ...`) when the diff changes tests or oracles, shared paths or the files the checks run. They block nothing and also appear in `apos inbox` and the UI. See [Limits](#limits).
 
 ### Multi-WP
@@ -248,6 +255,20 @@ Chosen by the Lead when one session is too small. `lead propose` then `package a
 ### Closing
 
 `outcome close` needs the Goal `verified` **and** its verified commit to be the commit of the last green gate (the `WP-MAIN` gate for Solo, the integration gate for Multi-WP). A different commit, a red or missing gate: refused, `--on-behalf` included. `--merge-to <branch>` authorizes one merge of exactly that commit and reruns the gate on the merge; if that gate is red the Goal stays `verified`.
+
+## Locked tests
+
+For a Goal pinned to a setup whose parts say where their tests are (`tests.paths`, copied from the catalogue at draft time) and that has at least one criterion proved by a test, `lead commit` puts the Goal in **`testing`** instead of `executing`. A Goal without such a setup skips this stage and runs as in phases 1 and 2; `apos goal show <id>` then says `không có khoá test`.
+
+1. **The tester** (an agent that does not write the code) commits, on top of the plan's `baseCommit`, tests for every criterion that needs one, empty **stubs** for the public entries (the plan's `stubPaths`) that raise "not implemented", and `.apos/goals/<id>/tests.json` (`[{acceptanceId, part, layer: L2|L3|L4, testIds}]`, ids as the layer's report gives them). A criterion has a `proof`: `red-green` (default), `stays-green` (refactors) or `manual`; optional `given`, `when`, `then` describe it.
+2. **`apos tests submit <goalId> --commit <sha>`** runs the layers of the mapped tests at that commit, twice, and checks in order, reporting every problem: the commit contains the plan base; the diff touches only test files, declared stubs and `tests.json`; every criterion that needs a test has one; every mapped test is in the report; a `red-green` test **fails** (or errors with the stack's "not implemented" pattern) and does not match the stack's load-error patterns (a test that is already green, or red because it never loaded, is refused and named); a `stays-green` test passes; two runs agree. If everything holds it records `tests-locked` (commit, sha256 of every test file, a count of assertions per file, the map). If not, nothing is written.
+3. **Packages** are now gated on top of the locked commit (a commit that does not contain it is refused with "rebase onto it"), and the gate adds: **`APOS-LOCKED`** (no locked file differs by a byte, deleted included, and the package's mapped tests pass on a full run of their layer), **`APOS-INVENTORY`** (every test that ran at the base, L1 included, is still there and not skipped; no `forbid` pattern in an added line) and **`APOS-SCOPE`** (no file changed outside the package's `paths` and stubs; a file that matches the setup's `needsHuman` makes the package **`needs-human`**, exit 3, instead of red).
+4. **Exceptions.** `apos exception approve <goalId> --kind needs-human|tests-weakened --ref <package|commit> --reason <text> (--by agent:<name> | --human)`. An agent may approve on the Human's behalf (logged as `agent:<name>`); `--human` needs a terminal or `--on-behalf`. A `needs-human` exception for a package and commit makes the same commit green on submit without running the gate again; it waits in `apos inbox` until then. `floor-reduced` is in the schema and refused until phase 4 reads it.
+5. **Changing locked tests.** `apos tests revise <goalId> --commit <sha> --reason <text>`: the commit contains the locked one and is checked like a submission (so it is red again on the old code). It must keep every locked test id (a rename is a deletion), at least as many tests for each criterion and at least as many assertions in each file. If it does, it re-locks (`revisionOf`) and every package goes back to `pending`. If it does not, it waits as `tests-revision-pending` until a `tests-weakened` exception names the commit; then the same command locks it.
+
+`apos tests show <goalId>` prints the locked commit, tests per layer and which tests prove which criterion.
+
+**Counting assertions is rough.** It counts lines that match a regular expression of the stack (`assertPatterns`), so a test can be weakened without the count falling, or the count can fall for a harmless reason. It is a tripwire, not a proof; mutation testing (phase 5) is the second net.
 
 ## Project setup
 
@@ -312,7 +333,12 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `goal select <id>` | **Gate B (H).** Records the choice; starts nothing. |
 | `goal revise --file <json> --source <path>` | New Goal version; needs re-approval. |
 | `lead propose --file <json>` | Submit an execution proposal (`baseCommit` required). |
-| `lead commit <id> [--by <name>]` | Accept the plan; execution starts. Solo gets `WP-MAIN`. |
+| `lead commit <id> [--by <name>]` | Accept the plan. Solo gets `WP-MAIN`. A Goal pinned to a setup with test paths goes to `testing` first. |
+| `tests submit <goalId> --commit <sha> [--by <name>]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
+| `tests revise <goalId> --commit <sha> --reason <text> [--by <name>]` | Replace the lock. Exit 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception. |
+| `tests show <goalId>` | The locked commit, tests per layer, the criterion-to-test map. |
+| `exception approve <goalId> --kind <kind> --ref <ref> --reason <text> (--by agent:<name> \| --human)` | An agent, or the Human (**H** with `--human`), approves a sensitive-file change or weakened locked tests. |
+| `goal show <id>` | Status, pinned setup and locked tests of one Goal. |
 | `package add --file <json> --reason <text>`, `package revise <goalId> --file <json> --reason <text>`, `package remove <goalId> <packageId> --reason <text>`, `package list <goalId>` | Plan the packages of a Multi-WP Goal. |
 | `package submit <goalId> <packageId> --commit <sha> [--by <name>] [--json]` | Gate a commit now. Exit 0 green, 1 red, 3 needs-human or unverifiable. |
 | `integration gate <goalId> --commit <sha> --reason <text> [--by <name>]` | Gate the integration commit. |
@@ -362,7 +388,9 @@ Conventions and the dependency rules: [`AGENTS.md`](AGENTS.md), [`docs/architect
 
 ## Limits
 
-- **No test lock yet (until phase 3).** A delivery can change or delete the tests that gate it. The gate flags it as a warning (`needs attention: tests or oracles changed ...`) but does not block it, and a review does not block either. Read the warnings on every green gate.
+- **Test locking needs a setup that names the tests.** Only a Goal pinned to a setup with `tests.paths` on its parts, and with a criterion proved by a test, has locked tests. Any other Goal still runs without them, and a delivery can change or delete the tests that gate it (the gate only warns). `goal show` says which kind of Goal it is.
+- **The assertion count is rough** (a regex per line, see [Locked tests](#locked-tests)). **Whether the tests call the code only through the declared entries is not checked**; it rests on the tester until the catalogue has a rule per stack (phase 4).
+- **Test ids are the layer report's ids.** A runner that changes how it names tests (for example renaming a `describe`) looks like a deleted test.
 - **The gate runs the Goal's own checks.** What it proves is only as good as the checks the Goal names. Phase 2 to 5 add the check catalogue, locked acceptance tests and quality layers (see the roadmap).
 - **Single host, trusted user** (see the trust model). Windows and Linux; Node 24+.
 - **Event log compatibility.** Controller-published document milestones are `documents-published` events with commit and file hashes. Do not roll back to a build older than v3 once a log holds v3 events: such a build does not know them.
@@ -373,7 +401,7 @@ Conventions and the dependency rules: [`AGENTS.md`](AGENTS.md), [`docs/architect
 
 Phase 1 (this version) removed the orchestration layer and put `package submit`, the confirmation on Human commands and the close-on-green-gate rule in place. The next phases, from the v3 design, are **not** in this version:
 
-2. ~~Result formats, a tool catalogue and a project setup with draft, probe and approve~~ (done: see [Project setup](#project-setup)). The gate does not run the setup's layers yet.
-3. Locking the acceptance tests before the code is written, red-for-the-right-reason checks, test inventory and scope guards.
+2. ~~Result formats, a tool catalogue and a project setup with draft, probe and approve~~ (done: see [Project setup](#project-setup)). 
+3. ~~Locking the acceptance tests before the code is written, red-for-the-right-reason checks, test inventory and scope guards~~ (done: see [Locked tests](#locked-tests)).
 4. Test layers L0 to L6 per stage, non-functional proofs and a per-Goal table of what the machine proves and what you confirmed by hand.
 5. Reviews and AI tools that can block only with a red test, and mutation testing.

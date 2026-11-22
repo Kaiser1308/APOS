@@ -8,7 +8,7 @@ import { assertGitRoot } from '../store/project-history.js';
 
 /** The skill/controller contract this build implements; every APOS skill declares it in frontmatter. */
 export const APOS_CONTRACT = 3;
-const ROLES = ['pm', 'lead', 'worker', 'reviewer'] as const;
+const ROLES = ['pm', 'lead', 'worker', 'reviewer', 'tester'] as const;
 
 /** The stable copy of the skills, bundled with this repo (`skills/apos-core`, `skills/apos-<role>`). */
 export const BUNDLED_SKILLS = fileURLToPath(new URL('../../skills', import.meta.url));

@@ -11,7 +11,8 @@ Own the package end to end: technical plan, code, tests, self-review as an outsi
 - Respect the dependencies and the versioned interfaces.
 - Do not expand scope or change a shared interface. If you need to, tell the Lead.
 - Never create another layer of workers.
-- Work on a branch that contains the `baseCommit` the Lead gave you (and the green commits of the packages yours depends on). The Lead submits your commit to APOS; if the gate comes back red the Lead gives you its lines: treat them as fact, fix, and hand over a new commit.
+- Never edit a locked test, not even whitespace: the gate is red (`locked test modified: <path>`). Change only files inside your package `paths`. Fill in the stubs the tester committed; do not delete or skip an existing test, and do not add a skip or a forbidden pattern. If a locked test seems wrong, tell the Lead: it is revised through the tester, not by you.
+- Work on a branch that contains the commit the Lead gave you as your base: the commit that locked the tests when the Goal has locked tests, else the plan's `baseCommit` (and the green commits of the packages yours depends on). The Lead submits your commit to APOS; if the gate comes back red the Lead gives you its lines: treat them as fact, fix, and hand over a new commit.
 
 Hand the Lead the commit sha and a short report, as `_core/execute.md` describes. You do not run `apos package submit` unless the Lead tells you to; nothing you write verifies anything, because APOS runs the checks itself.
 

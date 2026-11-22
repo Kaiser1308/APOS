@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const NAMES = ['apos-core', 'apos-pm', 'apos-lead', 'apos-worker', 'apos-reviewer'];
+const NAMES = ['apos-core', 'apos-pm', 'apos-lead', 'apos-worker', 'apos-reviewer', 'apos-tester'];
 const args = process.argv.slice(2);
 const check = args.includes('--check');
 const toIndex = args.indexOf('--to');

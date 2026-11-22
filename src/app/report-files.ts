@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { mergeReports, readReport, type ParsedReport, type ResultFormat } from '../domain/results/index.js';
 
 const escape = (text: string) => text.replace(/[.+^${}()|[\]\\]/g, '\\$&');
 
@@ -63,4 +64,27 @@ export function readReportFiles(root: string, pattern: string): string[] {
     }
   }
   return contents;
+}
+
+/**
+ * Reads the report a tool command left behind: the `{report}` file APOS provided when the command has the
+ * placeholder, else every file the `report` path or glob matches under `cwd`. No file at all is unreadable.
+ */
+export function readToolReport(opts: {
+  format: ResultFormat;
+  command: string;
+  report?: string;
+  metric?: string;
+  cwd: string;
+  tempReport: string;
+}): ParsedReport {
+  let contents: string[];
+  if (opts.command.includes('{report}')) {
+    try {
+      contents = [readFileSync(opts.tempReport, 'utf8')];
+    } catch {
+      contents = [];
+    }
+  } else contents = readReportFiles(opts.cwd, opts.report ?? '');
+  return mergeReports(contents.map(content => readReport(opts.format, content, { metric: opts.metric })));
 }

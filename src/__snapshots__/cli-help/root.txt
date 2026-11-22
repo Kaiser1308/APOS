@@ -11,6 +11,7 @@ Commands:
   init [options]   initialize .apos in a Git project
   migrate          import APOS v1 Goal histories from the repo into the
                    controller log
+  setup            draft, probe and approve the project setup
   goal
   plan [options]   show Goal plan and requirement coverage across the brief
   lead

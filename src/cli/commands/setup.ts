@@ -2,7 +2,7 @@ import { initProject } from '../../app/init-project.js';
 import type { CliContext } from '../context.js';
 
 export function registerSetup(ctx: CliContext): void {
-  const { program, write, repo, withJournal } = ctx;
+  const { program, options, write, repo, withJournal } = ctx;
   program
     .command('init')
     .description('initialize .apos in a Git project')
@@ -11,7 +11,7 @@ export function registerSetup(ctx: CliContext): void {
       'folder with apos-core/ and apos-<role>/ skills (default: APOS_SKILLS, else the copy bundled with APOS)',
     )
     .action(async (flags: { skills?: string }) => {
-      await initProject(repo(), flags.skills);
+      await initProject(repo(), flags.skills, options.codec);
       write(`Initialized ${repo()}`);
     });
   program

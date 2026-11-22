@@ -76,6 +76,8 @@ const setupV2 = z
     mutation: z.object({ minScore: z.number().min(0).max(100) }).optional(),
   })
   .superRefine((setup, ctx) => {
+    if (Object.hasOwn(setup.parts, 'system'))
+      ctx.addIssue({ code: 'custom', message: '"system" is reserved for the layers that span parts, not a part name' });
     const byRoot = new Map<string, string>();
     for (const [name, part] of Object.entries(setup.parts)) {
       const other = byRoot.get(part.root);

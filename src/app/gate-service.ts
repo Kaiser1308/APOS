@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { newEvent } from './events.js';
@@ -19,9 +19,8 @@ import {
   type GateEnvironment,
   type GateReport,
 } from '../domain/gate.js';
-import { mergeReports, readReport } from '../domain/results/index.js';
 import { reportFailures } from '../domain/results/failures.js';
-import { readReportFiles } from './report-files.js';
+import { readToolReport } from './report-files.js';
 import { gateWarnings } from '../domain/reviews.js';
 import { UserError } from '../domain/errors.js';
 import { assertGitRoot } from '../store/project-history.js';
@@ -329,19 +328,15 @@ export class GateService {
     tempReport: string,
   ): Pick<CheckRun, 'failures' | 'reportProblem'> {
     if (!check.format) return { failures: extractFailures(output, check.failurePattern) };
-    const contents = check.command.includes('{report}')
-      ? existsReport(tempReport)
-      : readReportFiles(workspace, check.report ?? '');
-    const parsed = mergeReports(contents.map(content => readReport(check.format!, content)));
-    const outcome = reportFailures(parsed);
+    const outcome = reportFailures(
+      readToolReport({
+        format: check.format,
+        command: check.command,
+        report: check.report,
+        cwd: workspace,
+        tempReport,
+      }),
+    );
     return 'problem' in outcome ? { failures: [], reportProblem: outcome.problem } : { failures: outcome.failures };
-  }
-}
-
-function existsReport(path: string): string[] {
-  try {
-    return [readFileSync(path, 'utf8')];
-  } catch {
-    return [];
   }
 }

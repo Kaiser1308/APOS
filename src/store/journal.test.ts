@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProjectJournal } from './journal.js';
 import { spec, proposal, sourceText, approval } from '../domain/fixtures.test-support.js';
+import { parseProjectSetup } from '../domain/project-setup.js';
+import { jsonCodec } from '../domain/setup-codec.js';
 import { initProject } from '../app/init-project.js';
 import { newEvent } from '../app/events.js';
 import type { GoalEventType } from '../domain/transitions.js';
@@ -191,6 +193,9 @@ it('keeps setup probes and approvals in the _project stream, which survives reop
 
 it('writes a v2 setup with no parts when initializing a project', async () => {
   const { dir, close } = await project();
-  expect(readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8')).toBe('schemaVersion: 2\nparts: {}\n');
+  expect(parseProjectSetup(readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8'), jsonCodec)).toMatchObject({
+    version: 2,
+    setup: { parts: {} },
+  });
   close();
 });

@@ -115,3 +115,9 @@ describe('parseProjectSetup', () => {
     expect(parseSetupObject(jsonCodec.parse(jsonCodec.stringify(parsed.setup)))).toEqual(parsed);
   });
 });
+
+it('reserves the part name "system"', () => {
+  expect(
+    refused({ schemaVersion: 2, parts: { system: { root: 'a', layers: {}, needsHuman: [], forbid: [] } } }),
+  ).toMatch(/reserved/);
+});

@@ -47,7 +47,7 @@ export async function initProject(repoPath: string, skillsRoot?: string): Promis
   const dir = join(repo, '.apos');
   mkdirSync(join(dir, 'goals'), { recursive: true });
   const config = join(dir, 'project.yaml');
-  if (!existsSync(config)) writeFileSync(config, 'schemaVersion: 1\n', 'utf8');
+  if (!existsSync(config)) writeFileSync(config, 'schemaVersion: 2\nparts: {}\n', 'utf8');
   const ignore = join(dir, '.gitignore');
   if (!existsSync(ignore)) writeFileSync(ignore, 'state.sqlite*\n', 'utf8');
   const files = [config, ignore];

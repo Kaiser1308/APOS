@@ -241,9 +241,10 @@ export function inspectTests(input: InspectInput): Inspection {
 
 /** The file a reported test lives in: the report's `file` attribute, or the class name read as a path or a dotted module. */
 function holderOf(candidates: string[], root: string, test: { id: string; file?: string }): string | undefined {
-  const classname = test.id.split('::')[0] ?? '';
+  const classname = (test.id.split('::')[0] ?? '').replaceAll('\\', '/');
   const dotted = classname.split('$')[0]!;
-  const asFile = test.file && (root === '.' ? test.file : `${root}/${test.file}`);
+  const given = test.file?.replaceAll('\\', '/');
+  const asFile = given && (root === '.' ? given : `${root}/${given}`);
   return candidates.find(file => {
     const bare = file.replace(/\.[^./]+$/, '').replaceAll('/', '.');
     return file === asFile || file === classname || bare === dotted || bare.endsWith(`.${dotted}`);

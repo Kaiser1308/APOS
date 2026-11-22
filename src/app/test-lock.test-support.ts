@@ -31,7 +31,7 @@ const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').
 let cases = '';
 function read(file) {
   const cls = file.replace(/\\\\/g, '/').replace(/\\.t$/, '').replace(/\\//g, '.');
-  for (const line of fs.readFileSync(file, 'utf8').split('\\n')) {
+  for (const line of fs.readFileSync(file, 'utf8').split(/\\r?\\n/)) {
     const m = /^case (\\S+) (\\S+)(?: (.*))?$/.exec(line);
     if (!m) continue;
     const [, name, kind, arg] = m;
@@ -81,8 +81,16 @@ export const setupDocument = {
 };
 
 const dirs: string[] = [];
+const closers: (() => void)[] = [];
+/** Closes the journals first (an open SQLite file cannot be removed on Windows), then removes the directories. */
 export const cleanProjects = () => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+  for (const close of closers.splice(0))
+    try {
+      close();
+    } catch {
+      /* already closed */
+    }
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 };
 const temp = (prefix: string) => {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -140,6 +148,7 @@ export async function testingProject(
     'base',
   );
   const { journal, close } = ProjectJournal.open(dir, home, newEvent);
+  closers.push(close);
   const sha256 = setupSha256(setupText);
   const at = new Date().toISOString();
   journal.appendProjectEvent({

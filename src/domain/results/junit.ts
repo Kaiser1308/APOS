@@ -28,6 +28,8 @@ function outcome(node: XmlElement): Pick<TestOutcome, 'status' | 'message'> {
  * in one report gets `#2`, `#3` ... in report order so that ids stay stable between runs.
  * `<error>` is status `error`, `<failure>` is `fail`.
  */
+const slashes = (text: string): string => text.replaceAll('\\', '/');
+
 export function readJunit(content: string): ParsedReport {
   let root: XmlElement;
   try {
@@ -42,14 +44,15 @@ export function readJunit(content: string): ParsedReport {
   const visit = (node: XmlElement, suite: XmlElement | undefined) => {
     const name = node.attrs.name;
     if (name === undefined) return;
-    const prefix = node.attrs.classname || node.attrs.file || suite?.attrs.name || 'suite';
+    // A path used as an id must read the same on Windows and Linux.
+    const prefix = slashes(node.attrs.classname || node.attrs.file || suite?.attrs.name || 'suite');
     const base = `${prefix}::${name}`;
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);
     tests.push({
       id: count === 1 ? base : `${base}#${count}`,
       ...outcome(node),
-      ...(node.attrs.file ? { file: node.attrs.file } : {}),
+      ...(node.attrs.file ? { file: slashes(node.attrs.file) } : {}),
     });
   };
   if (root.name === 'testsuite') walkSuite(root, visit);

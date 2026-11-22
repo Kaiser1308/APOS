@@ -14,7 +14,13 @@ describe('package gate with locked tests', () => {
     expect(result.result).toBe('green');
     expect(p.state().status).toBe('verified');
     const checks = p.state().packages?.['WP-MAIN']?.gate?.checks.map(item => `${item.checkId}:${item.status}`);
-    expect(checks).toEqual(['CHK-1:pass', 'APOS-LOCKED:pass', 'APOS-INVENTORY:pass', 'APOS-SCOPE:pass']);
+    expect(checks).toEqual([
+      'CHK-1:pass',
+      'APOS-LOCKED:pass',
+      'APOS-INVENTORY:pass',
+      'APOS-INFRA:pass',
+      'APOS-SCOPE:pass',
+    ]);
   }, 120_000);
 
   it('is red when the worker changes a locked test, even only its whitespace, and the reason names the file (review focus 5)', async () => {
@@ -130,5 +136,35 @@ describe('the Goal-level gate (Multi-WP integration reads the diff from the plan
     expect(p.gate.run(p.goalId, p.dir, { deliveryCommit: tampered }).checks.map(check => check.checkId)).toContain(
       'APOS-PROTECTED',
     );
+  }, 120_000);
+});
+
+describe('test infrastructure', () => {
+  const swallow = { 'tests/infra.cfg': 'swallow\n' };
+  it('records the infra files present at the lock', async () => {
+    const p = await lockedProject();
+    expect(Object.keys(p.state().testLock?.infra ?? {})).toEqual(['tests/infra.cfg']);
+  }, 60_000);
+
+  it('a package that edits test infrastructure so the locked red test reads green does not go green: needs-human', async () => {
+    const p = await lockedProject({ paths: ['src/**', 'tests/**'] });
+    // Nothing is implemented; the infra swallows the failure of the locked test.
+    const result = await p.submit(p.commit({ ...swallow, 'src/stub.txt': 'nothing\n' }, 'swallow failures'));
+    expect(result.result).toBe('needs-human');
+    expect(result.reasons.join('\n')).toContain('APOS-INFRA needs-human: hạ tầng test bị sửa: tests/infra.cfg');
+    expect(p.state().packages?.['WP-MAIN']?.status).toBe('needs-human');
+    expect(p.state().status).toBe('executing');
+  }, 120_000);
+
+  it('adding or deleting an infra file counts too', async () => {
+    const p = await lockedProject({ paths: ['src/**', 'tests/**'] });
+    const deleted = await p.submit(p.commit({ 'src/impl.txt': 'add\n', 'tests/infra.cfg': null }, 'delete infra'));
+    expect(deleted.reasons.join('\n')).toContain('hạ tầng test bị sửa: tests/infra.cfg');
+  }, 120_000);
+
+  it('a change nobody listed as infrastructure stays green', async () => {
+    const p = await lockedProject({ paths: ['src/**', 'tests/**'] });
+    const result = await p.submit(p.commit({ 'src/impl.txt': 'add\n' }, 'work'));
+    expect(result.result).toBe('green');
   }, 120_000);
 });

@@ -4,7 +4,7 @@ import { minutesOverBudget, type GoalEventType, type GoalState } from '../domain
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 import { summarizeGate, type GateReport, type GateResult } from '../domain/gate.js';
-import { SCOPE_CHECK } from '../domain/assurance.js';
+import { INFRA_CHECK, SCOPE_CHECK } from '../domain/assurance.js';
 import { randomUUID } from 'node:crypto';
 import { UserError } from '../domain/errors.js';
 import type { GateService } from './gate-service.js';
@@ -24,8 +24,15 @@ export class PackageService {
     this.store.append(newEvent(goalId, type, data));
   }
 
+  /** A Goal pinned to a setup scopes every package: a package without `paths` would run with no scope check. */
+  private requirePaths(goalId: string, spec: WorkPackageSpec): void {
+    if (this.store.getGoal(goalId)?.setupVersion !== undefined && !spec.paths?.length)
+      throw new UserError(`${spec.id} has no paths: the gate needs to know which files the package may change`);
+  }
+
   add(goalId: string, value: unknown, reason?: string, by = 'lead'): WorkPackageSpec {
     const spec = parseWorkPackage(value);
+    this.requirePaths(goalId, spec);
     const state = this.store.getGoal(goalId);
     const drafting = state?.status === 'planned' && reason === undefined;
     this.record(goalId, drafting ? 'package-added' : 'package-plan-added', drafting ? spec : { spec, reason, by });
@@ -38,6 +45,7 @@ export class PackageService {
 
   revise(goalId: string, value: unknown, reason: string, by = 'lead'): WorkPackageSpec {
     const spec = parseWorkPackage(value);
+    this.requirePaths(goalId, spec);
     this.record(goalId, 'package-revised', { spec, reason, by });
     return spec;
   }
@@ -69,24 +77,29 @@ export class PackageService {
     const prior = item?.gate;
     if (!item || item.status !== 'needs-human' || prior?.result !== 'needs-human') return undefined;
     if (prior.deliveryCommit.toLowerCase() !== commit.toLowerCase()) return undefined;
-    const approval = [...(state.exceptions ?? [])]
-      .reverse()
-      .find(
-        entry =>
-          entry.kind === 'needs-human' &&
-          entry.ref === packageId &&
-          entry.commit.toLowerCase() === commit.toLowerCase(),
-      );
-    if (!approval) return undefined;
-    const checks = prior.checks.map(check =>
-      check.checkId === SCOPE_CHECK && check.status === 'needs-human'
-        ? {
-            ...check,
-            status: 'pass' as const,
-            reason: `${check.reason} — approved by ${approval.by}: ${approval.reason}`,
-          }
-        : check,
+    // Every check that waits for a decision needs its own approval (a sensitive file, test infrastructure).
+    const kindOf: Record<string, 'needs-human' | 'tests-infra'> = {
+      [SCOPE_CHECK]: 'needs-human',
+      [INFRA_CHECK]: 'tests-infra',
+    };
+    const waiting = prior.checks.filter(check => check.status === 'needs-human');
+    const approvals = waiting.map(check =>
+      [...(state.exceptions ?? [])]
+        .reverse()
+        .find(
+          entry =>
+            entry.kind === kindOf[check.checkId] &&
+            entry.ref === packageId &&
+            entry.commit.toLowerCase() === commit.toLowerCase(),
+        ),
     );
+    if (!waiting.length || approvals.some(entry => !entry)) return undefined;
+    const checks = prior.checks.map(check => {
+      const approval = approvals[waiting.indexOf(check)];
+      return approval
+        ? { ...check, status: 'pass' as const, reason: `${check.reason}, duyệt bởi ${approval.by}: ${approval.reason}` }
+        : check;
+    });
     return {
       ...prior,
       gateId: `GATE-${randomUUID()}`,

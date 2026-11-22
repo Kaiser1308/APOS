@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ExceptionService } from './exceptions.js';
+import { buildInbox } from './inbox.js';
 import { cleanProjects, lockedProject } from './test-lock.test-support.js';
 
 afterEach(cleanProjects);
@@ -30,7 +31,7 @@ describe('exception approve', () => {
     const scope = p.state().packages?.['WP-MAIN']?.gate?.checks.find(check => check.checkId === 'APOS-SCOPE');
     expect(scope).toMatchObject({
       status: 'pass',
-      reason: expect.stringContaining('approved by agent:lead: lockfile bump reviewed') as unknown,
+      reason: expect.stringContaining('duyệt bởi agent:lead: lockfile bump reviewed') as unknown,
     });
   }, 180_000);
 
@@ -91,4 +92,42 @@ it('refuses a needs-human package that waits for something else (a manual check,
   expect(() =>
     new ExceptionService(store).approve('GOAL-1', { kind: 'needs-human', ref: 'WP-A', reason: 'r', by: 'agent:x' }),
   ).toThrow(/waits for something an exception does not settle/);
+});
+
+describe('tests-infra', () => {
+  it('an agent approves it; the report and inbox say which infra file and who approved; the same commit is green without a rerun', async () => {
+    const p = await lockedProject({ paths: ['src/**', 'tests/**'] });
+    const commit = p.commit({ 'src/impl.txt': 'add\n', 'tests/infra.cfg': 'plain, edited\n' }, 'infra');
+    expect((await p.submit(commit)).result).toBe('needs-human');
+    const service = new ExceptionService(p.journal);
+    // A sensitive-file approval does not settle an infra change.
+    expect(() =>
+      service.approve(p.goalId, { kind: 'needs-human', ref: 'WP-MAIN', reason: 'r', by: 'agent:lead' }),
+    ).toThrow(/waits for something an exception does not settle/);
+    service.approve(p.goalId, { kind: 'tests-infra', ref: 'WP-MAIN', reason: 'config tidy', by: 'agent:lead' });
+    const run = vi.spyOn(p.gate, 'runPackage');
+    expect((await p.submit(commit)).result).toBe('green');
+    expect(run).not.toHaveBeenCalled();
+    const infra = p.state().packages?.['WP-MAIN']?.gate?.checks.find(check => check.checkId === 'APOS-INFRA');
+    expect(infra?.reason).toBe('hạ tầng test bị sửa: tests/infra.cfg, duyệt bởi agent:lead: config tidy');
+  }, 180_000);
+
+  it('the inbox names the file and the command, then who approved', async () => {
+    const p = await lockedProject({ paths: ['src/**', 'tests/**'] });
+    const commit = p.commit({ 'src/impl.txt': 'add\n', 'tests/infra.cfg': 'x\n' }, 'infra');
+    await p.submit(commit);
+    const reasons = () =>
+      buildInbox(p.journal).flatMap(item => (JSON.parse(item.detail) as { reasons?: string[] }).reasons ?? []);
+    expect(reasons()[0]).toContain('hạ tầng test bị sửa: tests/infra.cfg. Approve with: apos exception approve');
+    expect(reasons()[0]).toContain('--kind tests-infra --ref WP-MAIN');
+    new ExceptionService(p.journal).approve(p.goalId, {
+      kind: 'tests-infra',
+      ref: 'WP-MAIN',
+      reason: 'ok',
+      by: 'agent:lead',
+    });
+    expect(reasons()[0]).toBe(
+      'hạ tầng test bị sửa: tests/infra.cfg, duyệt bởi agent:lead: submit again with the same commit',
+    );
+  }, 180_000);
 });

@@ -61,6 +61,14 @@ export const STACKS: CatalogEntry[] = [
       'Transform failed',
     ],
     testPaths: ['**/*.test.ts', '**/*.spec.ts', 'tests/**'],
+    testInfra: [
+      'vitest.config.*',
+      'vite.config.*',
+      'jest.config.*',
+      '**/vitest.setup.*',
+      '**/setupTests.*',
+      'tsconfig*.json',
+    ],
     assertPatterns: ['\\bexpect\\s*\\(', '\\bassert(?:\\.\\w+)?\\s*\\(', '\\bexpectTypeOf\\s*\\('],
     notImplementedPatterns: ['[Nn]ot implemented', 'NotImplemented', 'TODO: implement'],
     forbid: [
@@ -124,6 +132,7 @@ export const STACKS: CatalogEntry[] = [
       'SyntaxError',
     ],
     testPaths: ['tests/**', '**/test_*.py', '**/*_test.py'],
+    testInfra: ['**/conftest.py', 'pytest.ini', 'tox.ini', 'setup.cfg', 'pyproject.toml', '**/__init__.py'],
     assertPatterns: [
       '^\\s*assert\\b',
       '\\bself\\.assert\\w+\\s*\\(',
@@ -192,6 +201,7 @@ export const STACKS: CatalogEntry[] = [
       'ExceptionInInitializerError',
     ],
     testPaths: ['src/test/**'],
+    testInfra: ['src/test/resources/**', 'build.gradle*', 'settings.gradle*'],
     assertPatterns: [
       '\\bassert(?:That|Equals|NotEquals|True|False|Null|NotNull|Same|NotSame|Throws|ThrowsExactly|ArrayEquals|DoesNotThrow|All|Timeout)\\s*\\(',
       '\\bverify\\s*\\(',
@@ -250,6 +260,7 @@ export const STACKS: CatalogEntry[] = [
       'ExceptionInInitializerError',
     ],
     testPaths: ['src/test/**'],
+    testInfra: ['src/test/resources/**', 'pom.xml', '**/pom.xml'],
     assertPatterns: [
       '\\bassert(?:That|Equals|NotEquals|True|False|Null|NotNull|Same|NotSame|Throws|ThrowsExactly|ArrayEquals|DoesNotThrow|All|Timeout)\\s*\\(',
       '\\bverify\\s*\\(',

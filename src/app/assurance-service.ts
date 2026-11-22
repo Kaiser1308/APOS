@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { assertGitRoot } from '../store/project-history.js';
 import {
+  infraCheck,
   inventoryCheck,
   lockedTestsCheck,
   scopeCheck,
@@ -8,13 +9,13 @@ import {
   INVENTORY_CHECK,
   type TestSet,
 } from '../domain/assurance.js';
-import { rootedGlobs } from '../domain/glob.js';
+import { matchesAny, rootedGlobs } from '../domain/glob.js';
 import type { CheckResult } from '../domain/gate.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 import type { LayerOutcome, LockedLayer } from '../domain/test-lock.js';
 import type { GoalState, PackageState } from '../domain/transitions.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
-import { fileAt, sha256Of } from './git-files.js';
+import { fileAt, filesAt, sha256Of } from './git-files.js';
 import type { ToolRunner } from './layer-runner.js';
 
 export type AssuranceDeps = {
@@ -54,6 +55,34 @@ const unverifiable = (checkId: string, reason: string): CheckResult => ({
  */
 export class AssuranceService {
   constructor(private readonly deps: AssuranceDeps) {}
+
+  /**
+   * Files a green dependency of this package already changed, still byte for byte as that dependency left them: the
+   * delivery contains them, so they are not this package's change.
+   */
+  private inherited(state: GoalState, item: PackageState, head: string, base: string): Set<string> {
+    const { repo, inspector } = this.deps;
+    const out = new Set<string>();
+    const seen = new Set<string>();
+    const todo = [...item.spec.dependencies];
+    while (todo.length) {
+      const id = todo.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const dep = state.packages?.[id];
+      if (!dep) continue;
+      todo.push(...dep.spec.dependencies);
+      const commit = dep.gate?.deliveryCommit;
+      if (dep.status !== 'green' || !commit) continue;
+      for (const file of inspector.files(repo, commit, base)) {
+        const mine = fileAt(repo, head, file);
+        const theirs = fileAt(repo, commit, file);
+        if (mine?.equals(theirs ?? Buffer.alloc(0)) ? theirs !== undefined : mine === undefined && theirs === undefined)
+          out.add(file);
+      }
+    }
+    return out;
+  }
 
   checks(state: GoalState, item: PackageState, head: string, base: string, changed: string[]): CheckResult[] {
     const setup = this.deps.loadSetup(state);
@@ -112,11 +141,22 @@ export class AssuranceService {
             forbid: Object.values(setup.parts).flatMap(part => part.forbid),
           }),
     );
+    const inherited = this.inherited(state, item, head, base);
+    if (lock?.infra) {
+      const globs = Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.tests?.infra ?? []));
+      const now: Record<string, string> = {};
+      for (const file of filesAt(repo, head))
+        if (matchesAny(file, globs)) {
+          const content = fileAt(repo, head, file);
+          if (content) now[file] = sha256Of(content);
+        }
+      checks.push(infraCheck({ lockInfra: lock.infra, delivery: now, inherited }));
+    }
     const paths = item.spec.paths;
     if (paths?.length)
       checks.push(
         scopeCheck({
-          changed,
+          changed: changed.filter(file => !inherited.has(file)),
           paths: [...paths, ...(item.spec.stubPaths ?? [])],
           needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
           lockedFiles: Object.keys(lock?.files ?? {}),

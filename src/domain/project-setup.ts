@@ -52,6 +52,8 @@ const root = z
  */
 const testsSchema = z.object({
   paths: z.array(z.string().min(1)).min(1),
+  /** Globs (relative to `root`) of test infrastructure: conftest, runner config, setup files. */
+  infra: z.array(z.string().min(1)).default([]),
   assertPatterns: z.array(z.string()).default([]),
   notImplementedPatterns: z.array(z.string()).default([]),
   loadErrorPatterns: z.array(z.string()).default([]),

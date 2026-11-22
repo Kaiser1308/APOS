@@ -45,6 +45,7 @@ function partFrom(entry: CatalogEntry, root: string): PartSetup {
       ? {
           tests: {
             paths: [...entry.testPaths],
+            infra: [...entry.testInfra],
             assertPatterns: [...entry.assertPatterns],
             notImplementedPatterns: [...entry.notImplementedPatterns],
             loadErrorPatterns: [...entry.loadErrorPatterns],

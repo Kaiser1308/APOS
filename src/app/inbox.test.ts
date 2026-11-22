@@ -121,8 +121,8 @@ it('lists what waits for an exception: a sensitive file (with the command to app
   expect(details([])[0]?.reasons).toEqual([
     'APOS-SCOPE needs-human: sensitive files changed: pyproject.toml. Approve with: apos exception approve GOAL-1 --kind needs-human --ref WP-A --reason <why> (--by agent:<name> | --human)',
   ]);
-  expect(details([{ kind: 'needs-human', ref: 'WP-A', commit }])[0]?.reasons).toEqual([
-    `exception approved for WP-A on ${commit}: submit again with the same commit`,
+  expect(details([{ kind: 'needs-human', ref: 'WP-A', commit, by: 'agent:x' }])[0]?.reasons).toEqual([
+    'sensitive files changed: pyproject.toml, duyệt bởi agent:x: submit again with the same commit',
   ]);
   const pending = { commit: 'b'.repeat(40), reason: 'drops a test', problems: ['x'], by: 't' };
   expect(details([], pending).map(item => item.why)).toEqual(['package-needs-human', 'tests-revision-pending']);

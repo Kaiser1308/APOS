@@ -17,7 +17,7 @@ import {
 import type { GoalState } from '../domain/transitions.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
-import { fileAt, sha256Of } from './git-files.js';
+import { fileAt, filesAt, sha256Of } from './git-files.js';
 import type { ToolRunner } from './layer-runner.js';
 import { untrustedProtectedFiles } from './protected-milestones.js';
 
@@ -28,6 +28,8 @@ export type Inspection = {
   files: Record<string, string>;
   asserts: Record<string, number>;
   map: TestMapEntry[];
+  /** sha256 of every test-infrastructure file at the commit. */
+  infra: Record<string, string>;
   /** Tests per mapped layer, for the summary `apos tests show` prints. */
   testCount: number;
 };
@@ -69,10 +71,11 @@ export function inspectTests(input: InspectInput): Inspection {
   const changed = inspector.files(repo, commit, from);
   const owner = (file: string) =>
     testParts.find(([, part]) => matchesAny(file, rootedGlobs(part.root, part.tests!.paths)));
+  const infraGlobs = testParts.flatMap(([, part]) => rootedGlobs(part.root, part.tests!.infra));
   const foreign = untrustedProtectedFiles(input.store, goalId, repo, commit, changed);
   const testFiles: string[] = [];
   for (const file of changed) {
-    if (file === mapPath || matchesAny(file, stubs)) continue;
+    if (file === mapPath || matchesAny(file, stubs) || matchesAny(file, infraGlobs)) continue;
     if (file.startsWith('.apos/')) {
       if (foreign.includes(file)) problems.push(`${file}: APOS-managed file changed`);
       continue;
@@ -169,7 +172,28 @@ export function inspectTests(input: InspectInput): Inspection {
   const files: Record<string, string> = {};
   const asserts: Record<string, number> = {};
   const weakened: string[] = [];
-  for (const file of testFiles) {
+  // The files that hold the mapped tests are locked even when the tester did not change them (a stays-green test).
+  const treeFiles = filesAt(repo, commit);
+  const holders = new Set(testFiles);
+  if (ran)
+    for (const outcome of outcomes) {
+      const where = setup.parts[outcome.part]!;
+      const candidates = treeFiles.filter(
+        file => matchesAny(file, rootedGlobs(where.root, where.tests?.paths ?? [])) && !matchesAny(file, infraGlobs),
+      );
+      for (const entry of map.filter(item => item.part === outcome.part && item.layer === outcome.layer))
+        for (const id of entry.testIds) {
+          const test = outcome.tests.find(item => item.id === id);
+          if (!test) continue;
+          const holder = holderOf(candidates, where.root, test);
+          if (holder) holders.add(holder);
+          else
+            problems.push(
+              `${entry.acceptanceId} ${entry.part}.${entry.layer} ${id}: cannot tell which file holds this test, so it cannot be locked`,
+            );
+        }
+    }
+  for (const file of holders) {
     const content = fileAt(repo, commit, file);
     if (!content) {
       if (input.revising?.files[file] !== undefined) weakened.push(`${file}: a locked test file was deleted`);
@@ -179,6 +203,12 @@ export function inspectTests(input: InspectInput): Inspection {
     files[file] = sha256Of(content);
     asserts[file] = countAsserts(content.toString('utf8'), owner(file)?.[1].tests?.assertPatterns ?? []);
   }
+  const infra: Record<string, string> = {};
+  for (const file of treeFiles)
+    if (matchesAny(file, infraGlobs)) {
+      const content = fileAt(repo, commit, file);
+      if (content) infra[file] = sha256Of(content);
+    }
   const before = input.revising;
   if (before) {
     // A locked file the revision did not touch is carried over unchanged.
@@ -201,9 +231,21 @@ export function inspectTests(input: InspectInput): Inspection {
   return {
     problems,
     weakened,
+    infra,
     files,
     asserts,
     map,
     testCount: map.reduce((sum, entry) => sum + entry.testIds.length, 0),
   };
+}
+
+/** The file a reported test lives in: the report's `file` attribute, or the class name read as a path or a dotted module. */
+function holderOf(candidates: string[], root: string, test: { id: string; file?: string }): string | undefined {
+  const classname = test.id.split('::')[0] ?? '';
+  const dotted = classname.split('$')[0]!;
+  const asFile = test.file && (root === '.' ? test.file : `${root}/${test.file}`);
+  return candidates.find(file => {
+    const bare = file.replace(/\.[^./]+$/, '').replaceAll('/', '.');
+    return file === asFile || file === classname || bare === dotted || bare.endsWith(`.${dotted}`);
+  });
 }

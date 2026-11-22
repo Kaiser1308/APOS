@@ -1,12 +1,12 @@
 import { newEvent } from './events.js';
-import { SCOPE_CHECK } from '../domain/assurance.js';
+import { INFRA_CHECK, SCOPE_CHECK } from '../domain/assurance.js';
 import { UserError } from '../domain/errors.js';
 import { AGENT_MAY_APPROVE, EXCEPTION_KINDS, type ExceptionKind } from '../domain/exceptions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
 export type ExceptionRequest = {
   kind: string;
-  /** A package id for `needs-human`, a commit for `tests-weakened`. */
+  /** A package id for `needs-human` and `tests-infra`, a commit for `tests-weakened`. */
   ref: string;
   reason: string;
   /** `agent:<name>`, or `human` with the confirmation `confirmHuman` gave. */
@@ -30,14 +30,15 @@ export class ExceptionService {
     if (request.by.startsWith('agent:') && !AGENT_MAY_APPROVE.includes(kind))
       throw new UserError(`An agent cannot approve ${kind}; the Human does, with --human`);
     let commit: string;
-    if (kind === 'needs-human') {
+    if (kind === 'needs-human' || kind === 'tests-infra') {
+      const waitsOn = kind === 'needs-human' ? SCOPE_CHECK : INFRA_CHECK;
       const item = state.packages?.[request.ref];
-      if (!item) throw new UserError(`--ref must be a package of ${goalId} for needs-human (got ${request.ref})`);
+      if (!item) throw new UserError(`--ref must be a package of ${goalId} for ${kind} (got ${request.ref})`);
       if (item.status !== 'needs-human' || !item.submission)
         throw new UserError(`${request.ref} is ${item.status}: only a package that needs a human can be approved`);
-      if (!item.gate?.checks.some(check => check.checkId === SCOPE_CHECK && check.status === 'needs-human'))
+      if (!item.gate?.checks.some(check => check.checkId === waitsOn && check.status === 'needs-human'))
         throw new UserError(
-          `${request.ref} waits for something an exception does not settle (see \`apos inbox\`): only a sensitive-file change (${SCOPE_CHECK}) is approved this way`,
+          `${request.ref} waits for something an exception does not settle (see \`apos inbox\`): only ${kind === 'needs-human' ? `a sensitive-file change (${SCOPE_CHECK})` : `a change to test infrastructure (${INFRA_CHECK})`} is approved with --kind ${kind}`,
         );
       commit = item.submission.commit;
     } else if (kind === 'tests-weakened') {

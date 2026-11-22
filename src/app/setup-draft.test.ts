@@ -48,6 +48,7 @@ describe('draftSetup', () => {
       const tests = draftSetup(repo(files), STACKS).setup.parts.app?.tests;
       expect(tests, stack).toEqual({
         paths: entry.testPaths,
+        infra: entry.testInfra,
         assertPatterns: entry.assertPatterns,
         notImplementedPatterns: entry.notImplementedPatterns,
         loadErrorPatterns: entry.loadErrorPatterns,

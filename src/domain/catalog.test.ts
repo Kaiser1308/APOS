@@ -75,3 +75,17 @@ describe('catalog schema', () => {
     expect(catalogToolSchema.safeParse({ ...tool, format: 'tap' }).success).toBe(false);
   });
 });
+
+describe('test infrastructure globs', () => {
+  it('every stack lists some, and the draft copies them into the part', async () => {
+    for (const entry of STACKS) expect(entry.testInfra.length, entry.stack).toBeGreaterThan(0);
+    const byStack = Object.fromEntries(STACKS.map(entry => [entry.stack, entry.testInfra]));
+    expect(byStack['python']).toEqual(
+      expect.arrayContaining(['**/conftest.py', 'pytest.ini', 'tox.ini', 'setup.cfg', 'pyproject.toml']),
+    );
+    expect(byStack['typescript']).toEqual(
+      expect.arrayContaining(['vitest.config.*', 'jest.config.*', '**/vitest.setup.*', 'tsconfig*.json']),
+    );
+    expect(byStack['java-maven']).toEqual(expect.arrayContaining(['src/test/resources/**', 'pom.xml']));
+  });
+});

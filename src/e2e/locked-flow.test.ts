@@ -43,6 +43,9 @@ type Stack = {
   check: string;
   paths: string[];
   stubPaths: string[];
+  /** Test infrastructure that makes the locked red test read green, and the files it adds. */
+  swallow: Record<string, string>;
+  infraFiles: string[];
   setup?: (dir: string) => void;
 };
 
@@ -68,6 +71,11 @@ const python: Stack = {
   check: 'pytest -q',
   paths: ['calc.py', 'tests/test_unit.py'],
   stubPaths: ['calc.py'],
+  swallow: {
+    'tests/conftest.py':
+      'import pytest\n\n\n@pytest.hookimpl(hookwrapper=True)\ndef pytest_runtest_makereport(item, call):\n    outcome = yield\n    report = outcome.get_result()\n    if report.failed:\n        report.outcome = "passed"\n',
+  },
+  infraFiles: ['tests/conftest.py'],
 };
 
 const typescript: Stack = {
@@ -97,6 +105,12 @@ const typescript: Stack = {
   check: 'npx vitest run',
   paths: ['src/calc.ts', 'src/unit.test.ts'],
   stubPaths: ['src/calc.ts'],
+  swallow: {
+    'vitest.config.ts': "export default { test: { setupFiles: ['./src/vitest.setup.ts'] } };\n",
+    'src/vitest.setup.ts':
+      "import { vi } from 'vitest';\nvi.mock('./calc.js', () => ({ add: (a: number, b: number) => a + b }));\n",
+  },
+  infraFiles: ['src/vitest.setup.ts', 'vitest.config.ts'],
   setup: dir =>
     symlinkSync(resolve('node_modules'), join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir'),
 };
@@ -253,26 +267,93 @@ describe.each([
       });
       expect(await submit(edit)).toBe(3);
       expect(p.said()).toContain(`APOS-SCOPE needs-human: sensitive files changed, a decision is needed: ${sensitive}`);
-      await p.invoke(
-        'exception',
-        'approve',
-        spec.id,
-        '--kind',
-        'needs-human',
-        '--ref',
-        'WP-MAIN',
-        '--reason',
-        'reviewed the change',
-        '--by',
-        'agent:lead',
-      );
+      const approve = (kind: string) =>
+        p.invoke(
+          'exception',
+          'approve',
+          spec.id,
+          '--kind',
+          kind,
+          '--ref',
+          'WP-MAIN',
+          '--reason',
+          'reviewed the change',
+          '--by',
+          'agent:lead',
+        );
+      await approve('needs-human');
+      // pyproject.toml configures pytest too: it is test infrastructure as well, and needs its own approval.
+      if (stack.name.startsWith('python')) {
+        p.said();
+        expect(await submit(edit)).toBe(3);
+        expect(p.said()).toContain('hạ tầng test bị sửa: pyproject.toml');
+        await approve('tests-infra');
+      }
       p.said();
       expect(await submit(edit)).toBe(0);
       expect(p.said()).toContain(`WP-MAIN green on ${edit}; ${spec.id} verified`);
-      expect(p.state()).toMatchObject({ status: 'verified', exceptions: [{ by: 'agent:lead' }] });
+      expect(p.state().status).toBe('verified');
+      expect(p.state().exceptions?.every(item => item.by === 'agent:lead')).toBe(true);
 
       await p.invoke('outcome', 'close', spec.id, ...p.human);
       expect(p.state().status).toBe('closed');
+    },
+    600_000,
+  );
+
+  it.skipIf(!available)(
+    `${stack.name}: a package with wide paths that adds test infrastructure swallowing the failure of the locked test is not green`,
+    async () => {
+      const p = await scenario({ ...stack, paths: ['**'] });
+      const mapPath = `.apos/goals/${spec.id}/tests.json`;
+      const map = JSON.stringify([{ acceptanceId: 'AC-1', part: 'app', layer: 'L2', testIds: [stack.testId] }]);
+      const locked = p.commit(
+        { ...stack.green, ...stack.red, [mapPath]: map },
+        'tests and a stub that is not implemented',
+      );
+      expect(await p.invoke('tests', 'submit', spec.id, '--commit', locked)).toBeUndefined();
+      p.said();
+
+      // Nothing is implemented; the stub still raises. The infrastructure turns that failure into a pass.
+      p.git('checkout', '-q', '-B', 'cheat', locked);
+      const cheat = p.commit(stack.swallow, 'swallow the failure');
+      expect(await p.invoke('package', 'submit', spec.id, 'WP-MAIN', '--commit', cheat)).toBe(3);
+      const said = p.said();
+      for (const file of stack.infraFiles) expect(said).toContain(file);
+      expect(said).toContain('APOS-INFRA needs-human: hạ tầng test bị sửa:');
+      const gate = p.state().packages?.['WP-MAIN']?.gate;
+      // The locked test did read green, which is exactly why the infrastructure has to be judged.
+      expect(gate?.checks.find(check => check.checkId === 'APOS-LOCKED')?.status).toBe('pass');
+      expect(gate?.result).toBe('needs-human');
+      expect(p.state().status).toBe('executing');
+
+      // The decision is the approver's, and it is in the report.
+      const approve = (kind: string, reason: string) =>
+        p.invoke(
+          'exception',
+          'approve',
+          spec.id,
+          '--kind',
+          kind,
+          '--ref',
+          'WP-MAIN',
+          '--reason',
+          reason,
+          '--by',
+          'agent:lead',
+        );
+      await approve('tests-infra', 'not a cheat');
+      p.said();
+      let code = await p.invoke('package', 'submit', spec.id, 'WP-MAIN', '--commit', cheat);
+      if (code === 3) {
+        // A runner config file is a sensitive file as well (needsHuman): it needs its own approval.
+        await approve('needs-human', 'config reviewed');
+        code = await p.invoke('package', 'submit', spec.id, 'WP-MAIN', '--commit', cheat);
+      }
+      expect(code).toBe(0);
+      expect(
+        p.state().packages?.['WP-MAIN']?.gate?.checks.find(check => check.checkId === 'APOS-INFRA')?.reason,
+      ).toMatch(/^hạ tầng test bị sửa: .*, duyệt bởi agent:lead: not a cheat$/);
     },
     600_000,
   );

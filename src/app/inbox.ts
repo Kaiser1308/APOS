@@ -68,9 +68,15 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
               ? `manual check ${check.checkId} is confirmed on ${commit}: submit again`
               : `manual check ${check.checkId} awaits confirmation on ${commit} (apos gate confirm), then submit again`
             : check.status === 'needs-human'
-              ? hasException(state, 'needs-human', packageId, commit)
-                ? `exception approved for ${packageId} on ${commit}: submit again with the same commit`
-                : `${check.checkId} needs-human: ${check.reason}. Approve with: apos exception approve ${goalId} --kind needs-human --ref ${packageId} --reason <why> (--by agent:<name> | --human)`
+              ? (() => {
+                  const kind = check.checkId === 'APOS-INFRA' ? 'tests-infra' : 'needs-human';
+                  const approval = (state.exceptions ?? []).find(
+                    entry => entry.kind === kind && entry.ref === packageId && entry.commit === commit,
+                  );
+                  return approval
+                    ? `${check.reason}, duyệt bởi ${approval.by}: submit again with the same commit`
+                    : `${check.checkId} needs-human: ${check.reason}. Approve with: apos exception approve ${goalId} --kind ${kind} --ref ${packageId} --reason <why> (--by agent:<name> | --human)`;
+                })()
               : `${check.checkId} ${check.status}: ${check.reason}`,
         );
       items.push({

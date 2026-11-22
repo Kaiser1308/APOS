@@ -54,6 +54,8 @@ export const catalogEntrySchema = z.object({
   layers: z.partialRecord(catalogLayerId, z.array(catalogToolSchema).min(1)),
   /** Globs, relative to the part's root, of the files that hold tests: what a tester may commit and what gets locked. */
   testPaths: z.array(z.string().min(1)).default([]),
+  /** Globs of files that change how tests run without being tests (conftest, runner config, setup files): changing one needs a decision. */
+  testInfra: z.array(z.string().min(1)).default([]),
   /** Regexes that count an assertion in a test file, line by line. A rough count, not a parse. */
   assertPatterns: z.array(regex),
   /** Regexes that recognise "not implemented yet" in a failing test's message . */

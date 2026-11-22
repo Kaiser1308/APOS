@@ -89,7 +89,7 @@ export function registerPackage(ctx: CliContext): void {
   exception
     .command('approve')
     .argument('<goalId>')
-    .requiredOption('--kind <kind>', 'needs-human | tests-weakened | floor-reduced (phase 4)')
+    .requiredOption('--kind <kind>', 'needs-human | tests-weakened | tests-infra | floor-reduced (phase 4)')
     .requiredOption('--ref <ref>', 'the package id (needs-human) or the revision commit (tests-weakened)')
     .requiredOption('--reason <text>', 'why; the log keeps it')
     .option('--by <agent:name>', 'an agent approves for the Human (spec 7.3); logged as agent:<name>')
@@ -114,7 +114,7 @@ export function registerPackage(ctx: CliContext): void {
             confirmation,
           });
           write(
-            `Approved ${done.kind} for ${done.ref} on ${done.commit} by ${flags.human ? 'the Human' : flags.by}. ${done.kind === 'needs-human' ? `Submit ${done.ref} again with the same commit.` : 'Submit the revision again.'}`,
+            `Approved ${done.kind} for ${done.ref} on ${done.commit} by ${flags.human ? 'the Human' : flags.by}. ${done.kind === 'needs-human' || done.kind === 'tests-infra' ? `Submit ${done.ref} again with the same commit.` : 'Submit the revision again.'}`,
           );
         }),
     );

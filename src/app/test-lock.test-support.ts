@@ -52,6 +52,8 @@ function walk(d) {
   }
 }
 if (fs.existsSync(dir)) walk(dir);
+if (fs.existsSync('tests/infra.cfg') && fs.readFileSync('tests/infra.cfg', 'utf8').includes('swallow'))
+  cases = cases.replace(/<(failure|error) [^>]*\\/>/g, '');
 fs.writeFileSync(out, '<testsuite name="s">' + cases + '</testsuite>');
 `;
 
@@ -69,6 +71,7 @@ export const setupDocument = {
       forbid: ['@skip'],
       tests: {
         paths: ['tests/**'],
+        infra: ['tests/infra.cfg'],
         assertPatterns: ['^case\\b'],
         notImplementedPatterns: ['NotImplementedError'],
         loadErrorPatterns: ['ImportError'],
@@ -97,7 +100,7 @@ export const mapFor = (goalId: string, testIds: string[] = [ids.add]) =>
 
 /** A repo with a fake test tool, an approved setup pinned by a Goal that is `testing`, and a service to lock tests. */
 export async function testingProject(
-  options: { goal?: GoalSpec; setup?: object; files?: Record<string, string> } = {},
+  options: { goal?: GoalSpec; setup?: object; files?: Record<string, string>; paths?: string[] } = {},
 ) {
   const dir = temp('apos-lock-repo-');
   const home = temp('apos-lock-home-');
@@ -131,6 +134,7 @@ export async function testingProject(
       '.apos/project.yaml': setupText,
       'src/impl.txt': '',
       'tests/unit/u.t': 'case one pass\n',
+      'tests/infra.cfg': 'plain\n',
       ...options.files,
     },
     'base',
@@ -159,7 +163,8 @@ export async function testingProject(
       ...proposal,
       rationale: 'one owner',
       baseCommit: base,
-      paths: ['src/**', 'tests/unit/**'],
+      acceptanceMapping: goal.acceptance.map(item => ({ acceptanceId: item.id, verification: 'test' })),
+      paths: options.paths ?? ['src/**', 'tests/unit/**'],
       stubPaths: ['src/stub.txt'],
     }),
   );
@@ -208,5 +213,5 @@ export async function lockedProject(options: Parameters<typeof testingProject>[0
   const gate = new GateService(p.journal, { artifactRoot: p.artifacts, assurance });
   const packages = new PackageService(p.journal, { gate, repoPath: p.dir });
   const submit = (commit: string, packageId = 'WP-MAIN') => packages.submit(p.goalId, packageId, commit, 'worker');
-  return { ...p, lockCommit, gate, packages, submit };
+  return { ...p, lockCommit, gate, packages, assurance, submit };
 }

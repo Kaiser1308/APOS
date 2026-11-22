@@ -61,6 +61,7 @@ describe('parseSetupObject', () => {
     if (parsed.version !== 2) throw new Error('v2 expected');
     expect(parsed.setup.parts.app?.tests).toEqual({
       paths: ['tests/**'],
+      infra: [],
       assertPatterns: [],
       notImplementedPatterns: [],
       loadErrorPatterns: [],

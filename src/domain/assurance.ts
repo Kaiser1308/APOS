@@ -5,6 +5,7 @@ import { testKey, type LayerOutcome, type TestLock } from './test-lock.js';
 export const LOCKED_CHECK = 'APOS-LOCKED';
 export const INVENTORY_CHECK = 'APOS-INVENTORY';
 export const SCOPE_CHECK = 'APOS-SCOPE';
+export const INFRA_CHECK = 'APOS-INFRA';
 
 const result = (checkId: string, status: CheckResult['status'], reason: string): CheckResult => ({
   checkId,
@@ -126,4 +127,23 @@ export function scopeCheck(input: {
   if (sensitive.length)
     return result(SCOPE_CHECK, 'needs-human', `sensitive files changed, a decision is needed: ${sensitive.join(', ')}`);
   return result(SCOPE_CHECK, 'pass', 'every changed file is inside the package paths');
+}
+
+/**
+ * Test infrastructure (conftest, runner config, setup files) can turn a locked red test green without touching it, so a
+ * file that matches the setup's `testInfra` and differs from the lock (changed, added or deleted) needs a decision.
+ * `delivery` maps every infra file on the delivery to its sha256. `inherited` are files a green dependency already
+ * brought, unchanged since its own gate.
+ */
+export function infraCheck(input: {
+  lockInfra: Record<string, string>;
+  delivery: Record<string, string>;
+  inherited?: ReadonlySet<string>;
+}): CheckResult {
+  const touched = [...new Set([...Object.keys(input.lockInfra), ...Object.keys(input.delivery)])]
+    .filter(path => input.lockInfra[path] !== input.delivery[path] && !input.inherited?.has(path))
+    .sort();
+  return touched.length
+    ? result(INFRA_CHECK, 'needs-human', `hạ tầng test bị sửa: ${touched.join(', ')}`)
+    : result(INFRA_CHECK, 'pass', 'test infrastructure unchanged since the lock');
 }

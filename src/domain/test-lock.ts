@@ -27,6 +27,8 @@ const lockSchema = z.object({
   commit,
   files: z.record(z.string().min(1), sha256),
   asserts: z.record(z.string().min(1), z.number().int().nonnegative()),
+  /** sha256 of every test-infrastructure file (conftest, runner config ...) present at the lock commit. Absent on a lock from before this existed. */
+  infra: z.record(z.string().min(1), sha256).optional(),
   map: testMapSchema,
   by: z.string().min(1),
   /** The commit this lock replaced, for a revision. */

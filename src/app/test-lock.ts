@@ -68,7 +68,14 @@ export class TestLockService {
     });
     if (seen.problems.length) return { ok: false, problems: seen.problems };
     this.store.append(
-      newEvent(goalId, 'tests-locked', { commit, files: seen.files, asserts: seen.asserts, map: seen.map, by }),
+      newEvent(goalId, 'tests-locked', {
+        commit,
+        files: seen.files,
+        asserts: seen.asserts,
+        infra: seen.infra,
+        map: seen.map,
+        by,
+      }),
     );
     return { ok: true, problems: [] };
   }
@@ -106,6 +113,7 @@ export class TestLockService {
         commit,
         files: seen.files,
         asserts: seen.asserts,
+        infra: seen.infra,
         map: seen.map,
         by,
         revisionOf: before.commit,

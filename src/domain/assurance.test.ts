@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inventoryCheck, lockedTestsCheck, scopeCheck } from './assurance.js';
+import { infraCheck, inventoryCheck, lockedTestsCheck, scopeCheck } from './assurance.js';
 import { summarizeGate } from './gate.js';
 
 const lock = {
@@ -134,5 +134,33 @@ describe('lockedTestsCheck when the layers did not run', () => {
       status: 'unverifiable',
       reason: 'the delivery layers did not run: app.L2 acceptance: command not found: pytest',
     });
+  });
+});
+
+describe('infraCheck', () => {
+  const lockInfra = { 'tests/conftest.py': 'a'.repeat(64), 'pytest.ini': 'b'.repeat(64) };
+  it('passes when every infra file is as locked', () => {
+    expect(infraCheck({ lockInfra, delivery: { ...lockInfra } })).toMatchObject({
+      checkId: 'APOS-INFRA',
+      status: 'pass',
+    });
+  });
+  it('asks a decision for an infra file that changed, was added or was deleted, naming each', () => {
+    const check = infraCheck({
+      lockInfra,
+      delivery: { 'tests/conftest.py': 'f'.repeat(64), 'tox.ini': 'c'.repeat(64) },
+    });
+    expect(check).toMatchObject({
+      status: 'needs-human',
+      reason: 'hạ tầng test bị sửa: pytest.ini, tests/conftest.py, tox.ini',
+    });
+  });
+  it('does not charge a package for a file its green dependency already brought', () => {
+    const check = infraCheck({
+      lockInfra,
+      delivery: { ...lockInfra, 'tox.ini': 'c'.repeat(64) },
+      inherited: new Set(['tox.ini']),
+    });
+    expect(check.status).toBe('pass');
   });
 });

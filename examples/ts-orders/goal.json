@@ -1,0 +1,72 @@
+{
+  "id": "GOAL-001",
+  "version": 1,
+  "outcome": "An order placed more than 30 days ago cannot be cancelled",
+  "requirements": [
+    {
+      "id": "R-1",
+      "sourceSpan": "paragraph 2",
+      "text": "An order placed more than 30 days ago cannot be cancelled; exactly 30 days or less still can, and the customer is told why",
+      "disposition": "acceptance"
+    },
+    {
+      "id": "R-2",
+      "sourceSpan": "paragraph 3",
+      "text": "A shipped order cannot be cancelled at any age",
+      "disposition": "excluded",
+      "exclusion": { "kind": "out-of-scope" },
+      "exclusionReason": "this rule exists today and has no test; the Goal does not change it"
+    },
+    {
+      "id": "R-3",
+      "sourceSpan": "paragraph 4",
+      "text": "Cancelling must stay fast for the nightly clean-up job",
+      "disposition": "acceptance"
+    }
+  ],
+  "scope": ["src/cancel.ts"],
+  "exclusions": ["Shipped orders: the rule exists today and is not changed here"],
+  "acceptance": [
+    {
+      "id": "AC-1",
+      "text": "An order placed more than 30 days ago is refused and stays open",
+      "requirementIds": ["R-1"],
+      "given": "an open order placed 31 days ago",
+      "when": "the customer cancels it",
+      "then": "the cancellation is refused with a message that says why, and the order stays open",
+      "examples": [{ "input": "placed 31 days ago", "expected": "refused: more than 30 days" }],
+      "boundaries": ["placed exactly 30 days ago: still cancellable"],
+      "checkIds": ["CHK-1"]
+    },
+    {
+      "id": "AC-2",
+      "text": "An order placed 30 days ago or less can be cancelled",
+      "requirementIds": ["R-1"],
+      "given": "an open order placed 30 days ago, or less",
+      "when": "the customer cancels it",
+      "then": "the order is cancelled",
+      "examples": [
+        { "input": "placed exactly 30 days ago", "expected": "cancelled" },
+        { "input": "placed 5 days ago", "expected": "cancelled" }
+      ],
+      "checkIds": ["CHK-1"]
+    },
+    {
+      "id": "AC-3",
+      "text": "1000 cancellations take less than 5 ms at the 99th percentile",
+      "requirementIds": ["R-3"],
+      "proof": "benchmark",
+      "benchmark": {
+        "tool": "app.L5.bench",
+        "metric": "files.0.groups.0.benchmarks.0.p99",
+        "op": "<",
+        "value": 5
+      },
+      "given": "1000 open orders of ages from 0 to 24 days",
+      "when": "all of them are cancelled",
+      "then": "the p99 of one such round is under 5 ms"
+    }
+  ],
+  "checks": [{ "id": "CHK-1", "kind": "command", "command": "npx vitest run", "expect": "pass" }],
+  "priority": 1
+}

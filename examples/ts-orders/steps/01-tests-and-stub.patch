@@ -1,0 +1,68 @@
+diff --git a/.apos/goals/GOAL-001/tests.json b/.apos/goals/GOAL-001/tests.json
+new file mode 100644
+index 0000000..ee50439
+--- /dev/null
++++ b/.apos/goals/GOAL-001/tests.json
+@@ -0,0 +1,17 @@
++[
++  {
++    "acceptanceId": "AC-1",
++    "part": "app",
++    "layer": "L2",
++    "testIds": ["src/cancel.acceptance.test.ts::AC-1: an order placed 31 days ago is refused and stays open"]
++  },
++  {
++    "acceptanceId": "AC-2",
++    "part": "app",
++    "layer": "L2",
++    "testIds": [
++      "src/cancel.acceptance.test.ts::AC-2: an order placed exactly 30 days ago can still be cancelled",
++      "src/cancel.acceptance.test.ts::AC-2: an order placed 5 days ago is cancelled"
++    ]
++  }
++]
+diff --git a/src/cancel.acceptance.test.ts b/src/cancel.acceptance.test.ts
+new file mode 100644
+index 0000000..7f5e631
+--- /dev/null
++++ b/src/cancel.acceptance.test.ts
+@@ -0,0 +1,24 @@
++import { expect, it } from 'vitest';
++import { cancelOrder } from './cancel.ts';
++
++const day = 24 * 60 * 60 * 1000;
++const now = new Date('2026-04-01T12:00:00Z');
++const placedDaysAgo = (days: number) => ({
++  id: 'O-1',
++  placedAt: new Date(now.getTime() - days * day).toISOString(),
++  status: 'open' as const,
++});
++
++it('AC-1: an order placed 31 days ago is refused and stays open', () => {
++  const order = placedDaysAgo(31);
++  expect(() => cancelOrder(order, now)).toThrow('more than 30 days');
++  expect(order.status).toBe('open');
++});
++
++it('AC-2: an order placed exactly 30 days ago can still be cancelled', () => {
++  expect(cancelOrder(placedDaysAgo(30), now).status).toBe('cancelled');
++});
++
++it('AC-2: an order placed 5 days ago is cancelled', () => {
++  expect(cancelOrder(placedDaysAgo(5), now).status).toBe('cancelled');
++});
+diff --git a/src/cancel.ts b/src/cancel.ts
+index 6a7d31b..b884d25 100644
+--- a/src/cancel.ts
++++ b/src/cancel.ts
+@@ -1,7 +1,6 @@
+ import type { Order } from './orders.ts';
+ 
+-/** Cancels an order the customer asked to cancel. A shipped order is on its way and cannot be cancelled. */
+-export function cancelOrder(order: Order): Order {
+-  if (order.status === 'shipped') throw new Error(`order ${order.id} is shipped: it cannot be cancelled`);
+-  return { ...order, status: 'cancelled' };
++/** Stub: the Tester commits this so the acceptance tests fail for the right reason. The Worker fills it in. */
++export function cancelOrder(order: Order, now: Date): Order {
++  throw new Error(`not implemented: cancelOrder(${order.id}, ${now.toISOString()})`);
+ }

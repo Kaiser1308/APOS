@@ -1,0 +1,19 @@
+{
+  "id": "EXEC-001",
+  "version": 1,
+  "goalId": "GOAL-001",
+  "goalVersion": 1,
+  "mode": "solo-direct",
+  "approach": "Keep cancelOrder as the one entry; compare the order age with 30 days in milliseconds",
+  "rationale": "One function in one file: a single owner is faster than splitting",
+  "risks": ["The old shipped-order rule lives in the same function and has no test"],
+  "paths": ["src/cancel.ts"],
+  "stubPaths": ["src/cancel.ts"],
+  "entries": ["cancelOrder"],
+  "acceptanceMapping": [
+    { "acceptanceId": "AC-1", "verification": "locked acceptance test" },
+    { "acceptanceId": "AC-2", "verification": "locked acceptance test" },
+    { "acceptanceId": "AC-3", "verification": "benchmark at the close stage" }
+  ],
+  "verificationStrategy": "locked acceptance tests, then the benchmark at close"
+}

@@ -1,0 +1,15 @@
+diff --git a/src/cancel.ts b/src/cancel.ts
+index cfb2a20..6e20f99 100644
+--- a/src/cancel.ts
++++ b/src/cancel.ts
+@@ -2,8 +2,9 @@ import type { Order } from './orders.ts';
+ 
+ const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+ 
+-/** Cancels an order the customer asked to cancel, unless it was placed more than 30 days ago. */
++/** Cancels an order the customer asked to cancel, unless it is shipped or was placed more than 30 days ago. */
+ export function cancelOrder(order: Order, now: Date): Order {
++  if (order.status === 'shipped') throw new Error(`order ${order.id} is shipped: it cannot be cancelled`);
+   const age = now.getTime() - Date.parse(order.placedAt);
+   if (age > MAX_AGE_MS) throw new Error(`order ${order.id} was placed more than 30 days ago: it cannot be cancelled`);
+   return { ...order, status: 'cancelled' };

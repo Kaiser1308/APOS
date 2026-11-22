@@ -26,7 +26,7 @@
         "command": "mvn -B test -Dtest=\"*Acceptance*\" -Dsurefire.failIfNoSpecifiedTests=false",
         "format": "junit",
         "report": "target/surefire-reports/TEST-*.xml",
-        "runOne": "mvn -B test -Dtest=\"{classname}#{name}\" -Dsurefire.failIfNoSpecifiedTests=false"
+        "runOne": "mvn -B test -Dtest=\"{classname}#{name|noparens}\" -Dsurefire.failIfNoSpecifiedTests=false"
       }
     ],
     "L3": [
@@ -35,10 +35,16 @@
         "command": "mvn -B test -Dtest=\"*Integration*\" -Dsurefire.failIfNoSpecifiedTests=false",
         "format": "junit",
         "report": "target/surefire-reports/TEST-*.xml",
-        "runOne": "mvn -B test -Dtest=\"{classname}#{name}\" -Dsurefire.failIfNoSpecifiedTests=false"
+        "runOne": "mvn -B test -Dtest=\"{classname}#{name|noparens}\" -Dsurefire.failIfNoSpecifiedTests=false"
       }
     ]
   },
+  "loadErrorPatterns": [
+    "initializationError",
+    "ClassNotFoundException",
+    "NoClassDefFoundError",
+    "ExceptionInInitializerError"
+  ],
   "assertPatterns": [
     "\\bassert(?:That|Equals|NotEquals|True|False|Null|NotNull|Same|NotSame|Throws|ThrowsExactly|ArrayEquals|DoesNotThrow|All|Timeout)\\s*\\(",
     "\\bverify\\s*\\("

@@ -1,6 +1,8 @@
 {
   "stack": "python",
-  "notes": ["verified: pytest 9.0.2 (--junitxml). Not verified: ruff (--output-format sarif), mypy, bandit."],
+  "notes": [
+    "verified: pytest 9.0.2 (-o junit_family=xunit1 gives the file attribute; runOne by node id \"file::Class::name\"). Not verified: ruff (--output-format sarif), mypy, bandit."
+  ],
   "detect": {
     "files": ["pyproject.toml"]
   },
@@ -20,24 +22,24 @@
     "L1": [
       {
         "id": "pytest",
-        "command": "pytest --junitxml={report} --ignore=tests/acceptance --ignore=tests/integration",
+        "command": "pytest -o junit_family=xunit1 --junitxml={report} --ignore=tests/acceptance --ignore=tests/integration",
         "format": "junit"
       }
     ],
     "L2": [
       {
         "id": "pytest-acceptance",
-        "command": "pytest tests/acceptance --junitxml={report}",
+        "command": "pytest -o junit_family=xunit1 tests/acceptance --junitxml={report}",
         "format": "junit",
-        "runOne": "pytest tests/acceptance -k \"{name}\" --junitxml={report}"
+        "runOne": "pytest -o junit_family=xunit1 \"{file}::{within}{name}\" --junitxml={report}"
       }
     ],
     "L3": [
       {
         "id": "pytest-integration",
-        "command": "pytest tests/integration --junitxml={report}",
+        "command": "pytest -o junit_family=xunit1 tests/integration --junitxml={report}",
         "format": "junit",
-        "runOne": "pytest tests/integration -k \"{name}\" --junitxml={report}"
+        "runOne": "pytest -o junit_family=xunit1 \"{file}::{within}{name}\" --junitxml={report}"
       }
     ],
     "L5": [
@@ -48,6 +50,12 @@
       }
     ]
   },
+  "loadErrorPatterns": [
+    "^collection failure",
+    "ImportError while importing test module",
+    "ModuleNotFoundError",
+    "SyntaxError"
+  ],
   "assertPatterns": [
     "^\\s*assert\\b",
     "\\bself\\.assert\\w+\\s*\\(",

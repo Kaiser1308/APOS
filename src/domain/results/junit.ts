@@ -46,7 +46,11 @@ export function readJunit(content: string): ParsedReport {
     const base = `${prefix}::${name}`;
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);
-    tests.push({ id: count === 1 ? base : `${base}#${count}`, ...outcome(node) });
+    tests.push({
+      id: count === 1 ? base : `${base}#${count}`,
+      ...outcome(node),
+      ...(node.attrs.file ? { file: node.attrs.file } : {}),
+    });
   };
   if (root.name === 'testsuite') walkSuite(root, visit);
   else walk(root, visit);

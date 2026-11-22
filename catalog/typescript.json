@@ -1,7 +1,7 @@
 {
   "stack": "typescript",
   "notes": [
-    "verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc."
+    "verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc."
   ],
   "detect": {
     "files": ["package.json"],
@@ -34,7 +34,7 @@
         "id": "vitest-acceptance",
         "command": "npx vitest run acceptance.test --reporter=junit --outputFile={report}",
         "format": "junit",
-        "runOne": "npx vitest run {classname} --reporter=junit --outputFile={report} -t \"{name}\""
+        "runOne": "npx vitest run \"{classname}\" --reporter=junit --outputFile={report} -t \"^{name|spaced|regex}$\""
       }
     ],
     "L3": [
@@ -42,7 +42,7 @@
         "id": "vitest-integration",
         "command": "npx vitest run integration.test --reporter=junit --outputFile={report}",
         "format": "junit",
-        "runOne": "npx vitest run {classname} --reporter=junit --outputFile={report} -t \"{name}\""
+        "runOne": "npx vitest run \"{classname}\" --reporter=junit --outputFile={report} -t \"^{name|spaced|regex}$\""
       }
     ],
     "L5": [
@@ -53,6 +53,13 @@
       }
     ]
   },
+  "loadErrorPatterns": [
+    "Failed to load",
+    "Cannot find module",
+    "Failed to resolve import",
+    "SyntaxError",
+    "Transform failed"
+  ],
   "assertPatterns": ["\\bexpect\\s*\\(", "\\bassert(?:\\.\\w+)?\\s*\\(", "\\bexpectTypeOf\\s*\\("],
   "notImplementedPatterns": ["[Nn]ot implemented", "NotImplemented", "TODO: implement"],
   "forbid": [

@@ -66,7 +66,13 @@ export function registerSetupFlow(ctx: CliContext): void {
     .action((flags: { commit: string }) =>
       withJournalAsync(async journal => {
         const commit = resolveCommit(flags.commit);
-        const report = await probeSetup(repo(), commit, { codec, artifactRoot: journal.artifactRoot() });
+        const { entries, warnings } = loadCatalog({ codec });
+        for (const warning of warnings) writeError(`catalog: ${warning}`);
+        const report = await probeSetup(repo(), commit, {
+          codec,
+          artifactRoot: journal.artifactRoot(),
+          catalog: entries,
+        });
         recordProbe(journal, commit, report);
         for (const item of report.results)
           write(`${item.ok ? 'ok  ' : 'FAIL'} ${item.part}.${item.layer} ${item.tool}: ${item.reason}`);

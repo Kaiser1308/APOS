@@ -117,6 +117,17 @@ describe('junit', () => {
       ],
     });
   });
+  it('reads pytest xunit1: the file attribute is kept, class tests carry the class in the classname', () => {
+    const report = readReport('junit', fixture('pytest-xunit1.junit.xml'));
+    expect(report).toEqual({
+      kind: 'tests',
+      tests: [
+        { id: 'test_calc::test_add', status: 'pass', file: 'test_calc.py' },
+        { id: 'test_calc::test_add_neg', status: 'pass', file: 'test_calc.py' },
+        { id: 'test_calc.TestCalc::test_mul', status: 'pass', file: 'test_calc.py' },
+      ],
+    });
+  });
   it('reads jest-junit: message from the body when there is no attribute; no classname falls back to the suite', () => {
     const report = readReport('junit', fixture('jest.junit.xml'));
     expect(report.kind).toBe('tests');
@@ -160,7 +171,10 @@ describe('junit', () => {
   });
   it('takes a testcase with the file attribute when there is no classname', () => {
     const xml = '<testsuite name="s"><testcase file="t/a.py" name="x"/></testsuite>';
-    expect(readReport('junit', xml)).toEqual({ kind: 'tests', tests: [{ id: 't/a.py::x', status: 'pass' }] });
+    expect(readReport('junit', xml)).toEqual({
+      kind: 'tests',
+      tests: [{ id: 't/a.py::x', status: 'pass', file: 't/a.py' }],
+    });
   });
   it('a valid report with no testcases is an empty test list, not unreadable', () => {
     expect(readReport('junit', '<testsuites/>')).toEqual({ kind: 'tests', tests: [] });

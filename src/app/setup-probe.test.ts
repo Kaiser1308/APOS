@@ -9,6 +9,7 @@ import { ProjectJournal } from '../store/journal.js';
 import { newEvent } from './events.js';
 import { initProject } from './init-project.js';
 import { jsonCodec } from '../domain/setup-codec.js';
+import { STACKS } from '../domain/catalog-stacks.test-support.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -30,6 +31,8 @@ const skip = n => tc(n, '<skipped/>');
 let cases;
 if (mode === 'broken') cases = '<testcase';
 else if (mode === 'empty') cases = '';
+else if (mode === 'allerr') cases = '<testcase classname="tests.acceptance.test_calc" name="tests.acceptance.test_calc"><error message="collection failure"/></testcase>';
+else if (mode === 'loaderr') cases = tc('a') + '<testcase classname="m" name="mod"><error message="ImportError while importing test module"/></testcase>';
 else if (name) {
   if (mode === 'none') cases = skip('a') + skip('b');
   else if (mode === 'wrong') cases = tc('b') + skip('a');
@@ -43,14 +46,18 @@ else if (name) {
 fs.writeFileSync(out, mode === 'broken' ? '<testsuite>' + cases : '<testsuite name="suite">' + cases + '</testsuite>');
 `;
 
-async function repoWith(layers: Record<string, unknown[]>, extra: Record<string, unknown> = {}) {
+async function repoWith(
+  layers: Record<string, unknown[]>,
+  extra: Record<string, unknown> = {},
+  part: Record<string, unknown> = {},
+) {
   const dir = temp('apos-probe-repo-');
   execFileSync('git', ['init', '-q', dir]);
   await initProject(dir);
   writeFileSync(join(dir, 'tool.js'), tool);
   const setup = {
     schemaVersion: 2,
-    parts: { app: { root: '.', layers, needsHuman: [], forbid: [] } },
+    parts: { app: { root: '.', layers, needsHuman: [], forbid: [], ...part } },
     ...extra,
   };
   writeFileSync(join(dir, '.apos', 'project.yaml'), jsonCodec.stringify(setup));
@@ -163,6 +170,23 @@ describe('probeSetup', () => {
     await expect(probeSetup(old, head, deps())).rejects.toThrow(/not a v2 setup/);
     await expect(probeSetup(old, 'deadbeef', deps())).rejects.toThrow(/does not exist/);
   }, 60_000);
+});
+
+describe('tests that never loaded', () => {
+  it('fails when every testcase errored (pytest collection failure), with the message', async () => {
+    const { dir, commit } = await repoWith({ L1: [junit('allerr')] });
+    const report = await probeSetup(dir, commit, deps());
+    expect(report.ok).toBe(false);
+    expect(report.results[0]?.reason).toBe('tests could not load: collection failure');
+  }, 60_000);
+  it("fails on a load error among passing tests when the stack's loadErrorPatterns recognise it, and only then", async () => {
+    const python = STACKS.find(entry => entry.stack === 'python')!;
+    const { dir, commit } = await repoWith({ L1: [junit('loaderr')] }, {}, { stack: 'python' });
+    const known = await probeSetup(dir, commit, { ...deps(), catalog: [python] });
+    expect(known.results[0]?.reason).toBe('tests could not load: ImportError while importing test module');
+    const unknown = await probeSetup(dir, commit, { ...deps(), catalog: [{ ...python, loadErrorPatterns: [] }] });
+    expect(unknown.results[0]?.ok).toBe(true);
+  }, 90_000);
 });
 
 describe('approving a probed setup', () => {

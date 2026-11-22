@@ -26,7 +26,7 @@
         "command": "./gradlew cleanTest test --tests \"*Acceptance*\"",
         "format": "junit",
         "report": "build/test-results/test/*.xml",
-        "runOne": "./gradlew cleanTest test --tests \"{classname}.{name}\""
+        "runOne": "./gradlew cleanTest test --tests \"{classname}.{name|noparens}\""
       }
     ],
     "L3": [
@@ -35,10 +35,16 @@
         "command": "./gradlew cleanTest test --tests \"*Integration*\"",
         "format": "junit",
         "report": "build/test-results/test/*.xml",
-        "runOne": "./gradlew cleanTest test --tests \"{classname}.{name}\""
+        "runOne": "./gradlew cleanTest test --tests \"{classname}.{name|noparens}\""
       }
     ]
   },
+  "loadErrorPatterns": [
+    "initializationError",
+    "ClassNotFoundException",
+    "NoClassDefFoundError",
+    "ExceptionInInitializerError"
+  ],
   "assertPatterns": [
     "\\bassert(?:That|Equals|NotEquals|True|False|Null|NotNull|Same|NotSame|Throws|ThrowsExactly|ArrayEquals|DoesNotThrow|All|Timeout)\\s*\\(",
     "\\bverify\\s*\\("

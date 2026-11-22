@@ -13,7 +13,9 @@ import { assertGitRoot } from '../store/project-history.js';
 import { GitWorktreeFactory, type WorkspaceFactory } from './gate-workspace.js';
 import { ShellExecutor, type CommandExecutor, type ExecResult } from './shell-executor.js';
 import { readToolReport } from './report-files.js';
-import { fillRunOne } from './run-one.js';
+import { fillRunOne } from '../domain/run-one.js';
+import { loadFailure } from '../domain/results/load-errors.js';
+import type { CatalogEntry } from '../domain/catalog.js';
 
 export type ProbeDeps = {
   codec: SetupCodec;
@@ -22,6 +24,8 @@ export type ProbeDeps = {
   workspaces?: WorkspaceFactory;
   executor?: CommandExecutor;
   timeoutMs?: number;
+  /** The catalog, for each stack's `loadErrorPatterns`; without it only the "every test errored" rule applies. */
+  catalog?: CatalogEntry[];
 };
 export type ProbeReport = { sha256: string; ok: boolean; results: ProbeResult[] };
 
@@ -84,7 +88,12 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
     }
   };
 
-  const probeTool = (tool: LayerSpec, layer: string, root: string): { ok: boolean; reason: string } => {
+  const probeTool = (
+    tool: LayerSpec,
+    layer: string,
+    root: string,
+    patterns: string[],
+  ): { ok: boolean; reason: string } => {
     const first = run(tool, tool.command, root);
     const problem = notRunnable(first.exec);
     if (problem) return { ok: false, reason: `${problem}: ${tool.command}` };
@@ -95,11 +104,18 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
     if (report.kind === 'unreadable') return { ok: false, reason: `report unreadable: ${report.reason}` };
     if (tool.format === 'junit' && report.kind === 'tests' && !report.tests.length)
       return { ok: false, reason: 'the junit report holds no test' };
+    const unloaded = report.kind === 'tests' ? loadFailure(report.tests, patterns) : undefined;
+    if (unloaded) return { ok: false, reason: unloaded };
     let summary = report.kind === 'tests' ? `${report.tests.length} tests` : report.kind;
     if (report.kind === 'tests' && tool.runOne) {
       const target = report.tests.find(test => test.status !== 'skip');
       if (!target) return { ok: false, reason: 'runOne: the full run has no test that ran, so none to run alone' };
-      const one = run(tool, fillRunOne(tool.runOne, target.id), root);
+      if (/\{(file|within)\b/.test(tool.runOne) && !target.file)
+        return {
+          ok: false,
+          reason: `runOne needs the file of ${target.id}, but the report has no file attribute (pytest: add -o junit_family=xunit1)`,
+        };
+      const one = run(tool, fillRunOne(tool.runOne, target), root);
       const oneProblem = notRunnable(one.exec);
       if (oneProblem) return { ok: false, reason: `runOne ${oneProblem}: ${target.id}` };
       if (!one.report || one.report.kind !== 'tests')
@@ -125,16 +141,20 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
     return { ok: true, reason: summary };
   };
 
-  const scopes: [string, string, Partial<Record<string, LayerSpec[]>>][] = [
-    ...Object.entries(parsed.setup.parts).map(
-      ([name, part]): [string, string, Partial<Record<string, LayerSpec[]>>] => [name, part.root, part.layers],
-    ),
-    ['system', '.', parsed.setup.system ?? {}],
+  type Scope = { part: string; root: string; layers: Partial<Record<string, LayerSpec[]>>; patterns: string[] };
+  const scopes: Scope[] = [
+    ...Object.entries(parsed.setup.parts).map(([part, setup]) => ({
+      part,
+      root: setup.root,
+      layers: setup.layers,
+      patterns: deps.catalog?.find(entry => entry.stack === setup.stack)?.loadErrorPatterns ?? [],
+    })),
+    { part: 'system', root: '.', layers: parsed.setup.system ?? {}, patterns: [] },
   ];
-  for (const [part, root, layers] of scopes)
+  for (const { part, root, layers, patterns } of scopes)
     for (const layer of LAYER_IDS)
       for (const tool of layers[layer] ?? []) {
-        const outcome = probeTool(tool, layer, root);
+        const outcome = probeTool(tool, layer, root, patterns);
         results.push({ part, layer, tool: tool.id, ...outcome });
       }
   return { sha256: parsed.sha256, ok: results.length > 0 && results.every(item => item.ok), results };

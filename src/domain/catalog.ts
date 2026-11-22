@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { runOneProblem } from './run-one.js';
 import type { ResultFormat } from './results/types.js';
 
 export const RESULT_FORMATS = ['junit', 'sarif', 'metric', 'apos-json'] as const satisfies readonly ResultFormat[];
@@ -21,7 +22,10 @@ export const catalogToolSchema = z.object({
     .string()
     .trim()
     .min(1)
-    .refine(value => /\{(id|classname|name)\}/.test(value), 'runOne must contain {id}, {classname} or {name}')
+    .superRefine((value, ctx) => {
+      const problem = runOneProblem(value);
+      if (problem) ctx.addIssue({ code: 'custom', message: `runOne ${problem}` });
+    })
     .optional(),
 });
 export type CatalogTool = z.infer<typeof catalogToolSchema>;
@@ -52,6 +56,8 @@ export const catalogEntrySchema = z.object({
   assertPatterns: z.array(regex),
   /** Regexes that recognise "not implemented yet" in a failing test's message (wave 3). */
   notImplementedPatterns: z.array(regex),
+  /** Regexes that recognise a test that never loaded (collection, import or class-init error), matched on the failure message. */
+  loadErrorPatterns: z.array(regex).default([]),
   /** Regexes forbidden in added diff lines: the strict floor a draft starts with. */
   forbid: z.array(regex),
   /** Globs of sensitive files that need a Human. */

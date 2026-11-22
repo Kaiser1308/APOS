@@ -5,6 +5,7 @@ const test = z.object({
   id: z.string().min(1),
   status: z.enum(['pass', 'fail', 'error', 'skip']),
   message: z.string().optional(),
+  file: z.string().optional(),
 });
 const finding = z.object({
   ruleId: z.string().min(1),

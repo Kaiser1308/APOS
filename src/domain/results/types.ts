@@ -1,5 +1,11 @@
 export type ResultFormat = 'junit' | 'sarif' | 'metric' | 'apos-json';
-export type TestOutcome = { id: string; status: 'pass' | 'fail' | 'error' | 'skip'; message?: string };
+export type TestOutcome = {
+  id: string;
+  status: 'pass' | 'fail' | 'error' | 'skip';
+  message?: string;
+  /** The `file` attribute of the testcase when the runner writes one (pytest with junit_family=xunit1). */
+  file?: string;
+};
 export type Finding = { ruleId: string; level: 'error' | 'warning' | 'note'; file?: string; line?: number };
 export type ParsedReport =
   | { kind: 'tests'; tests: TestOutcome[] }

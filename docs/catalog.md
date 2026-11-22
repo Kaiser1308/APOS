@@ -39,6 +39,7 @@ The file format is the one the build injects as `SetupCodec` (JSON today; see [s
 | `stack` | Lowercase name; `apos setup draft --part <name>=<dir>:<stack>` uses it. |
 | `detect` | A directory is this stack when every file in `files` exists and every `contains` substring is found. |
 | `layers` | Tools per layer `L0` to `L5` (`L6` is a hand confirmation, never a tool). The first tool of each layer is what a draft picks. |
+| `loadErrorPatterns` | Regexes matched on a failing test's message to recognise a test that never loaded (a collection or import error, a broken class). The probe fails with `tests could not load: <message>` on such a test, and also when every test in a report errored. Phase 3 reuses them to tell "red for the right reason" from "could not run". |
 | `assertPatterns`, `notImplementedPatterns` | Regexes for phase 3 (counting assertions, recognising "not implemented yet"). Prepared here, not used yet. |
 | `forbid` | Regexes forbidden in added diff lines: the strict floor a draft starts with. |
 | `needsHuman` | Globs of sensitive files (dependencies, build config) that need a Human. |
@@ -53,7 +54,20 @@ The file format is the one the build injects as `SetupCodec` (JSON today; see [s
 | `format` | `junit`, `sarif`, `metric`, `apos-json`, or `exit`. |
 | `report` | Where the report is when the command does not use `{report}`: a path or glob relative to the part. Every file the glob matches is read and merged; no file means the report is unreadable. |
 | `metric` | For `format: metric`: dotted path to the number (e.g. `metrics.mutationScore`). Omit when the file is one number. |
-| `runOne` | Runs a single test, needed to prove a test can run alone. `{id}` is the whole test id (`<classname>::<name>`); `{classname}` and `{name}` are its halves, split at the first `::`. Quotes, backslashes, `$` and backticks in the value are escaped for a double-quoted context. |
+| `runOne` | Runs a single test, needed to prove a test can run alone; see below. |
+
+### `runOne` placeholders
+
+The probe takes the first test of the full run that did not skip and fills the template with it. The probe passes only if the run reports exactly one test that did not skip, with the same id (a runner may list the others as skipped).
+
+| Placeholder | Value |
+| --- | --- |
+| `{id}` | The whole test id, `<classname>::<name>`. |
+| `{classname}`, `{name}` | Its two halves, split at the first `::`. |
+| `{file}` | The `file` attribute of the testcase, when the runner writes one (pytest needs `-o junit_family=xunit1`). The probe fails with that hint when `{file}` is used and the report has none. |
+| `{within}` | The class segments between the file's module path and the test name, as `Class::Inner::`, or empty: `{file}::{within}{name}` is a pytest node id for a function or a method. |
+
+A modifier changes the value before it is quoted: `{name|regex}` escapes regex characters, `{name|spaced}` turns ` > ` (how vitest joins describe names in a report) into a space, `{name|noparens}` drops a trailing `(...)` (JUnit 5 names), and modifiers chain left to right: vitest uses `-t "^{name|spaced|regex}$"` to match one test by its exact full name, nested `describe` included. After the modifiers the value is escaped for a double-quoted shell string (quotes, backslashes, and off Windows `$` and backticks), so put the placeholder inside double quotes. An unknown placeholder or modifier makes the catalog file invalid.
 
 ### The result formats
 

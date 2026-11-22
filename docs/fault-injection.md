@@ -80,6 +80,9 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | Approval without a passing probe, or a version that skips | refused when appended to the project log | `project-log.test.ts` |
 | Project log edited | reported as tampering; torn tail dropped | `project-log.test.ts` › detects an edited line |
 | `runOne` runs two tests, none, or another one | probe fails and names the test | `setup-probe.test.ts` › fails and names the test when runOne … |
+| Test module that cannot be imported (pytest collection failure: every testcase is an `<error>`) | probe fails: `tests could not load: <message>`, not "1 tests, stable" | `setup-probe.test.ts` › tests that never loaded; `setup-e2e.test.ts` (real pytest) |
+| `runOne` of a test whose name is a prefix of another (`test_add`, `test_add_neg`), a class test, or a vitest test nested in `describe` | runs exactly that one test; the draft passes the probe | `setup-e2e.test.ts` (real pytest and vitest, skipped when absent) |
+| Same setup text probed at commit A (fail) then B (fail for another reason), approve at B | the reason of the latest probe at B; a commit never probed says so | `setup-probe.test.ts` › judges by the latest probe at this commit |
 | Tool that does not exist, times out, or gives different results on two runs | probe fails with the reason | `setup-probe.test.ts` |
 | Part whose stack is not recognised | draft still produced, part empty, note `chưa nhận ra stack` | `setup-draft.test.ts` |
 | Delivery edits `.apos/project.yaml` | gate red, `APOS-PROTECTED` | `gate-service.test.ts` › fails the gate when the delivery edits the approved setup |

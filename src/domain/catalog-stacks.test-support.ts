@@ -13,7 +13,7 @@ export const STACKS: CatalogEntry[] = [
   {
     stack: 'typescript',
     notes: [
-      'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc.',
+      'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc.',
     ],
     detect: { files: ['package.json'], contains: { 'package.json': '"vitest"' } },
     layers: {
@@ -40,7 +40,7 @@ export const STACKS: CatalogEntry[] = [
           id: 'vitest-acceptance',
           command: 'npx vitest run acceptance.test --reporter=junit --outputFile={report}',
           format: 'junit',
-          runOne: 'npx vitest run {classname} --reporter=junit --outputFile={report} -t "{name}"',
+          runOne: 'npx vitest run "{classname}" --reporter=junit --outputFile={report} -t "^{name|spaced|regex}$"',
         },
       ],
       L3: [
@@ -48,11 +48,18 @@ export const STACKS: CatalogEntry[] = [
           id: 'vitest-integration',
           command: 'npx vitest run integration.test --reporter=junit --outputFile={report}',
           format: 'junit',
-          runOne: 'npx vitest run {classname} --reporter=junit --outputFile={report} -t "{name}"',
+          runOne: 'npx vitest run "{classname}" --reporter=junit --outputFile={report} -t "^{name|spaced|regex}$"',
         },
       ],
       L5: [{ id: 'semgrep', command: 'semgrep scan --config auto --sarif-output={report} .', format: 'sarif' }],
     },
+    loadErrorPatterns: [
+      'Failed to load',
+      'Cannot find module',
+      'Failed to resolve import',
+      'SyntaxError',
+      'Transform failed',
+    ],
     assertPatterns: ['\\bexpect\\s*\\(', '\\bassert(?:\\.\\w+)?\\s*\\(', '\\bexpectTypeOf\\s*\\('],
     notImplementedPatterns: ['[Nn]ot implemented', 'NotImplemented', 'TODO: implement'],
     forbid: [
@@ -74,7 +81,9 @@ export const STACKS: CatalogEntry[] = [
   },
   {
     stack: 'python',
-    notes: ['verified: pytest 9.0.2 (--junitxml). Not verified: ruff (--output-format sarif), mypy, bandit.'],
+    notes: [
+      'verified: pytest 9.0.2 (-o junit_family=xunit1 gives the file attribute; runOne by node id "file::Class::name"). Not verified: ruff (--output-format sarif), mypy, bandit.',
+    ],
     detect: { files: ['pyproject.toml'] },
     layers: {
       L0: [
@@ -84,28 +93,35 @@ export const STACKS: CatalogEntry[] = [
       L1: [
         {
           id: 'pytest',
-          command: 'pytest --junitxml={report} --ignore=tests/acceptance --ignore=tests/integration',
+          command:
+            'pytest -o junit_family=xunit1 --junitxml={report} --ignore=tests/acceptance --ignore=tests/integration',
           format: 'junit',
         },
       ],
       L2: [
         {
           id: 'pytest-acceptance',
-          command: 'pytest tests/acceptance --junitxml={report}',
+          command: 'pytest -o junit_family=xunit1 tests/acceptance --junitxml={report}',
           format: 'junit',
-          runOne: 'pytest tests/acceptance -k "{name}" --junitxml={report}',
+          runOne: 'pytest -o junit_family=xunit1 "{file}::{within}{name}" --junitxml={report}',
         },
       ],
       L3: [
         {
           id: 'pytest-integration',
-          command: 'pytest tests/integration --junitxml={report}',
+          command: 'pytest -o junit_family=xunit1 tests/integration --junitxml={report}',
           format: 'junit',
-          runOne: 'pytest tests/integration -k "{name}" --junitxml={report}',
+          runOne: 'pytest -o junit_family=xunit1 "{file}::{within}{name}" --junitxml={report}',
         },
       ],
       L5: [{ id: 'bandit', command: 'bandit -r . -f sarif -o {report}', format: 'sarif' }],
     },
+    loadErrorPatterns: [
+      '^collection failure',
+      'ImportError while importing test module',
+      'ModuleNotFoundError',
+      'SyntaxError',
+    ],
     assertPatterns: [
       '^\\s*assert\\b',
       '\\bself\\.assert\\w+\\s*\\(',
@@ -154,7 +170,7 @@ export const STACKS: CatalogEntry[] = [
           command: './gradlew cleanTest test --tests "*Acceptance*"',
           format: 'junit',
           report: 'build/test-results/test/*.xml',
-          runOne: './gradlew cleanTest test --tests "{classname}.{name}"',
+          runOne: './gradlew cleanTest test --tests "{classname}.{name|noparens}"',
         },
       ],
       L3: [
@@ -163,10 +179,16 @@ export const STACKS: CatalogEntry[] = [
           command: './gradlew cleanTest test --tests "*Integration*"',
           format: 'junit',
           report: 'build/test-results/test/*.xml',
-          runOne: './gradlew cleanTest test --tests "{classname}.{name}"',
+          runOne: './gradlew cleanTest test --tests "{classname}.{name|noparens}"',
         },
       ],
     },
+    loadErrorPatterns: [
+      'initializationError',
+      'ClassNotFoundException',
+      'NoClassDefFoundError',
+      'ExceptionInInitializerError',
+    ],
     assertPatterns: [
       '\\bassert(?:That|Equals|NotEquals|True|False|Null|NotNull|Same|NotSame|Throws|ThrowsExactly|ArrayEquals|DoesNotThrow|All|Timeout)\\s*\\(',
       '\\bverify\\s*\\(',
@@ -205,7 +227,7 @@ export const STACKS: CatalogEntry[] = [
           command: 'mvn -B test -Dtest="*Acceptance*" -Dsurefire.failIfNoSpecifiedTests=false',
           format: 'junit',
           report: 'target/surefire-reports/TEST-*.xml',
-          runOne: 'mvn -B test -Dtest="{classname}#{name}" -Dsurefire.failIfNoSpecifiedTests=false',
+          runOne: 'mvn -B test -Dtest="{classname}#{name|noparens}" -Dsurefire.failIfNoSpecifiedTests=false',
         },
       ],
       L3: [
@@ -214,10 +236,16 @@ export const STACKS: CatalogEntry[] = [
           command: 'mvn -B test -Dtest="*Integration*" -Dsurefire.failIfNoSpecifiedTests=false',
           format: 'junit',
           report: 'target/surefire-reports/TEST-*.xml',
-          runOne: 'mvn -B test -Dtest="{classname}#{name}" -Dsurefire.failIfNoSpecifiedTests=false',
+          runOne: 'mvn -B test -Dtest="{classname}#{name|noparens}" -Dsurefire.failIfNoSpecifiedTests=false',
         },
       ],
     },
+    loadErrorPatterns: [
+      'initializationError',
+      'ClassNotFoundException',
+      'NoClassDefFoundError',
+      'ExceptionInInitializerError',
+    ],
     assertPatterns: [
       '\\bassert(?:That|Equals|NotEquals|True|False|Null|NotNull|Same|NotSame|Throws|ThrowsExactly|ArrayEquals|DoesNotThrow|All|Timeout)\\s*\\(',
       '\\bverify\\s*\\(',

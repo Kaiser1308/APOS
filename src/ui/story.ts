@@ -1,6 +1,5 @@
 import type { ExecutionProposal } from '../domain/contracts.js';
 import type { GoalEvent, GoalState } from '../domain/transitions.js';
-import { dispatchesOf } from './activity.js';
 import type { ReadOnlyJournal } from '../store/readonly-journal.js';
 
 /** One thing an owner or the Lead put on record. Only structured sources: nothing here is inferred from prose. */
@@ -18,9 +17,7 @@ export type StoryOwner = {
   attempts: number;
   outcome?: string;
   dependencies: string[];
-  latestCheckpoint?: { phase: string; progress: string; at: string };
   entries: StoryEntry[];
-  dispatches: { dispatchId: string; role: string; at: string }[];
 };
 export type Story = {
   goal: {
@@ -63,6 +60,27 @@ function entryOf(event: GoalEvent): { owner: string; entry: StoryEntry } | undef
   const owner = typeof data.packageId === 'string' ? data.packageId : 'goal';
   const base = { at: event.at, type: event.type };
   switch (event.type) {
+    case 'package-submitted':
+      return {
+        owner,
+        entry: {
+          ...base,
+          kind: 'report',
+          by: str(data.by),
+          text: `submitted ${str(data.commit).slice(0, 7)} for its gate`,
+        },
+      };
+    case 'package-gate-recorded': {
+      const report = obj(data.report);
+      return {
+        owner,
+        entry: {
+          ...base,
+          kind: 'report',
+          text: `gate ${str(report.result)} on ${str(report.deliveryCommit).slice(0, 7)}`,
+        },
+      };
+    }
     case 'decision-logged':
       return { owner, entry: { ...base, kind: 'decision', text: str(data.note) } };
     case 'checkpointed':
@@ -117,17 +135,17 @@ export function buildStory(repo: ReadOnlyJournal, id: string): Story | undefined
   if (!state) return undefined;
   const proposal = state.proposal;
   const owners = new Map<string, StoryOwner>();
-  const multi = proposal?.mode === 'multi-wp' || Object.keys(state.packages ?? {}).length > 0;
+  // A Solo plan's implicit WP-MAIN is the Goal itself: its entries stay under the Goal.
+  const multi = proposal?.mode === 'multi-wp';
   owners.set('goal', {
     id: 'goal',
-    label: multi ? 'Goal (Lead / chung)' : 'Owner (Solo)',
+    label: multi ? 'Goal (Lead / chung)' : 'Goal (Solo)',
     status: state.status,
-    attempts: state.soloAttempts ?? 0,
+    attempts: 0,
     dependencies: [],
     entries: [],
-    dispatches: [],
   });
-  for (const item of Object.values(state.packages ?? {})) {
+  for (const item of multi ? Object.values(state.packages ?? {}) : []) {
     owners.set(item.spec.id, {
       id: item.spec.id,
       label: item.spec.id,
@@ -136,7 +154,6 @@ export function buildStory(repo: ReadOnlyJournal, id: string): Story | undefined
       outcome: item.spec.outcome,
       dependencies: item.spec.dependencies,
       entries: [],
-      dispatches: [],
     });
   }
   for (const event of repo.events(id)) {
@@ -144,13 +161,7 @@ export function buildStory(repo: ReadOnlyJournal, id: string): Story | undefined
     if (!hit) continue;
     const target = owners.get(hit.owner) ?? owners.get('goal')!;
     target.entries.push(hit.entry);
-    if (event.type === 'checkpointed') {
-      const data = obj(event.data);
-      target.latestCheckpoint = { phase: str(data.phase), progress: str(data.progress), at: event.at };
-    }
   }
-  for (const d of dispatchesOf(repo.events(id)))
-    (owners.get(d.owner) ?? owners.get('goal')!).dispatches.push({ dispatchId: d.dispatchId, role: d.role, at: d.at });
   const ordered = [...owners.values()].filter(item => item.id !== 'goal' || item.entries.length || !multi);
   return {
     goal: {

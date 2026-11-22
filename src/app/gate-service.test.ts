@@ -78,7 +78,6 @@ async function project() {
   add('goal-selected');
   add('proposal-drafted', { ...proposal, baseCommit: base });
   add('proposal-approved');
-  add('execution-started', { runId: 'run_1', owner: 'lead', baseCommit: git('rev-parse', 'HEAD') });
   const commit = (files: Record<string, string>, message: string) => {
     for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
     git('add', '-A', '--', '.', ':!.apos');
@@ -91,7 +90,7 @@ async function project() {
 
 describe('controller gate on real commits', () => {
   it('goes green when the feature passes and only pre-existing failures remain, with logs hashed outside the repo', async () => {
-    const { dir, commit, gate, journal, artifacts } = await project();
+    const { dir, commit, gate, artifacts } = await project();
     const delivery = commit({ 'feature.js': 'process.exit(0);' }, 'feature');
     const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery });
     expect(report.result).toBe('green');
@@ -100,7 +99,6 @@ describe('controller gate on real commits', () => {
     expect(regression.reason).toMatch(/already present on base/);
     expect(regression.delivery[0].logRef.startsWith(artifacts)).toBe(true);
     expect(readFileSync(regression.delivery[0].logRef, 'utf8')).toContain(`# commit ${delivery}`);
-    expect(new VerificationService(journal).verify(baseSpec.id, delivery).passed).toBe(true);
   }, 60_000);
 
   it('goes red and names the test the delivery newly broke', async () => {
@@ -224,14 +222,15 @@ describe('controller gate on real commits', () => {
     expect(existsSync(workspace.path)).toBe(false);
   }, 60_000);
 
-  it('accepts manual confirmation only for a declared manual check and never from the owner', async () => {
-    const { commit, gate } = await project();
+  it('accepts manual confirmation only for a declared manual check and never from whoever submitted the work', async () => {
+    const { commit, gate, add, base } = await project();
     const delivery = commit({ 'feature.js': 'process.exit(0);' }, 'feature');
+    add('package-submitted', { packageId: 'WP-MAIN', version: 1, commit: delivery, base, by: 'lead' });
     expect(() =>
       gate.confirmManual(baseSpec.id, { checkId: 'CHK-1', deliveryCommit: delivery, by: 'human', note: 'looked' }),
     ).toThrow(/Unknown manual check/);
     expect(() =>
       gate.confirmManual(baseSpec.id, { checkId: 'CHK-1', deliveryCommit: delivery, by: 'lead', note: 'mine' }),
-    ).toThrow(/other than the owner/);
+    ).toThrow(/other than whoever submitted/);
   }, 60_000);
 });

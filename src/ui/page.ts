@@ -28,10 +28,10 @@ h3 { font-size:14px; margin:14px 0 6px; }
 .item .k { font-weight:600; }
 .item .d { color:var(--mute); font-size:13px; overflow-wrap:anywhere; }
 .chip { display:inline-block; padding:1px 8px; border-radius:10px; background:var(--chip); font-size:12px; }
-.chip.human,.chip.blocked,.chip.red,.chip.fail,.chip.stale { background:var(--bad); color:#fff; }
+.chip.human,.chip.blocked,.chip.red,.chip.fail { background:var(--bad); color:#fff; }
 .chip.verified,.chip.green,.chip.pass,.chip.closed,.chip.done { background:var(--ok); color:#fff; }
-.chip.executing,.chip.dispatching,.chip.resuming,.chip.controller { background:var(--accent); color:#fff; }
-.chip.lead,.chip.unverifiable,.chip.manual-pending { background:var(--warn); color:#fff; }
+.chip.executing,.chip.submitted { background:var(--accent); color:#fff; }
+.chip.lead,.chip.unverifiable,.chip.manual-pending,.chip.needs-human,.chip.legacy { background:var(--warn); color:#fff; }
 table { width:100%; border-collapse:collapse; }
 th, td { text-align:left; padding:6px 8px; border-top:1px solid var(--line); vertical-align:top; }
 th { color:var(--mute); font-weight:500; font-size:12px; }
@@ -82,7 +82,6 @@ details > summary { cursor:pointer; color:var(--accent); }
   <h1>APOS</h1>
   <span class="meta" id="read"></span>
   <span class="meta" id="last"></span>
-  <span class="meta" id="tick"></span>
 </header>
 <div id="banner" role="alert"></div>
 <main>
@@ -91,9 +90,9 @@ details > summary { cursor:pointer; color:var(--accent); }
 </main>
 <script>
 (function () {
-  var HOLDERS = [["human", "Human"], ["lead", "Lead"], ["controller", "Controller / agent"], ["done", "Done"]];
-  var STEPS = ["draft", "approved", "selected", "planned", "ready", "executing", "verified", "closed"];
-  var state = { snap: null, goal: null, tab: "story", story: null, open: {}, act: {}, lastGood: null, failed: false, doneOpen: false, timeline: [], nextBefore: null };
+  var HOLDERS = [["human", "Human"], ["lead", "Lead"], ["done", "Done"]];
+  var STEPS = ["draft", "approved", "selected", "planned", "executing", "verified", "closed"];
+  var state = { snap: null, goal: null, tab: "story", story: null, lastGood: null, failed: false, doneOpen: false, timeline: [], nextBefore: null };
 
   function h(tag, attrs, kids) {
     var el = document.createElement(tag);
@@ -109,29 +108,21 @@ details > summary { cursor:pointer; color:var(--accent); }
     if (s < 86400) return Math.round(s / 3600) + "h ago"; return Math.round(s / 86400) + "d ago";
   }
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
-  function num(n) { return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n); }
-  function usageText(u) {
-    if (!u) return "-";
-    var t = num(u.inputTokens) + " in (" + num(u.cachedInputTokens) + " cached) / " + num(u.outputTokens) + " out";
-    if (u.unknownDispatches) t += " + " + u.unknownDispatches + " unknown";
-    return t;
-  }
   function budget(g) {
     var a = g.appetite; if (!a) return "no appetite yet";
-    return "owner attempts " + g.attempts + "/" + a.maxAttempts + ", " + g.elapsedMinutes + "/" + a.maxWallMinutes + " min, max $" + a.maxSpendUsd + " (spend not measured)";
+    return "submit đỏ nhiều nhất ở một gói " + g.attempts + "/" + a.maxAttempts + ", " + g.elapsedMinutes + "/" + a.maxWallMinutes + " phút";
   }
   function get(path) {
     return fetch(path, { cache: "no-store" }).then(function (r) {
       return r.text().then(function (body) { if (!r.ok) throw new Error(path + " -> " + r.status + " " + body.slice(0, 200)); return body; });
     });
   }
-  function select(id) { state.goal = id; state.detail = null; state.detailError = null; state.story = null; state.open = {}; state.act = {}; state.tab = "story"; state.timeline = []; state.nextBefore = null; location.hash = id || ""; render(); if (id) loadDetail(); }
+  function select(id) { state.goal = id; state.detail = null; state.detailError = null; state.story = null; state.tab = "story"; state.timeline = []; state.nextBefore = null; location.hash = id || ""; render(); if (id) loadDetail(); }
 
   function renderHeader() {
     var s = state.snap;
     document.getElementById("read").textContent = s ? "read " + new Date(s.readAt).toLocaleTimeString() : "";
     document.getElementById("last").textContent = s ? "last event " + age(s.lastEventAt) : "";
-    document.getElementById("tick").textContent = s ? (s.tickRunning ? "controller tick running" : "no tick running right now") : "";
     var b = document.getElementById("banner");
     if (state.failed) { b.style.display = "block"; b.textContent = "Cannot read the controller. Showing data from " + (state.lastGood ? new Date(state.lastGood).toLocaleTimeString() : "never") + "."; }
     else b.style.display = "none";
@@ -147,15 +138,16 @@ details > summary { cursor:pointer; color:var(--accent); }
       ]));
     });
   }
+  var LEGACY_NOTE = "chỉ đọc – APOS cũ";
   function goalTable(goals) {
     var t = h("table", null, [h("tr", null, ["Goal", "Outcome", "Status", "Mode", "Packages", "Budget", "Last event"].map(function (c) { return h("th", { text: c }); }))]);
     goals.forEach(function (g) {
       t.appendChild(h("tr", { class: "goal", onclick: function () { select(g.id); } }, [
         h("td", { text: g.id }),
         h("td", g.integrityError ? { class: "err", text: "log integrity: " + g.integrityError } : { text: g.outcome || "" }),
-        h("td", null, [g.status ? chip(g.status) : null]),
+        h("td", null, [g.status ? chip(g.status) : null, g.legacy ? h("div", { class: "mute", text: LEGACY_NOTE }) : null]),
         h("td", { text: g.mode || "-" }),
-        h("td", { text: g.packages.total ? g.packages.verified + "/" + g.packages.total : "-" }),
+        h("td", { text: g.packages.total ? g.packages.green + "/" + g.packages.total : "-" }),
         h("td", { class: "mute", text: budget(g) }),
         h("td", { class: "mute", text: age(g.lastEventAt) })
       ]));
@@ -203,7 +195,7 @@ details > summary { cursor:pointer; color:var(--accent); }
     var svg = s("svg", { width: (maxCol + 1) * (W + GX) + 16, height: maxRows * (H + GY) + 16, role: "img", "aria-label": "work package dependency graph" });
     var defs = s("defs", {}); var mk = s("marker", { id: "arr", markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: "auto" });
     mk.appendChild(s("path", { d: "M0,0 L8,4 L0,8 z", fill: "#888" })); defs.appendChild(mk); svg.appendChild(defs);
-    var COLOR = { verified: "#1a7f4b", executing: "#2f5bd8", dispatching: "#2f5bd8", resuming: "#2f5bd8", blocked: "#c0392b", stale: "#c0392b", specified: "#8a93a6" };
+    var COLOR = { green: "#1a7f4b", submitted: "#2f5bd8", red: "#c0392b", "needs-human": "#b9770e", pending: "#8a93a6" };
     packages.forEach(function (p) { p.dependencies.forEach(function (x) { if (!pos[x]) return; var a = pos[x], b = pos[p.id]; svg.appendChild(s("line", { x1: a.x + W, y1: a.y + H / 2, x2: b.x, y2: b.y + H / 2, stroke: "#888", "marker-end": "url(#arr)" })); }); });
     packages.forEach(function (p) {
       var q = pos[p.id]; var g = s("g", {});
@@ -223,19 +215,16 @@ details > summary { cursor:pointer; color:var(--accent); }
     box.appendChild(steps);
     if (g.status === "blocked") box.appendChild(h("div", { class: "err", text: "Blocked: " + JSON.stringify(g.blocker) }));
     if (g.status === "stopped") box.appendChild(h("div", { class: "mute", text: "Stopped by the Human." }));
+    if (g.status === "legacy") box.appendChild(h("div", { class: "mute", text: LEGACY_NOTE + ": Goal này do APOS bản cũ (có điều phối agent) ghi; xem được, không chạy tiếp." + (g.legacyOutcome ? " Kết thúc: " + g.legacyOutcome + "." : "") }));
     box.appendChild(h("h3", { text: "Budget" })); box.appendChild(h("div", { text: budget(g) }));
-    box.appendChild(h("div", { class: "mute", text: "Tokens: " + usageText(g.usage) }));
     if (g.packageList.length) { box.appendChild(h("h3", { text: "Work packages" })); box.appendChild(dag(g.packageList));
-      g.packageList.forEach(function (p) { box.appendChild(h("div", null, [h("b", { text: p.id + " " }), chip(p.status), h("span", { class: "mute", text: " " + p.owner + ", attempts " + p.attempts + (g.appetite ? "/" + g.appetite.maxAttempts : "") + " - " + p.outcome }), p.blocker ? h("div", { class: "err", text: p.blocker.kind + ": " + p.blocker.note }) : null])); }); }
+      g.packageList.forEach(function (p) { box.appendChild(h("div", null, [h("b", { text: p.id + " " }), chip(p.status), h("span", { class: "mute", text: " " + p.owner + ", submit đỏ " + p.attempts + (g.appetite ? "/" + g.appetite.maxAttempts : "") + " - " + p.outcome }), p.blocker ? h("div", { class: "err", text: p.blocker.kind + ": " + p.blocker.note }) : null])); }); }
     box.appendChild(h("h3", { text: "Findings" }));
     if (!g.findings.length) box.appendChild(h("div", { class: "mute", text: "none" }));
     g.findings.forEach(function (f) { box.appendChild(h("div", null, [chip(f.kind, "lead"), h("span", { text: " " + f.note }), h("span", { class: "mute", text: " (" + f.by + ")" })])); });
     box.appendChild(h("h3", { text: "Reviews" }));
     if (!g.reviews.length) box.appendChild(h("div", { class: "mute", text: "none" }));
     g.reviews.forEach(function (r) { box.appendChild(h("div", null, [chip(r.result, r.result === "pass" ? "pass" : "fail"), h("span", { text: " " + r.subject + (r.packageId ? " " + r.packageId : "") + " by " + r.reviewer + " on " + r.commitRef.slice(0, 10) + ": " + r.note })])); });
-    box.appendChild(h("h3", { text: "Telemetry" }));
-    if (!g.telemetry.length) box.appendChild(h("div", { class: "mute", text: "none" }));
-    g.telemetry.forEach(function (t) { box.appendChild(h("div", { class: "mute", text: t.role + " " + t.dispatchId + " " + (t.model || "?") + ": " + (t.usage === "unknown" || !t.usage ? "usage unknown" : usageText({ inputTokens: t.usage.inputTokens, cachedInputTokens: t.usage.cachedInputTokens, outputTokens: t.usage.outputTokens, unknownDispatches: 0 })) + (t.wallMs ? ", " + Math.round(t.wallMs / 60000) + " min" : "") })); });
     return box;
   }
   function gates(g) {
@@ -243,6 +232,7 @@ details > summary { cursor:pointer; color:var(--accent); }
     if (!g.gates.length) return h("div", { class: "mute", text: "No gate has run yet." });
     g.gates.forEach(function (gate) {
       box.appendChild(h("h3", null, [h("span", { text: gate.scope + " " }), chip(gate.result), h("span", { class: "mute", text: " " + gate.commit.slice(0, 10) + " " + age(gate.at) })]));
+      (gate.warnings || []).forEach(function (w) { box.appendChild(h("div", { class: "err", text: w })); });
       gate.checks.forEach(function (c) {
         var line = h("div", null, [chip(c.status), h("span", { text: " " + c.checkId + ": " + c.reason })]);
         c.logs.forEach(function (l) { line.appendChild(document.createTextNode(" ")); line.appendChild(h("a", { href: "/api/goals/" + encodeURIComponent(g.id) + "/gate-log/" + l.logSha256, target: "_blank", rel: "noopener", text: l.role + " log" + (l.exitCode === null ? "" : " (exit " + l.exitCode + ")") })); });
@@ -282,7 +272,7 @@ details > summary { cursor:pointer; color:var(--accent); }
     c.appendChild(h("div", { class: "ct" }, [h("span", { class: "mode", text: l.modeLabel }), chip(l.approved ? "controller đã duyệt" : "chờ controller duyệt", l.approved ? "pass" : "lead")]));
     var maps = h("table", null, [h("tr", null, [h("th", { text: "Acceptance" }), h("th", { text: "Kiểm bằng" })])]);
     l.acceptanceMapping.forEach(function (m) { maps.appendChild(h("tr", null, [h("td", { text: m.acceptanceId }), h("td", { text: m.verification })])); });
-    var cost = l.estimatedCost ? "$" + l.estimatedCost.spendUsd + ", " + l.estimatedCost.wallMinutes + " phút" + (s.goal.appetite ? "  (appetite: $" + s.goal.appetite.maxSpendUsd + ", " + s.goal.appetite.maxWallMinutes + " phút)" : "") : "";
+    var cost = l.estimatedCost ? l.estimatedCost.wallMinutes + " phút" + (s.goal.appetite ? "  (appetite: " + s.goal.appetite.maxWallMinutes + " phút)" : "") : "";
     c.appendChild(kv([
       ["Cách làm", l.approach], [l.mode === "multi-wp" ? "Vì sao chia" : "Vì sao không chia", l.whySplit || "(chưa ghi)"],
       ["Rủi ro", l.risks.length ? list(l.risks) : ""], ["Đường dùng chung", l.sharedPaths.join(", ")],
@@ -295,11 +285,6 @@ details > summary { cursor:pointer; color:var(--accent); }
     var max = state.detail && state.detail.appetite ? "/" + state.detail.appetite.maxAttempts : "";
     c.appendChild(h("div", { class: "ct" }, [h("span", { text: o.label }), o.status ? chip(o.status) : null, h("span", { class: "mute", text: "lần thử " + o.attempts + max + (o.dependencies.length ? " · sau " + o.dependencies.join(", ") : "") })]));
     if (o.outcome) c.appendChild(h("div", { class: "mute", text: o.outcome }));
-    if (o.latestCheckpoint) c.appendChild(h("div", { style: "margin:4px 0" }, [chip("checkpoint", "executing"), h("span", { text: " " + o.latestCheckpoint.phase + ": " + o.latestCheckpoint.progress + " · " + age(o.latestCheckpoint.at) })]));
-    o.dispatches.forEach(function (d) {
-      c.appendChild(h("div", null, [h("a", { href: "#", text: (state.open[d.dispatchId] ? "Ẩn" : "Xem") + " hoạt động của " + d.role + " " + d.dispatchId, onclick: function (e) { e.preventDefault(); toggleAct(d.dispatchId); } })]));
-      if (state.open[d.dispatchId]) c.appendChild(actView(d));
-    });
     if (!o.entries.length) { c.appendChild(h("div", { class: "mute", text: "Chưa ghi gì vào APOS." })); return c; }
     var tl = h("div", { class: "tl" });
     o.entries.slice().reverse().forEach(function (e) {
@@ -308,36 +293,12 @@ details > summary { cursor:pointer; color:var(--accent); }
     c.appendChild(tl);
     return c;
   }
-  var ACT_LABEL = { say: "Agent nói", plan: "Kế hoạch", command: "Chạy lệnh", "file-change": "Sửa file", result: "Kết quả", error: "Lỗi" };
-  function actView(d) {
-    var box = h("div", { class: "act" }), a = state.act[d.dispatchId];
-    if (!a) { box.appendChild(h("div", { class: "mute", text: "đang tải..." })); return box; }
-    if (!a.found) { box.appendChild(h("div", { class: "mute", text: a.reason || "Không có transcript." })); return box; }
-    box.appendChild(h("div", { class: "mute", text: "Nguồn: " + a.matched.map(function (m) { return m.agent; }).join(", ") + " (ghép theo worktree + giờ; agent tự báo cáo, đã che mẫu khóa/token) · " + a.total + " mục" }));
-    a.items.slice().reverse().forEach(function (it) {
-      var row = h("div", { class: "a " + it.kind }, [h("div", { class: "lab", text: (ACT_LABEL[it.kind] || it.kind) + "  " + new Date(it.at).toLocaleTimeString() + (it.truncated ? "  (cắt bớt)" : "") })]);
-      if (it.kind === "result" && it.text.length > 240) row.appendChild(h("details", null, [h("summary", { text: it.text.slice(0, 120).replace(/[ \t\r\n]+/g, " ") + "..." }), h("pre", { text: it.text })]));
-      else row.appendChild(h("div", { text: it.text, style: "white-space:pre-wrap; overflow-wrap:anywhere" }));
-      box.appendChild(row);
-    });
-    return box;
-  }
-  function toggleAct(id) { state.open[id] = !state.open[id]; if (state.open[id]) loadAct(id); render(); }
-  function loadAct(id) {
-    var goal = state.goal, cur = state.act[id];
-    var url = "/api/goals/" + encodeURIComponent(goal) + "/activity/" + encodeURIComponent(id) + (cur && cur.found ? "?after=" + cur.total : "");
-    return get(url).then(function (b) {
-      if (state.goal !== goal) return; var r = JSON.parse(b);
-      if (cur && cur.found && r.found) { r.items = cur.items.concat(r.items); r.offset = cur.offset; }
-      state.act[id] = r;
-    }).catch(function (e) { state.act[id] = { found: false, reason: String(e.message), matched: [], total: 0, items: [] }; }).then(render);
-  }
   function storyView() {
     var s = state.story, box = h("div");
     if (!s) { box.appendChild(h("div", { class: "mute", text: "đang tải..." })); return box; }
     box.appendChild(giveCard(s)); box.appendChild(leadCard(s));
     box.appendChild(h("h3", { text: "3. Owner làm gì" }));
-    box.appendChild(h("div", { class: "mute", text: "Những gì đã ghi vào log APOS (mới nhất ở trên). Bấm «Xem hoạt động» để đọc việc chi tiết của agent (lệnh, file, kết quả) từ transcript." }));
+    box.appendChild(h("div", { class: "mute", text: "Những gì đã ghi vào log APOS (mới nhất ở trên). " }));
     s.owners.forEach(function (o) { box.appendChild(ownerCard(s, o)); });
     return box;
   }
@@ -361,8 +322,6 @@ details > summary { cursor:pointer; color:var(--accent); }
     return get("/api/goals/" + encodeURIComponent(id)).then(function (b) { if (state.goal === id) { state.detail = JSON.parse(b); state.detailError = null; } })
       .then(function () { return get("/api/goals/" + encodeURIComponent(id) + "/story"); }).then(function (b) {
         if (state.goal !== id) return; state.story = JSON.parse(b);
-        // What a running owner is doing now is the first thing worth seeing, so its latest dispatch opens by itself once.
-        state.story.owners.forEach(function (o) { var d = o.dispatches[o.dispatches.length - 1]; if (d && o.status === "executing" && state.open[d.dispatchId] === undefined) { state.open[d.dispatchId] = true; loadAct(d.dispatchId); } });
       })
       .catch(function (e) { if (state.goal === id) { state.detail = null; state.detailError = String(e.message); } }).then(render);
   }
@@ -375,7 +334,7 @@ details > summary { cursor:pointer; color:var(--accent); }
   function poll() {
     if (document.hidden) return;
     get("/api/snapshot").then(function (b) { state.snap = JSON.parse(b); state.lastGood = state.snap.readAt; state.failed = false; })
-      .catch(function () { state.failed = true; }).then(function () { render(); if (state.goal && !state.failed && state.tab !== "timeline") { loadDetail(); Object.keys(state.open).forEach(function (id) { if (state.open[id] && state.act[id] && state.act[id].found) loadAct(id); }); } });
+      .catch(function () { state.failed = true; }).then(function () { render(); if (state.goal && !state.failed && state.tab !== "timeline") { loadDetail(); } });
   }
   window.addEventListener("hashchange", function () { var id = location.hash.slice(1); if (id !== (state.goal || "")) select(id || null); });
   document.addEventListener("visibilitychange", poll);

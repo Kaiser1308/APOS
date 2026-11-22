@@ -10,7 +10,7 @@ import { ProjectJournal } from '../store/journal.js';
 import { ReadOnlyJournal } from '../store/readonly-journal.js';
 import { buildInbox } from '../app/inbox.js';
 import { buildSnapshot } from '../ui/read-model.js';
-import { approval, proposal, sourceText, spec } from '../domain/fixtures.test-support.js';
+import { approval, DELIVERY, proposal, soloGreen, sourceText, spec } from '../domain/fixtures.test-support.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -193,8 +193,8 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
     add('GOAL-002', 'goal-selected');
     add('GOAL-002', 'proposal-drafted', { ...proposal, goalId: 'GOAL-002' });
     add('GOAL-002', 'proposal-approved');
-    add('GOAL-002', 'execution-started', { runId: 'r', taskId: 't', dispatchId: 'd', owner: 'lead', repoPath: dir });
-    add('GOAL-002', 'verified');
+    for (const item of soloGreen()) add('GOAL-002', item.type, item.data);
+    add('GOAL-002', 'verified', { deliveryCommit: DELIVERY });
     opened.close();
 
     await invoke('outcome', 'close', 'GOAL-002', '--on-behalf', 'test');

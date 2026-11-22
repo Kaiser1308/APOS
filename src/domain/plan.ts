@@ -1,5 +1,5 @@
 import { isSketchGoal, type GoalSpec } from './contracts.js';
-import type { GoalState, GoalStatus } from './transitions.js';
+import { effectiveStatus, type GoalState, type GoalStatus } from './transitions.js';
 
 export type RequirementCoverageStatus = 'covered' | 'planned' | 'deferred' | 'orphan' | 'out-of-scope' | 'unplanned';
 
@@ -114,7 +114,9 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
   const placeholderTargets = new Set<string>();
 
   for (const item of reqMap.values()) {
-    const closedAccepting = item.entries.find(e => e.req.disposition === 'acceptance' && e.goal.status === 'closed');
+    const closedAccepting = item.entries.find(
+      e => e.req.disposition === 'acceptance' && effectiveStatus(e.goal) === 'closed',
+    );
     if (closedAccepting) {
       requirements.push({
         id: item.id,
@@ -128,7 +130,10 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
     }
 
     const activeAccepting = item.entries.find(
-      e => e.req.disposition === 'acceptance' && e.goal.status !== 'closed' && e.goal.status !== 'stopped',
+      e =>
+        e.req.disposition === 'acceptance' &&
+        effectiveStatus(e.goal) !== 'closed' &&
+        effectiveStatus(e.goal) !== 'stopped',
     );
     if (activeAccepting) {
       requirements.push({
@@ -174,7 +179,7 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
         });
         continue;
       }
-      if (target.status === 'closed' || target.status === 'stopped') {
+      if (['closed', 'stopped'].includes(effectiveStatus(target))) {
         requirements.push({
           id: item.id,
           text: item.text,

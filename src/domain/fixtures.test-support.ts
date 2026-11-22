@@ -55,6 +55,7 @@ export const gateReport = (
   deliveryCommit: string = DELIVERY,
   result: GateReport['result'] = 'green',
   goal: GoalSpec = spec,
+  attemptKey = 'WP-MAIN@1:0',
 ): GateReport => ({
   gateId: 'GATE-test',
   goalId: goal.id,
@@ -62,7 +63,7 @@ export const gateReport = (
   sourceSha256: goal.source.sha256,
   baseCommit: BASE,
   deliveryCommit,
-  attemptKey: 'solo:-:1',
+  attemptKey,
   environment: { platform: 'test', shell: 'sh', node: 'v0' },
   checks: goal.checks.map(check => ({
     checkId: check.id,
@@ -75,3 +76,10 @@ export const gateReport = (
   result,
   at: '2026-11-07T00:00:00.000Z',
 });
+/** The two events `apos package submit` records when the Solo package WP-MAIN goes green on `commit`. */
+export const soloGreen = (
+  commit: string = DELIVERY,
+): { type: 'package-submitted' | 'package-gate-recorded'; data: unknown }[] => [
+  { type: 'package-submitted', data: { packageId: 'WP-MAIN', version: 1, commit, base: BASE, by: 'lead' } },
+  { type: 'package-gate-recorded', data: { packageId: 'WP-MAIN', report: gateReport(commit) } },
+];

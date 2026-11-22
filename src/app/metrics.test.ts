@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal, approval, DELIVERY, gateReport } from '../domain/fixtures.test-support.js';
+import { spec, proposal, approval, BASE, DELIVERY, gateReport } from '../domain/fixtures.test-support.js';
 import { MetricsService } from './metrics.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -12,7 +12,9 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-it('summarizes attempts, blockers and review rework from the durable event log', () => {
+const DELIVERY2 = 'c'.repeat(40);
+
+it('summarizes submits per package, red gates and minutes from the durable event log', () => {
   const dir = mkdtempSync(join(tmpdir(), 'apos-metrics-'));
   dirs.push(dir);
   const store = SqliteStore.open(join(dir, 'state.sqlite'));
@@ -21,30 +23,25 @@ it('summarizes attempts, blockers and review rework from the durable event log',
     store.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at });
   add('goal-drafted', spec);
   add('goal-approved', approval);
-  add('goal-selected');
+  add('goal-selected', undefined, '2026-11-08T00:00:00.000Z');
   add('proposal-drafted', proposal);
   add('proposal-approved');
-  add('execution-started', { runId: 'run_1' });
-  add('gate-recorded', gateReport());
-  add('review-submitted', {
-    subject: 'goal',
-    reviewer: 'reviewer-agent',
-    session: 'review-1',
-    result: 'changes',
-    commitRef: DELIVERY,
-    note: 'Needs regression test',
+  const submit = (commit: string) =>
+    add('package-submitted', { packageId: 'WP-MAIN', version: 1, commit, base: BASE, by: 'lead' });
+  submit(DELIVERY);
+  add('package-gate-recorded', { packageId: 'WP-MAIN', report: gateReport(DELIVERY, 'red') });
+  submit(DELIVERY2);
+  add('package-gate-recorded', {
+    packageId: 'WP-MAIN',
+    report: gateReport(DELIVERY2, 'green', spec, 'WP-MAIN@1:1'),
   });
-  add('blocked', { kind: 'external', note: 'CI offline' });
-  add('unblocked');
-  add('evidence-submitted', { acceptanceId: 'AC-1', result: 'pass', command: 'npm test', artifactRef: 'log:test' });
-  add('verified');
-  add('outcome-accepted', undefined, '2026-11-08T00:01:00.000Z');
-  expect(new MetricsService(store).show(spec.id)).toMatchObject({
-    attempts: 1,
-    blockers: 1,
-    reviewChanges: 1,
-    cycleTimeMs: 60_000,
-    status: 'closed',
+  add('verified', { deliveryCommit: DELIVERY2 }, '2026-11-08T00:30:00.000Z');
+  expect(new MetricsService(store).show(spec.id)).toEqual({
+    goalId: spec.id,
+    status: 'verified',
+    submitsByPackage: { 'WP-MAIN': 2 },
+    redGates: 1,
+    minutes: 30,
   });
   store.close();
 });

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal, gateReport, approval } from '../domain/fixtures.test-support.js';
+import { spec, proposal, soloGreen, approval } from '../domain/fixtures.test-support.js';
 import { initProject } from './init-project.js';
 import { MergeService } from './merge.js';
 import type { GoalEventType } from '../domain/transitions.js';
@@ -39,7 +39,6 @@ it('merges only the gated commit, only after the Human authorizes that one merge
   add('goal-selected');
   add('proposal-drafted', proposal);
   add('proposal-approved');
-  add('execution-started', { runId: 'run_1' });
   // The owner reports a different commit than the one the controller gated: only the gated one may merge.
   const stale = '0'.repeat(40);
   add('evidence-submitted', {
@@ -49,8 +48,8 @@ it('merges only the gated commit, only after the Human authorizes that one merge
     artifactRef: 'log:goal',
     commitRef: stale,
   });
-  add('gate-recorded', gateReport(source));
-  add('verified');
+  for (const item of soloGreen(source)) add(item.type, item.data);
+  add('verified', { deliveryCommit: source });
   const service = new MergeService(store);
   expect(() => service.merge(spec.id, dir, source, target)).toThrow(/Human merge authorization/);
   service.authorize(spec.id, target, 'human');

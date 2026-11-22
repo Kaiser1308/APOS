@@ -39,26 +39,15 @@ it('drops a lead-question notice once the Human has answered it', () => {
   expect(buildInbox(repo).map(item => JSON.parse(item.detail).messageId)).toEqual(['m2']);
 });
 
-it('drops owner-idle and agent-exhausted notices once the dispatch is handed off (#23)', () => {
-  const at = '2026-11-18T03:33:17.000Z';
-  const repo = {
-    listGoals: () => [{ spec: { id: 'GOAL-1' }, status: 'executing' }],
-    events: () => [
-      {
-        id: 'E1',
-        goalId: 'GOAL-1',
-        type: 'human-notified',
-        data: { kind: 'owner-idle', goalId: 'GOAL-1', dispatchId: 'ctx_old', idleMinutes: 15 },
-        at,
-      },
-      {
-        id: 'E2',
-        goalId: 'GOAL-1',
-        type: 'owner-handed-off',
-        data: { key: 'k1', target: { kind: 'lead' }, from: 'ctx_old', ref: { dispatchId: 'ctx_new' } },
-        at,
-      },
-    ],
-  } as unknown as GoalRepository;
-  expect(buildInbox(repo)).toEqual([]);
+it('shows the warnings a gate report carries as one attention notice, and nothing for an archived Goal', () => {
+  const gate = { warnings: ['needs attention: tests or oracles changed: a.test.ts (not locked before phase 3)'] };
+  const repo = (status: string) =>
+    ({
+      listGoals: () => [{ spec: { id: 'GOAL-1' }, status, gate, packages: {} }],
+      events: () => [],
+    }) as unknown as GoalRepository;
+  const [item] = buildInbox(repo('executing'));
+  expect(item).toMatchObject({ goalId: 'GOAL-1', kind: 'notice' });
+  expect(JSON.parse(item.detail)).toEqual({ kind: 'attention', warnings: gate.warnings });
+  expect(buildInbox(repo('legacy'))).toEqual([]);
 });

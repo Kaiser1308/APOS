@@ -1,7 +1,6 @@
 import { newEvent } from './events.js';
 import type { Evidence, GoalId } from '../domain/contracts.js';
 import type { GoalEventType } from '../domain/transitions.js';
-import { requiresIndependentReview } from '../domain/reviews.js';
 import { gateShortfalls } from '../domain/gate.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
@@ -41,11 +40,6 @@ export class VerificationService {
     const problems = gateShortfalls(state.spec, state.gate, expected);
     if (problems.length) throw new Error(`Controller gate does not verify ${goalId}: ${problems.join('; ')}`);
     const gated = state.gate!.deliveryCommit;
-    if (requiresIndependentReview(state)) {
-      const review = [...state.reviews].reverse().find(item => item.subject === 'goal');
-      if (review?.result !== 'pass' || review.commitRef.toLowerCase() !== gated.toLowerCase())
-        throw new Error('Passing independent Goal review of the gated delivery commit required');
-    }
     this.record(goalId, 'verified', {
       acceptanceIds: state.spec.acceptance.map(item => item.id),
       gateId: state.gate!.gateId,

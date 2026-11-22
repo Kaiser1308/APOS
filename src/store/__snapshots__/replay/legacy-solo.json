@@ -63,10 +63,42 @@
       "dependencies": [],
       "priority": 2
     },
-    "status": "closed",
+    "status": "legacy",
     "selected": true,
     "evidence": [],
-    "packages": {},
+    "packages": {
+      "WP-MAIN": {
+        "spec": {
+          "id": "WP-MAIN",
+          "goalId": "GOAL-SMOKE-R",
+          "goalVersion": 1,
+          "version": 1,
+          "owner": "lead",
+          "outcome": "sub.js exports a correct sub(a, b)",
+          "scope": [
+            "sub.js"
+          ],
+          "exclusions": [],
+          "dependencies": [],
+          "interfaces": [
+            "EXEC-SMOKE-R@v1"
+          ],
+          "acceptance": [
+            {
+              "id": "AC-1",
+              "text": "sub subtracts and rejects non-numbers",
+              "goalAcceptanceId": "AC-1",
+              "checkIds": [
+                "CHK-1"
+              ]
+            }
+          ],
+          "integration": "Solo: the package is the whole Goal"
+        },
+        "status": "pending",
+        "attempts": 0
+      }
+    },
     "reviews": [],
     "approvedGoalVersion": 1,
     "appetite": {
@@ -96,169 +128,8 @@
       "verificationStrategy": "controller gate"
     },
     "proposalApprovedVersion": 1,
-    "settlements": {
-      "ctx_c78b6ed89e64": "completed",
-      "ctx_92cc4cee1675": "completed"
-    },
-    "merge": {
-      "sourceRef": "6b72487a8650a935939d42ae0ae5847db7fb5f27",
-      "targetBranch": "smoke-target",
-      "mergeCommit": "53ab1a926337eaefd65fa076cca5078ec26615b3"
-    },
-    "soloAttempts": 2,
-    "runtimeRef": {
-      "runId": "run_79516dbdf01e",
-      "taskId": "task_cfd86dc6d912",
-      "dispatchId": "ctx_92cc4cee1675",
-      "owner": "lead",
-      "repoPath": "/fixture/claude/f955c312cacd8afc/c9650458-39e8-4897-bb69-6c63979e2a01/scratchpad/apos-smoke2",
-      "terminal": "term_8cbabed5-f358-4165-9b5b-c9398364dafa",
-      "worktreeId": "c8609f71-559d-4bb1-b13d-3e23b5697104::/fixture/orca/workspaces/apos-smoke2/apos-goal-smoke-r-6c300eab",
-      "baseCommit": "8af1f2c5216d45bdd4924d478e597883c4d841f7"
-    },
-    "checkpoint": {
-      "phase": "controller finding",
-      "progress": "Controller gate red on 5d51466b8a3479ccb2a441611d038ee42febad91: CHK-1 fail (exit 1 on delivery)",
-      "evidenceRefs": [
-        "/fixture/projects/apos-smoke2-3beeb74fc9a9/artifacts/GOAL-SMOKE-R/GATE-34af0c1e-7e11-4cfc-80c7-606d6d842507/CHK-1-delivery-1.log"
-      ],
-      "goalId": "GOAL-SMOKE-R",
-      "attempt": 2
-    },
-    "gate": {
-      "gateId": "GATE-1eaab226-800e-4967-badb-df72f15dc6a3",
-      "goalId": "GOAL-SMOKE-R",
-      "goalVersion": 1,
-      "sourceSha256": "b2454eee712c93bb73ace467d56de0afbf536bbd41a439d12aeacd09cbe3e8a5",
-      "baseCommit": "8af1f2c5216d45bdd4924d478e597883c4d841f7",
-      "deliveryCommit": "6b72487a8650a935939d42ae0ae5847db7fb5f27",
-      "attemptKey": "solo:ctx_92cc4cee1675:2",
-      "phase": "delivery",
-      "changedFiles": [
-        ".apos/goals/GOAL-SMOKE-R/evidence/solo-a1.md",
-        ".apos/goals/GOAL-SMOKE-R/evidence/solo-a2.md",
-        "sub.js"
-      ],
-      "environment": {
-        "platform": "win32",
-        "shell": "/fixture/WINDOWS/system32/cmd.exe",
-        "node": "v24.22.1"
-      },
-      "checks": [
-        {
-          "checkId": "CHK-1",
-          "status": "pass",
-          "reason": "exit 0 on delivery",
-          "base": [],
-          "delivery": [
-            {
-              "commit": "6b72487a8650a935939d42ae0ae5847db7fb5f27",
-              "exitCode": 0,
-              "timedOut": false,
-              "logRef": "/fixture/projects/apos-smoke2-3beeb74fc9a9/artifacts/GOAL-SMOKE-R/GATE-1eaab226-800e-4967-badb-df72f15dc6a3/CHK-1-delivery-1.log",
-              "logSha256": "b3964d062064b3f91d05acbec70ff8d75205eb503b42a7f61ea5001a6dd3c573",
-              "failures": []
-            }
-          ],
-          "newFailures": []
-        }
-      ],
-      "result": "green",
-      "at": "2026-11-08T01:31:58.154Z"
-    },
     "manualConfirmations": [],
-    "telemetry": [
-      {
-        "dispatchId": "ctx_c78b6ed89e64",
-        "role": "lead",
-        "launchedModel": "gpt-6.1-terra",
-        "usage": {
-          "inputTokens": 306842,
-          "cachedInputTokens": 298112,
-          "outputTokens": 2454,
-          "sessions": 1,
-          "model": "gpt-6.1-terra"
-        },
-        "wallMs": 92150
-      },
-      {
-        "dispatchId": "ctx_92cc4cee1675",
-        "role": "lead",
-        "launchedModel": null,
-        "usage": "unknown",
-        "wallMs": 112093
-      }
-    ],
-    "findings": [
-      {
-        "kind": "patch",
-        "by": "controller",
-        "attempt": 1,
-        "note": "Controller gate red on 5d51466b8a3479ccb2a441611d038ee42febad91: CHK-1 fail (exit 1 on delivery)",
-        "signature": "CHK-1[]",
-        "checkIds": [
-          "CHK-1"
-        ],
-        "logRefs": [
-          "/fixture/projects/apos-smoke2-3beeb74fc9a9/artifacts/GOAL-SMOKE-R/GATE-34af0c1e-7e11-4cfc-80c7-606d6d842507/CHK-1-delivery-1.log"
-        ],
-        "commit": "5d51466b8a3479ccb2a441611d038ee42febad91"
-      }
-    ],
-    "mergeAuthorization": {
-      "goalId": "GOAL-SMOKE-R",
-      "goalVersion": 1,
-      "integrationCommit": "6b72487a8650a935939d42ae0ae5847db7fb5f27",
-      "targetBranch": "smoke-target",
-      "scope": "goal",
-      "once": true,
-      "by": "human"
-    },
-    "postMergeGate": {
-      "gateId": "GATE-450ac15e-6ce7-4a75-b40c-e38eb4893eb7",
-      "goalId": "GOAL-SMOKE-R",
-      "goalVersion": 1,
-      "sourceSha256": "b2454eee712c93bb73ace467d56de0afbf536bbd41a439d12aeacd09cbe3e8a5",
-      "baseCommit": "8d9a6fcae8f2fddad9a85b1005d0be22a6b0a80c",
-      "deliveryCommit": "53ab1a926337eaefd65fa076cca5078ec26615b3",
-      "attemptKey": "solo:ctx_92cc4cee1675:2",
-      "phase": "post-merge",
-      "changedFiles": [
-        ".apos/goals/GOAL-SMOKE-R/evidence/solo-a1.md",
-        ".apos/goals/GOAL-SMOKE-R/evidence/solo-a2.md",
-        ".apos/goals/GOAL-SMOKE-R/execution.md",
-        ".apos/goals/GOAL-SMOKE-R/goal.md",
-        ".apos/goals/GOAL-SMOKE-R/source.md",
-        "harness-sub.js",
-        "sub.js"
-      ],
-      "environment": {
-        "platform": "win32",
-        "shell": "/fixture/WINDOWS/system32/cmd.exe",
-        "node": "v24.22.1"
-      },
-      "checks": [
-        {
-          "checkId": "CHK-1",
-          "status": "pass",
-          "reason": "exit 0 on delivery",
-          "base": [],
-          "delivery": [
-            {
-              "commit": "53ab1a926337eaefd65fa076cca5078ec26615b3",
-              "exitCode": 0,
-              "timedOut": false,
-              "logRef": "/fixture/projects/apos-smoke2-3beeb74fc9a9/artifacts/GOAL-SMOKE-R/GATE-450ac15e-6ce7-4a75-b40c-e38eb4893eb7/CHK-1-delivery-1.log",
-              "logSha256": "e23633967516b043dee9537c16cd17d66612042cf3ba6947b8bacc66a522e386",
-              "failures": []
-            }
-          ],
-          "newFailures": []
-        }
-      ],
-      "result": "green",
-      "at": "2026-11-08T01:34:25.570Z"
-    }
+    "legacyOutcome": "closed"
   },
   {
     "spec": {
@@ -358,10 +229,52 @@
       "dependencies": [],
       "priority": 1
     },
-    "status": "closed",
+    "status": "legacy",
     "selected": true,
     "evidence": [],
-    "packages": {},
+    "packages": {
+      "WP-MAIN": {
+        "spec": {
+          "id": "WP-MAIN",
+          "goalId": "GOAL-SMOKE-V2",
+          "goalVersion": 1,
+          "version": 1,
+          "owner": "lead",
+          "outcome": "math.js exports a correct add(a, b)",
+          "scope": [
+            "math.js"
+          ],
+          "exclusions": [
+            "other operations"
+          ],
+          "dependencies": [],
+          "interfaces": [
+            "EXEC-SMOKE@v1"
+          ],
+          "acceptance": [
+            {
+              "id": "AC-1",
+              "text": "add sums numbers, including floats within 1e-9",
+              "goalAcceptanceId": "AC-1",
+              "checkIds": [
+                "CHK-1"
+              ]
+            },
+            {
+              "id": "AC-2",
+              "text": "non-number input raises TypeError",
+              "goalAcceptanceId": "AC-2",
+              "checkIds": [
+                "CHK-1"
+              ]
+            }
+          ],
+          "integration": "Solo: the package is the whole Goal"
+        },
+        "status": "pending",
+        "attempts": 0
+      }
+    },
     "reviews": [],
     "approvedGoalVersion": 1,
     "appetite": {
@@ -395,123 +308,7 @@
       "verificationStrategy": "controller runs node harness.js on the delivery commit"
     },
     "proposalApprovedVersion": 1,
-    "settlements": {
-      "ctx_31a7bf2bf6b3": "completed"
-    },
-    "merge": {
-      "sourceRef": "5fa2f81de78fc8eefec30c81b6e45c725d6f5acc",
-      "targetBranch": "smoke-target",
-      "mergeCommit": "15a46ac1940206cea8fe00d507da9a418455c30d"
-    },
-    "soloAttempts": 1,
-    "runtimeRef": {
-      "runId": "run_e2174d61a3b0",
-      "taskId": "task_a3ffd111c1d9",
-      "dispatchId": "ctx_31a7bf2bf6b3",
-      "owner": "lead",
-      "repoPath": "/fixture/claude/f955c312cacd8afc/c9650458-39e8-4897-bb69-6c63979e2a01/scratchpad/apos-smoke2",
-      "terminal": "term_60174e22-6c3e-476a-9ec7-988ff622366a",
-      "worktreeId": "c8609f71-559d-4bb1-b13d-3e23b5697104::/fixture/orca/workspaces/apos-smoke2/apos-goal-smoke-v2-f41dd664",
-      "baseCommit": "a8db7ca31f21743f8575d33d8975e423c8f0c48e"
-    },
-    "gate": {
-      "gateId": "GATE-f3b52701-f662-4ce2-a883-1c7fef316c71",
-      "goalId": "GOAL-SMOKE-V2",
-      "goalVersion": 1,
-      "sourceSha256": "a8ad4fa32e60e63cdc5ab584c29f49449753f02076aa97ff1b4dde2976e9f5e2",
-      "baseCommit": "a8db7ca31f21743f8575d33d8975e423c8f0c48e",
-      "deliveryCommit": "5fa2f81de78fc8eefec30c81b6e45c725d6f5acc",
-      "attemptKey": "solo:ctx_31a7bf2bf6b3:1",
-      "phase": "delivery",
-      "changedFiles": [
-        ".apos/goals/GOAL-SMOKE-V2/evidence/solo-a1.md",
-        "math.js"
-      ],
-      "environment": {
-        "platform": "win32",
-        "shell": "/fixture/WINDOWS/system32/cmd.exe",
-        "node": "v24.22.1"
-      },
-      "checks": [
-        {
-          "checkId": "CHK-1",
-          "status": "pass",
-          "reason": "exit 0 on delivery",
-          "base": [],
-          "delivery": [
-            {
-              "commit": "5fa2f81de78fc8eefec30c81b6e45c725d6f5acc",
-              "exitCode": 0,
-              "timedOut": false,
-              "logRef": "/fixture/projects/apos-smoke2-3beeb74fc9a9/artifacts/GOAL-SMOKE-V2/GATE-f3b52701-f662-4ce2-a883-1c7fef316c71/CHK-1-delivery-1.log",
-              "logSha256": "672a0cad1886deeb7c9adb67228854415ef0397ce3e61b5b667b77d79bf8d704",
-              "failures": []
-            }
-          ],
-          "newFailures": []
-        }
-      ],
-      "result": "green",
-      "at": "2026-11-08T01:24:29.643Z"
-    },
     "manualConfirmations": [],
-    "telemetry": [
-      {
-        "dispatchId": "ctx_31a7bf2bf6b3",
-        "role": "lead",
-        "launchedModel": "gpt-6.1-terra",
-        "usage": "unknown",
-        "wallMs": 2949
-      }
-    ],
-    "mergeAuthorization": {
-      "goalId": "GOAL-SMOKE-V2",
-      "goalVersion": 1,
-      "integrationCommit": "5fa2f81de78fc8eefec30c81b6e45c725d6f5acc",
-      "targetBranch": "smoke-target",
-      "scope": "goal",
-      "once": true,
-      "by": "human"
-    },
-    "postMergeGate": {
-      "gateId": "GATE-b9b527f3-ed75-489e-9c1d-70d6459b838d",
-      "goalId": "GOAL-SMOKE-V2",
-      "goalVersion": 1,
-      "sourceSha256": "a8ad4fa32e60e63cdc5ab584c29f49449753f02076aa97ff1b4dde2976e9f5e2",
-      "baseCommit": "ec900ede44310dc3904ca0d3eb01a4cfbebed0a3",
-      "deliveryCommit": "15a46ac1940206cea8fe00d507da9a418455c30d",
-      "attemptKey": "solo:ctx_31a7bf2bf6b3:1",
-      "phase": "post-merge",
-      "changedFiles": [
-        ".apos/goals/GOAL-SMOKE-V2/evidence/solo-a1.md",
-        "math.js"
-      ],
-      "environment": {
-        "platform": "win32",
-        "shell": "/fixture/WINDOWS/system32/cmd.exe",
-        "node": "v24.22.1"
-      },
-      "checks": [
-        {
-          "checkId": "CHK-1",
-          "status": "pass",
-          "reason": "exit 0 on delivery",
-          "base": [],
-          "delivery": [
-            {
-              "commit": "15a46ac1940206cea8fe00d507da9a418455c30d",
-              "exitCode": 0,
-              "timedOut": false,
-              "logRef": "/fixture/projects/apos-smoke2-3beeb74fc9a9/artifacts/GOAL-SMOKE-V2/GATE-b9b527f3-ed75-489e-9c1d-70d6459b838d/CHK-1-delivery-1.log",
-              "logSha256": "d15b0e26aac4074c15e03799a85a5622607ed1d670d3316a4850f601b4746c4f",
-              "failures": []
-            }
-          ],
-          "newFailures": []
-        }
-      ],
-      "result": "green",
-      "at": "2026-11-08T01:25:53.989Z"
-    }
+    "legacyOutcome": "closed"
   }
 ]

@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { Appetite } from '../domain/contracts.js';
 import type { GateReport } from '../domain/gate.js';
 import { buildPlan, type PlanSummary } from '../domain/plan.js';
@@ -7,7 +5,7 @@ import type { GoalEvent, GoalState, GoalStatus } from '../domain/transitions.js'
 import { buildInbox, type InboxItem } from '../app/inbox.js';
 import type { ReadOnlyJournal } from '../store/readonly-journal.js';
 
-export type Holder = 'human' | 'lead' | 'controller' | 'done';
+export type Holder = 'human' | 'lead' | 'done';
 /** Who has the ball. Typed over every status, so a new status cannot ship without a holder. */
 export const HOLDER: Record<GoalStatus, Holder> = {
   draft: 'human',
@@ -16,95 +14,49 @@ export const HOLDER: Record<GoalStatus, Holder> = {
   verified: 'human',
   selected: 'lead',
   planned: 'lead',
-  ready: 'controller',
-  executing: 'controller',
+  executing: 'lead',
+  legacy: 'done',
   closed: 'done',
   stopped: 'done',
 };
 
 export type UiInboxKind = InboxItem['kind'] | 'awaiting-approval' | 'awaiting-selection';
 export type UiInboxItem = { goalId: string; kind: UiInboxKind; detail: string; at?: string };
-export type Usage = {
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  unknownDispatches: number;
-  wallMs: number;
-};
 export type GoalRow = {
   id: string;
   outcome?: string;
   status?: GoalStatus;
   holder?: Holder;
   mode?: string;
-  packages: { verified: number; total: number };
+  packages: { green: number; total: number };
+  /** True for a Goal an older APOS recorded: read-only, shown as an archive. */
+  legacy: boolean;
+  legacyOutcome?: 'verified' | 'closed' | 'stopped';
   appetite?: Appetite;
-  /** Most attempts any one owner has used; the limit is per owner, not per Goal. */ attempts: number;
-  /** Wall minutes since the first owner started, measured as the supervisor measures them. */ elapsedMinutes: number;
-  usage: Usage;
+  /** Most red gate runs any one package has had; the limit is per package, not per Goal. */ attempts: number;
+  /** Wall minutes since `goal select`. */ elapsedMinutes: number;
   lastEventAt?: string;
   integrityError?: string;
 };
 export type Snapshot = {
   readAt: string;
   lastEventAt?: string;
-  tickRunning: boolean;
   inbox: UiInboxItem[];
   goals: GoalRow[];
   plan?: PlanSummary;
 };
 
 const lastAt = (events: GoalEvent[]) => events.at(-1)?.at;
-const pidAlive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-};
-
-/** A controller tick is running only while `controller.lease` exists and names a live process. */
-export function tickRunning(home: string): boolean {
-  const path = join(home, 'controller.lease');
-  if (!existsSync(path)) return false;
-  try {
-    const lease = JSON.parse(readFileSync(path, 'utf8')) as { pid?: number };
-    return typeof lease.pid === 'number' && pidAlive(lease.pid);
-  } catch {
-    return false;
-  }
-}
-
-function usageOf(state: GoalState): Usage {
-  const total: Usage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, unknownDispatches: 0, wallMs: 0 };
-  for (const item of state.telemetry ?? []) {
-    total.wallMs += item.wallMs ?? 0;
-    if (item.usage && item.usage !== 'unknown') {
-      total.inputTokens += item.usage.inputTokens;
-      total.cachedInputTokens += item.usage.cachedInputTokens;
-      total.outputTokens += item.usage.outputTokens;
-    } else total.unknownDispatches += 1;
-  }
-  return total;
-}
-
-/** `attemptLimit` applies to each owner (Solo owner or Work Package) on its own, so report the busiest owner. */
+/** `attemptLimit` applies to each package on its own, so report the busiest one. */
 function attemptsOf(state: GoalState): number {
-  return Math.max(state.soloAttempts ?? 0, ...Object.values(state.packages ?? {}).map(item => item.attempts));
+  return Math.max(0, ...Object.values(state.packages ?? {}).map(item => item.attempts));
 }
 
-/**
- * Same clock as the supervisor's overrun check (`wallMinutesUsed`): from the Lead's dispatch, else the first owner start. A running or
- * blocked Goal is still on the clock, so it counts to now; a finished one stops at its last event.
- */
+/** From `goal select`. A running or blocked Goal is still on the clock, so it counts to now; a finished one stops at its last event. */
 function elapsedMinutes(events: GoalEvent[], state: GoalState, now: Date): number {
-  // The Lead's dispatch starts the clock when there is one (planning counts against the appetite).
-  const start =
-    events.find(item => item.type === 'lead-dispatch-intended') ??
-    events.find(item => item.type === 'execution-started' || item.type === 'package-started');
+  const start = events.find(item => item.type === 'goal-selected');
   if (!start) return 0;
-  const running = ['executing', 'blocked', 'ready', 'selected', 'planned'].includes(state.status);
+  const running = ['executing', 'blocked', 'selected', 'planned'].includes(state.status);
   const end = running ? now.getTime() : Date.parse(events.at(-1)!.at);
   return Math.max(0, Math.round((end - Date.parse(start.at)) / 60_000));
 }
@@ -118,11 +70,12 @@ function row(repo: ReadOnlyJournal, state: GoalState, now: Date): GoalRow {
     status: state.status,
     holder: HOLDER[state.status],
     mode: state.proposal?.mode,
-    packages: { verified: packages.filter(item => item.status === 'verified').length, total: packages.length },
+    packages: { green: packages.filter(item => item.status === 'green').length, total: packages.length },
+    legacy: state.status === 'legacy',
+    ...(state.legacyOutcome ? { legacyOutcome: state.legacyOutcome } : {}),
     appetite: state.appetite,
     attempts: attemptsOf(state),
     elapsedMinutes: elapsedMinutes(events, state, now),
-    usage: usageOf(state),
     lastEventAt: lastAt(events),
   };
 }
@@ -157,10 +110,10 @@ export function buildSnapshot(repo: ReadOnlyJournal, now: () => Date = () => new
       ? row(repo, state, now())
       : {
           id,
-          packages: { verified: 0, total: 0 },
+          packages: { green: 0, total: 0 },
+          legacy: false,
           attempts: 0,
           elapsedMinutes: 0,
-          usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, unknownDispatches: 0, wallMs: 0 },
           integrityError: repo.failures.get(id),
         };
   });
@@ -171,7 +124,7 @@ export function buildSnapshot(repo: ReadOnlyJournal, now: () => Date = () => new
     .at(-1);
   const inbox: UiInboxItem[] = [...gateItems(repo), ...buildInbox(repo)];
   const plan = buildPlan(repo.listGoals());
-  return { readAt: now().toISOString(), lastEventAt, tickRunning: tickRunning(repo.home), inbox, goals, plan };
+  return { readAt: now().toISOString(), lastEventAt, inbox, goals, plan };
 }
 
 export type GateView = {
@@ -180,6 +133,7 @@ export type GateView = {
   commit: string;
   result: string;
   at: string;
+  warnings: string[];
   checks: {
     checkId: string;
     status: string;
@@ -196,6 +150,7 @@ function gateView(scope: string, report: GateReport): GateView {
     commit: report.deliveryCommit,
     result: report.result,
     at: report.at,
+    warnings: report.warnings ?? [],
     checks: report.checks.map(check => ({
       checkId: check.checkId,
       status: check.status,
@@ -241,7 +196,6 @@ export type GoalDetail = GoalRow & {
   findings: { kind: string; note: string; by: string; commit?: string }[];
   gates: GateView[];
   reviews: { subject: string; packageId?: string; result: string; reviewer: string; commitRef: string; note: string }[];
-  telemetry: { dispatchId: string; role: string; model?: string | null; usage: unknown; wallMs?: number }[];
   blocker?: unknown;
   timeline: { events: { id: string; type: string; at: string; data?: string }[]; nextBefore?: string };
 };
@@ -274,8 +228,8 @@ export function buildGoalDetail(
       outcome: item.spec.outcome,
       dependencies: item.spec.dependencies,
       attempts: item.attempts,
-      blocker: item.blocker,
-      findings: item.findings ?? [],
+      blocker: undefined,
+      findings: item.finding ? [item.finding] : [],
     })),
     findings: (state.findings ?? []).map(item => ({
       kind: item.kind,
@@ -291,13 +245,6 @@ export function buildGoalDetail(
       reviewer: item.reviewer,
       commitRef: item.commitRef,
       note: item.note,
-    })),
-    telemetry: (state.telemetry ?? []).map(item => ({
-      dispatchId: item.dispatchId,
-      role: item.role,
-      model: item.launchedModel ?? item.requestedModel,
-      usage: item.usage,
-      wallMs: item.wallMs,
     })),
     blocker: state.blocker,
     timeline: {

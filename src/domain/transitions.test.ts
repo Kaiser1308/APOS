@@ -1,63 +1,91 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, type GoalEvent, type GoalState } from './transitions.js';
-import { spec, proposal, approval } from './fixtures.test-support.js';
+import { LEGACY_EVENT_TYPES } from './legacy-events.js';
+import {
+  applyEvent,
+  effectiveStatus,
+  isWritableEventType,
+  SOLO_PACKAGE_ID,
+  type GoalEvent,
+  type GoalState,
+} from './transitions.js';
+import { BASE, DELIVERY, gateReport, spec, proposal, approval } from './fixtures.test-support.js';
+
 let counter = 0;
-const event = (type: GoalEvent['type'], data?: unknown): GoalEvent => ({
+const event = (type: string, data?: unknown): GoalEvent => ({
   id: `EV-${++counter}`,
   goalId: spec.id,
-  type,
+  type: type as GoalEvent['type'],
   data,
   at: '2026-11-07T00:00:00.000Z',
 });
 const start = (): GoalState => applyEvent(undefined, event('goal-drafted', spec));
+const selected = (): GoalState => {
+  const state = applyEvent(start(), event('goal-approved', approval));
+  return applyEvent(state, event('goal-selected'));
+};
+const executingSolo = (): GoalState => {
+  let state = applyEvent(selected(), event('proposal-drafted', proposal));
+  state = applyEvent(state, event('proposal-approved'));
+  return state;
+};
+const submit = (state: GoalState, commit = DELIVERY) =>
+  applyEvent(
+    state,
+    event('package-submitted', {
+      packageId: SOLO_PACKAGE_ID,
+      version: 1,
+      commit,
+      base: BASE,
+      by: 'lead',
+    }),
+  );
+const record = (state: GoalState, result: 'green' | 'red' | 'unverifiable', commit = DELIVERY) => {
+  const item = state.packages![SOLO_PACKAGE_ID];
+  return applyEvent(
+    state,
+    event('package-gate-recorded', {
+      packageId: SOLO_PACKAGE_ID,
+      report: gateReport(commit, result, spec, `${SOLO_PACKAGE_ID}@1:${item.attempts}`),
+    }),
+  );
+};
 
 describe('approval gates', () => {
-  it('does not permit execution after Goal approval alone', () => {
+  it('does not start work after Goal approval alone', () => {
     const approved = applyEvent(start(), event('goal-approved', approval));
-    expect(() => applyEvent(approved, event('execution-started'))).toThrow();
+    expect(() => applyEvent(approved, event('proposal-approved'))).toThrow();
+    expect(approved.status).toBe('approved');
   });
   it('rejects proposal approval when a Goal criterion is not mapped', () => {
-    let state = applyEvent(start(), event('goal-approved', approval));
-    state = applyEvent(state, event('goal-selected'));
-    state = applyEvent(
-      state,
+    const state = applyEvent(
+      selected(),
       event('proposal-drafted', { ...proposal, acceptanceMapping: [{ acceptanceId: 'OTHER', verification: 'test' }] }),
     );
     expect(() => applyEvent(state, event('proposal-approved'))).toThrow(/verification mapping/);
   });
-  it('permits execution only after selection and current proposal approval', () => {
-    let state = applyEvent(start(), event('goal-approved', approval));
-    state = applyEvent(state, event('goal-selected'));
-    state = applyEvent(state, event('proposal-drafted', proposal));
-    state = applyEvent(state, event('proposal-approved'));
-    expect(applyEvent(state, event('execution-started')).status).toBe('executing');
+  it('starts executing the moment the current proposal is approved, with the implicit WP-MAIN for a Solo plan', () => {
+    const state = executingSolo();
+    expect(state.status).toBe('executing');
+    const main = state.packages?.[SOLO_PACKAGE_ID];
+    expect(main).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(main?.spec.acceptance.map(item => item.goalAcceptanceId)).toEqual(spec.acceptance.map(item => item.id));
+    expect(main?.spec.acceptance[0]?.checkIds).toEqual(['CHK-1']);
   });
-  it('invalidates plan approval and evidence after Goal revision', () => {
-    let state = applyEvent(start(), event('goal-approved', approval));
-    state = applyEvent(state, event('goal-selected'));
-    state = applyEvent(state, event('proposal-drafted', proposal));
-    state = applyEvent(state, event('proposal-approved'));
-    state = applyEvent(state, event('goal-revised', { ...spec, version: 2 }));
+  it('invalidates plan approval after Goal revision', () => {
+    const state = applyEvent(executingSolo(), event('goal-revised', { ...spec, version: 2 }));
     expect(state.proposalApprovedVersion).toBeUndefined();
-    expect(() => applyEvent(state, event('execution-started'))).toThrow();
+    expect(state.status).toBe('draft');
+    expect(state.packages).toEqual({});
   });
   it('does not restart a closed Goal', () => {
-    let state = applyEvent(start(), event('goal-approved', approval));
-    state = applyEvent(state, event('goal-selected'));
-    state = applyEvent(state, event('proposal-drafted', proposal));
-    state = applyEvent(state, event('proposal-approved'));
-    state = applyEvent(state, event('execution-started'));
-    state = applyEvent(state, event('verified'));
+    let state = record(submit(executingSolo()), 'green');
+    state = applyEvent(state, event('verified', { deliveryCommit: DELIVERY }));
     state = applyEvent(state, event('outcome-accepted'));
-    expect(() => applyEvent(state, event('execution-started'))).toThrow();
+    expect(state.status).toBe('closed');
+    expect(() => submit(state)).toThrow(/terminal/);
   });
   it('records a blocker and requires an explicit unblock event to resume', () => {
-    let state = applyEvent(start(), event('goal-approved', approval));
-    state = applyEvent(state, event('goal-selected'));
-    state = applyEvent(state, event('proposal-drafted', proposal));
-    state = applyEvent(state, event('proposal-approved'));
-    state = applyEvent(state, event('execution-started'));
-    state = applyEvent(state, event('blocked', { kind: 'external', note: 'API unavailable' }));
+    let state = applyEvent(executingSolo(), event('blocked', { kind: 'external', note: 'API unavailable' }));
     expect(state.status).toBe('blocked');
     expect(() => applyEvent(state, event('verified'))).toThrow();
     state = applyEvent(state, event('decision-logged', { note: 'API restored' }));
@@ -65,9 +93,7 @@ describe('approval gates', () => {
     expect(applyEvent(state, event('unblocked')).status).toBe('executing');
   });
   it('holds Multi-WP packages as versioned Goal-owned state', () => {
-    let state = applyEvent(start(), event('goal-approved', approval));
-    state = applyEvent(state, event('goal-selected'));
-    state = applyEvent(state, event('proposal-drafted', { ...proposal, mode: 'multi-wp' }));
+    let state = applyEvent(selected(), event('proposal-drafted', { ...proposal, mode: 'multi-wp' }));
     const wp = {
       id: 'WP-01',
       goalId: spec.id,
@@ -83,7 +109,7 @@ describe('approval gates', () => {
       integration: 'Lead runs check-in flow',
     };
     state = applyEvent(state, event('package-added', wp));
-    expect(state.packages?.['WP-01']?.spec.version).toBe(1);
+    expect(state.packages?.['WP-01']).toMatchObject({ status: 'pending', spec: { version: 1 } });
     expect(() => applyEvent(state, event('package-added', wp))).toThrow(/already exists/i);
     expect(() => applyEvent(state, event('proposal-approved'))).toThrow(/at least two packages/i);
     state = applyEvent(
@@ -95,6 +121,89 @@ describe('approval gates', () => {
         acceptance: [{ id: 'WP-AC-2', text: 'history works' }],
       }),
     );
-    expect(applyEvent(state, event('proposal-approved')).status).toBe('ready');
+    const approved = applyEvent(state, event('proposal-approved'));
+    expect(approved.status).toBe('executing');
+    expect(Object.keys(approved.packages ?? {})).toEqual(['WP-01', 'WP-02']);
+  });
+});
+
+describe('package submissions', () => {
+  it('goes pending, submitted, then green, and a green Solo package can verify the Goal', () => {
+    let state = submit(executingSolo());
+    expect(state.packages?.[SOLO_PACKAGE_ID]?.status).toBe('submitted');
+    state = record(state, 'green');
+    expect(state.packages?.[SOLO_PACKAGE_ID]).toMatchObject({ status: 'green', attempts: 0 });
+    expect(state.gate?.deliveryCommit).toBe(DELIVERY);
+    state = applyEvent(state, event('verified', { deliveryCommit: DELIVERY }));
+    expect(state).toMatchObject({ status: 'verified', verifiedCommit: DELIVERY });
+  });
+  it('refuses to verify a Solo Goal whose package is not green', () => {
+    expect(() => applyEvent(executingSolo(), event('verified'))).toThrow(/green/);
+    expect(() => applyEvent(record(submit(executingSolo()), 'red'), event('verified'))).toThrow(/green/);
+  });
+  it('counts a red gate and lets the package be submitted again', () => {
+    let state = record(submit(executingSolo()), 'red');
+    expect(state.packages?.[SOLO_PACKAGE_ID]).toMatchObject({ status: 'red', attempts: 1 });
+    expect(state.status).toBe('executing');
+    state = record(submit(state, 'c'.repeat(40)), 'green', 'c'.repeat(40));
+    expect(state.packages?.[SOLO_PACKAGE_ID]?.status).toBe('green');
+  });
+  it('blocks the Goal once the red count passes the approved attempts', () => {
+    let state = executingSolo();
+    for (let n = 0; n < 3; n++) {
+      state = record(submit(state), 'red');
+      expect(state.status).toBe('executing');
+    }
+    state = record(submit(state), 'red');
+    expect(state).toMatchObject({ status: 'blocked', blocker: { kind: 'technical' } });
+    expect(() => submit(state)).toThrow(/Executing Goal required/);
+  });
+  it('sends an unverifiable gate to a Human instead of counting an attempt', () => {
+    const state = record(submit(executingSolo()), 'unverifiable');
+    expect(state.packages?.[SOLO_PACKAGE_ID]).toMatchObject({ status: 'needs-human', attempts: 0 });
+    expect(submit(state).packages?.[SOLO_PACKAGE_ID]?.status).toBe('submitted');
+  });
+  it('rejects a gate for another commit or attempt, and a gate for a package that was never submitted', () => {
+    expect(() => record(executingSolo(), 'green')).toThrow(/submitted commit/);
+    expect(() => record(submit(executingSolo()), 'green', 'c'.repeat(40))).toThrow(/submitted commit/);
+  });
+  it('refuses to submit a green package or a short commit', () => {
+    const green = record(submit(executingSolo()), 'green');
+    expect(() => submit(green)).toThrow(/green/);
+    expect(() => submit(executingSolo(), 'abc')).toThrow(/Full commit/);
+  });
+});
+
+describe('legacy Goals', () => {
+  it('turns legacy on the first orchestration event and keeps what was known', () => {
+    const legacy = applyEvent(selected(), event('lead-dispatch-intended', 'key'));
+    expect(legacy.status).toBe('legacy');
+    expect(legacy.selected).toBe(true);
+    expect(legacy.spec.id).toBe(spec.id);
+  });
+  it('never throws on the old events that follow, and keeps how the Goal ended', () => {
+    let state = applyEvent(selected(), event('lead-started', { dispatchId: 'x' }));
+    for (const type of [
+      'proposal-drafted',
+      'execution-started',
+      'worker-settled',
+      'gate-recorded',
+      'package-gate-recorded',
+    ])
+      state = applyEvent(state, event(type, {}));
+    expect(state.status).toBe('legacy');
+    state = applyEvent(state, event('verified'));
+    expect(state.legacyOutcome).toBe('verified');
+    state = applyEvent(state, event('outcome-accepted'));
+    expect(effectiveStatus(state)).toBe('closed');
+    expect(state.status).toBe('legacy');
+  });
+  it('replays every legacy event type without throwing', () => {
+    for (const type of LEGACY_EVENT_TYPES) expect(() => applyEvent(selected(), event(type, {}))).not.toThrow();
+  });
+  it('is not writable: append refuses legacy and unknown event types', () => {
+    for (const type of LEGACY_EVENT_TYPES) expect(isWritableEventType(type), type).toBe(false);
+    expect(isWritableEventType('something-new')).toBe(false);
+    expect(isWritableEventType('package-submitted')).toBe(true);
   });
 });

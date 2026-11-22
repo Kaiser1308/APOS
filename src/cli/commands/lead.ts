@@ -2,7 +2,6 @@ import { newEvent } from '../../app/events.js';
 import { assertProposalRationale, parseExecutionProposal, proposalRationale } from '../../domain/contracts.js';
 import { GitCommitInspector } from '../../app/integration.js';
 import { UserError } from '../../domain/errors.js';
-import { assertMultiWpPlannable } from '../../domain/packages.js';
 import type { CliContext } from '../context.js';
 
 export function registerLead(ctx: CliContext): void {
@@ -27,7 +26,6 @@ export function registerLead(ctx: CliContext): void {
           planned.sourceSha256 || !state ? planned : { ...planned, sourceSha256: state.spec.source.sha256 };
         if (!state || proposal.goalVersion !== state.spec.version)
           throw new Error('Proposal targets stale Goal version');
-        assertMultiWpPlannable(proposal);
         const mapped = new Set(proposal.acceptanceMapping.map(item => item.acceptanceId));
         if (state.spec.acceptance.some(item => !mapped.has(item.id)))
           throw new Error('Every Goal acceptance criterion needs a verification mapping');
@@ -55,7 +53,6 @@ export function registerLead(ctx: CliContext): void {
           state.proposal,
           `. This saved proposal predates that field: add a "rationale" string to your execution JSON, re-run apos lead propose --file <execution.json>, then apos lead commit ${id}`,
         );
-        assertMultiWpPlannable(state.proposal);
         journal.append(newEvent(id, 'proposal-approved', { by: flags.by, proposalVersion: state.proposal.version }));
         if (state.proposal.mode === 'multi-wp') {
           const notice = {

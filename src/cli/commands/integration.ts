@@ -12,19 +12,21 @@ export function registerIntegration(ctx: CliContext): void {
   integration
     .command('gate')
     .argument('<goalId>')
-    .requiredOption('--commit <sha>', 'the integration commit; for a bot Lead, the head of a verified package')
+    .requiredOption('--commit <sha>', 'the integration commit')
     .requiredOption('--reason <text>', 'why this commit is the integration')
-    .description('Lead: ask the controller to gate the integration commit; the request is an event with its reason')
-    .action((goalId: string, { commit, reason }: { commit: string; reason: string }) =>
+    .option('--by <name>', 'who asks, for the log', 'lead')
+    .description('Lead: gate the integration commit now; the request is an event with its reason')
+    .action((goalId: string, { commit, reason, by }: { commit: string; reason: string; by: string }) =>
       withJournal(journal => {
-        const state = journal.getGoal(goalId)!;
+        const state = journal.getGoal(goalId);
+        if (!state) throw new UserError(`Goal not found: ${goalId}`);
         const problem = integrationGateProblem(state, commit, reason);
         if (problem) throw new UserError(problem);
         journal.append(
           newEvent(goalId, 'integration-gate-requested', {
             commit,
             reason,
-            by: state.leadBot ? `bot:${state.leadBot.name}` : 'lead',
+            by,
           }),
         );
         const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(goalId, repo(), {

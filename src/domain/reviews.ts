@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { GoalState } from './transitions.js';
+import type { ExecutionProposal, GoalSpec } from './contracts.js';
 
 const text = z.string().trim().min(1);
 const schema = z
@@ -11,7 +11,7 @@ const schema = z
       .optional(),
     packageVersion: z.number().int().positive().optional(),
     reviewer: text,
-    /** The reviewer's own session: an Orca Dispatch ID, or `human:<name>`. A name alone is not enough. */
+    /** The reviewer's own session, for the record. */
     session: text,
     result: z.enum(['pass', 'changes']),
     commitRef: text,
@@ -37,16 +37,22 @@ const ORACLE =
   /(^|\/)(tests?|__tests__|spec|specs|fixtures?|testdata)\/|\.(test|spec)\.[A-Za-z0-9]+$|(^|\/)test_[^/]+\.py$|_test\.(go|py)$/i;
 
 /**
- * Why an independent review is required, derived from the plan and the gated diff rather than only
- * from risks the Lead chose to declare. Empty when the controller gate alone is enough.
+ * Things in a gated diff that deserve a human look: tests or oracles changed, shared interface paths touched, or
+ * the files the checks run (or are built from) changed. Since v3 they no longer block anything: they are shown as
+ * warnings in the gate report, the inbox and the UI. This is a known gap until test locking arrives (phase 3).
  */
-export function reviewReasons(state: GoalState): string[] {
+export function reviewReasons(input: {
+  spec: GoalSpec;
+  proposal?: ExecutionProposal;
+  changedFiles?: string[];
+}): string[] {
+  const state = input;
+
   const reasons: string[] = [];
-  if (state.proposal?.mode === 'multi-wp') reasons.push('Multi-WP integration');
   if (state.proposal?.risks.length) reasons.push(`declared risks: ${state.proposal.risks.join('; ')}`);
-  const changed = state.gate?.changedFiles ?? [];
+  const changed = state.changedFiles ?? [];
   const oracle = changed.filter(file => ORACLE.test(file));
-  if (oracle.length) reasons.push(`tests or oracles changed: ${oracle.join(', ')}`);
+  if (oracle.length) reasons.push(`tests or oracles changed: ${oracle.join(', ')} (not locked before phase 3)`);
   const shared = changed.filter(file =>
     (state.proposal?.sharedPaths ?? []).some(
       prefix => file === prefix || file.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`),
@@ -64,19 +70,7 @@ export function reviewReasons(state: GoalState): string[] {
   if (wired.length) reasons.push(`files the checks run or are built from changed: ${wired.join(', ')}`);
   return reasons;
 }
-export function requiresIndependentReview(state: GoalState): boolean {
-  return reviewReasons(state).length > 0;
-}
 
-/** Owner identities and sessions a reviewer must not share. */
-export function ownerIdentities(state: GoalState, packageId?: string): { names: string[]; sessions: string[] } {
-  const items = Object.values(state.packages ?? {}).filter(item => !packageId || item.spec.id === packageId);
-  const refs = [...(packageId ? [] : [state.runtimeRef]), ...items.map(item => item.runtimeRef)] as (
-    { dispatchId?: string; terminal?: string } | undefined
-  )[];
-  const names = packageId ? items.map(item => item.spec.owner) : ['lead', ...items.map(item => item.spec.owner)];
-  return {
-    names: names.map(name => name.toLowerCase()),
-    sessions: refs.flatMap(ref => [ref?.dispatchId, ref?.terminal]).filter((value): value is string => Boolean(value)),
-  };
-}
+/** The warnings a gate report carries for a diff. */
+export const gateWarnings = (input: Parameters<typeof reviewReasons>[0]): string[] =>
+  reviewReasons(input).map(reason => `needs attention: ${reason}`);

@@ -1,4 +1,5 @@
 import { newEvent } from './events.js';
+import { effectiveStatus } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
 export class GoalRegistryService {
@@ -36,6 +37,11 @@ export class GoalRegistryService {
     this.store.append(newEvent(goalId, 'goal-approved', { appetite, confirmation }));
   }
 
+  private isClosed(id: string): boolean {
+    const state = this.store.getGoal(id);
+    return state !== undefined && effectiveStatus(state) === 'closed';
+  }
+
   select(goalId: string, confirmation?: unknown): void {
     const state = this.store.getGoal(goalId);
     if (!state) throw new Error(`Goal does not exist: ${goalId}`);
@@ -43,7 +49,7 @@ export class GoalRegistryService {
       throw new Error(
         `Approved Goal required: ${goalId} is ${state.status}${state.status === 'draft' ? ' (gate A first: apos goal approve)' : ''}`,
       );
-    const pending = state.spec.dependencies.filter(id => this.store.getGoal(id)?.status !== 'closed');
+    const pending = state.spec.dependencies.filter(id => !this.isClosed(id));
     if (pending.length) throw new Error(`Goal dependencies not closed: ${pending.join(', ')}`);
     this.store.append(newEvent(goalId, 'goal-selected', confirmation ? { confirmation } : undefined));
   }

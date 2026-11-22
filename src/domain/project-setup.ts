@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { catalogToolSchema } from './catalog.js';
 import { UserError } from './errors.js';
+import { LAYER_IDS, type LayerId } from './layers.js';
 
-export const LAYER_IDS = ['L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6'] as const;
-export type LayerId = (typeof LAYER_IDS)[number];
+export type { LayerId } from './layers.js';
 const STAGES = ['submit', 'integrate', 'close'] as const;
 
 const layerId = z.enum(LAYER_IDS);

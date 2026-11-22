@@ -3,8 +3,9 @@ import { z } from 'zod';
 export const RESULT_FORMATS = ['junit', 'sarif', 'metric', 'apos-json'] as const;
 
 /**
- * One command that produces a standard report. `{report}` in `command` is replaced by a path APOS provides;
- * `runOne` runs a single test by `{id}` (needed to prove a test can be run alone).
+ * One command that produces a standard report. `{report}` in `command` is replaced by a path APOS provides.
+ * `runOne` runs a single test (needed to prove a test can be run alone): `{id}` is the whole test id
+ * (`<classname>::<name>`), `{classname}` and `{name}` its two halves, split at the first `::`.
  */
 export const catalogToolSchema = z.object({
   id: z.string().trim().min(1),
@@ -16,7 +17,40 @@ export const catalogToolSchema = z.object({
     .string()
     .trim()
     .min(1)
-    .refine(value => value.includes('{id}'), 'runOne must contain {id}')
+    .refine(value => /\{(id|classname|name)\}/.test(value), 'runOne must contain {id}, {classname} or {name}')
     .optional(),
 });
 export type CatalogTool = z.infer<typeof catalogToolSchema>;
+
+const regex = z.string().refine(value => {
+  try {
+    new RegExp(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, 'not a valid regular expression');
+const catalogLayerId = z.enum(['L0', 'L1', 'L2', 'L3', 'L4', 'L5']);
+
+/**
+ * What APOS knows about one stack. It is a starting point for a Lead drafting a setup and carries no
+ * guarantee: only an approved setup decides what the gate runs.
+ */
+export const catalogEntrySchema = z.object({
+  stack: z.string().regex(/^[a-z][a-z0-9-]*$/, 'stack is a lowercase word'),
+  /** A stack is recognised in a directory when every file exists and every `contains` substring is found. */
+  detect: z.object({
+    files: z.array(z.string().min(1)).min(1),
+    contains: z.record(z.string(), z.string().min(1)).optional(),
+  }),
+  layers: z.partialRecord(catalogLayerId, z.array(catalogToolSchema).min(1)),
+  /** Regexes that count an assertion in a test file (wave 3). */
+  assertPatterns: z.array(regex),
+  /** Regexes that recognise "not implemented yet" in a failing test's message (wave 3). */
+  notImplementedPatterns: z.array(regex),
+  /** Regexes forbidden in added diff lines: the strict floor a draft starts with. */
+  forbid: z.array(regex),
+  /** Globs of sensitive files that need a Human. */
+  needsHuman: z.array(z.string().min(1)),
+});
+export type CatalogEntry = z.infer<typeof catalogEntrySchema>;

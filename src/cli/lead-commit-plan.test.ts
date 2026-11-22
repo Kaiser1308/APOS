@@ -1,10 +1,11 @@
 import { afterEach, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from '../cli.js';
 import { ProjectJournal } from '../store/journal.js';
+import { setupSha256 } from '../domain/project-setup.js';
 import { newEvent } from '../app/events.js';
 import { proposal, sourceText, spec } from '../domain/fixtures.test-support.js';
 
@@ -28,7 +29,8 @@ async function plannedGoal(pinSetup: boolean) {
   await invoke('init');
   if (pinSetup) {
     const { journal, close } = ProjectJournal.open(dir, home, newEvent);
-    const base = { sha256: 'a'.repeat(64), commit: 'a'.repeat(40) };
+    const head = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const base = { sha256: setupSha256(readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8')), commit: head };
     const at = new Date().toISOString();
     journal.appendProjectEvent({ id: 'P1', type: 'setup-probed', at, data: { ...base, ok: true, results: [] } });
     journal.appendProjectEvent({

@@ -15,6 +15,8 @@ Commands:
   goal
   plan [options]   show Goal plan and requirement coverage across the brief
   lead
+  tests            the tester submits acceptance tests; APOS checks and locks
+                   them
   package          the Lead plans packages; delivery goes through `submit`
   integration
   gate             controller-run checks on exact commits; owner claims are not

@@ -7,6 +7,7 @@ import { sourceDigest } from '../../domain/gate.js';
 import { buildPlan } from '../../domain/plan.js';
 import { GoalRegistryService } from '../../app/registry.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
+import { lockSummary } from '../lock-summary.js';
 import type { CliContext } from '../context.js';
 
 export function registerGoal(ctx: CliContext): void {
@@ -34,6 +35,19 @@ export function registerGoal(ctx: CliContext): void {
         );
     }),
   );
+  goal
+    .command('show')
+    .argument('<id>')
+    .description('status, pinned setup and locked tests of one Goal')
+    .action((id: string) =>
+      withJournal(journal => {
+        const state = journal.getGoal(id);
+        if (!state) throw new UserError(`Goal not found: ${id}`);
+        write(`${id}\t${state.status}\t${state.spec.outcome}`);
+        write(state.setupVersion === undefined ? 'không có setup' : `setup v${state.setupVersion}`);
+        for (const line of lockSummary(state)) write(line);
+      }),
+    );
   // Gate A: the Human approves WHAT, together with the appetite only the controller will see.
   const appetiteOptions = <T extends Command>(command: T): T =>
     command

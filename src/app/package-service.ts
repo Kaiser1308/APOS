@@ -73,7 +73,7 @@ export class PackageService {
       throw new UserError(`${goalId} is a legacy Goal recorded by an older APOS: it is read-only`);
     if (state.status !== 'executing')
       throw new UserError(
-        `${goalId} is ${state.status}${state.blocker ? ` (${state.blocker.note})` : ''}: only an executing Goal takes a submission${state.status === 'planned' ? '; run `apos lead commit` first' : ''}`,
+        `${goalId} is ${state.status}${state.blocker ? ` (${state.blocker.note})` : ''}: only an executing Goal takes a submission${state.status === 'planned' ? '; run `apos lead commit` first' : state.status === 'testing' ? '; the acceptance tests are not locked yet: run `apos tests submit` first' : ''}`,
       );
     const item = state.packages?.[packageId];
     if (!item) throw new UserError(`Unknown package ${packageId} of ${goalId}`);

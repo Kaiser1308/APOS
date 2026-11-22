@@ -118,3 +118,22 @@ it('the journal itself refuses a pin to a version that was never approved', asyn
     close();
   }
 });
+
+it('goal show says "không có khoá test" for a Goal that pinned no setup, and shows the pin otherwise', async () => {
+  const { invoke, out, approveSetup, approve } = await project();
+  await approve();
+  out.length = 0;
+  await invoke('goal', 'show', spec.id);
+  expect(out).toEqual([
+    `${spec.id}\tapproved\t${spec.outcome}`,
+    'không có setup',
+    expect.stringContaining('không có khoá test') as unknown,
+  ]);
+  approveSetup(1, 'a');
+  const second = await project();
+  second.approveSetup(1, 'a');
+  await second.approve();
+  second.out.length = 0;
+  await second.invoke('goal', 'show', spec.id);
+  expect(second.out[1]).toBe('setup v1');
+});

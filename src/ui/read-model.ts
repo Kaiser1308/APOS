@@ -14,6 +14,7 @@ export const HOLDER: Record<GoalStatus, Holder> = {
   verified: 'human',
   selected: 'lead',
   planned: 'lead',
+  testing: 'lead',
   executing: 'lead',
   legacy: 'done',
   closed: 'done',
@@ -58,7 +59,7 @@ function attemptsOf(state: GoalState): number {
 function elapsedMinutes(events: GoalEvent[], state: GoalState, now: Date): number {
   const start = events.find(item => item.type === 'goal-selected');
   if (!start) return 0;
-  const running = ['executing', 'blocked', 'selected', 'planned'].includes(state.status);
+  const running = ['executing', 'blocked', 'selected', 'planned', 'testing'].includes(state.status);
   const end = running ? now.getTime() : Date.parse(events.at(-1)!.at);
   return Math.max(0, Math.round((end - Date.parse(start.at)) / 60_000));
 }

@@ -5,6 +5,7 @@ import { registerIntegration } from './cli/commands/integration.js';
 import { registerLead } from './cli/commands/lead.js';
 import { registerOutcome } from './cli/commands/outcome.js';
 import { registerPackage } from './cli/commands/package.js';
+import { registerTests } from './cli/commands/tests.js';
 import { registerSetup } from './cli/commands/setup.js';
 import { registerSetupFlow } from './cli/commands/setup-flow.js';
 import { createContext } from './cli/context.js';
@@ -24,6 +25,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   registerSetupFlow(ctx);
   registerGoal(ctx);
   registerLead(ctx);
+  registerTests(ctx);
   registerPackage(ctx);
   registerIntegration(ctx);
   registerChecks(ctx);

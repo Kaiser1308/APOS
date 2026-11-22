@@ -140,6 +140,7 @@ it('groups every status under exactly one holder', () => {
     'approved',
     'selected',
     'planned',
+    'testing',
     'executing',
     'blocked',
     'verified',

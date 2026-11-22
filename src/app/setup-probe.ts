@@ -1,18 +1,17 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { UserError } from '../domain/errors.js';
 import { LAYER_IDS } from '../domain/layers.js';
 import { parseProjectSetup, type LayerSpec } from '../domain/project-setup.js';
 import type { ProbeResult, ProjectEvent } from '../domain/setup-history.js';
 import { SETUP_FILE, type SetupCodec } from '../domain/setup-codec.js';
-import type { ParsedReport, TestOutcome } from '../domain/results/index.js';
+import type { TestOutcome } from '../domain/results/index.js';
 import type { ProjectJournal } from '../store/journal.js';
 import { assertGitRoot } from '../store/project-history.js';
 import { GitWorktreeFactory, type WorkspaceFactory } from './gate-workspace.js';
-import { ShellExecutor, type CommandExecutor, type ExecResult } from './shell-executor.js';
-import { readToolReport } from './report-files.js';
+import { ShellExecutor, type CommandExecutor } from './shell-executor.js';
+import { ToolRunner, notRunnable } from './layer-runner.js';
 import { fillRunOne } from '../domain/run-one.js';
 import { loadFailure } from '../domain/results/load-errors.js';
 import type { CatalogEntry } from '../domain/catalog.js';
@@ -41,14 +40,6 @@ export function setupTextAt(repo: string, commit: string): string {
   }
 }
 
-const NOT_FOUND = /command not found|is not recognized as an internal or external command|: not found$/im;
-const notRunnable = (result: ExecResult): string | undefined => {
-  if (result.timedOut) return 'timed out';
-  if (result.exitCode === null) return 'did not exit';
-  if (result.exitCode === 127 || NOT_FOUND.test(result.output)) return 'command not found';
-  return undefined;
-};
-
 const signature = (tests: TestOutcome[]) =>
   JSON.stringify(tests.map(test => [test.id, test.status]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
 
@@ -65,28 +56,13 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
   const timeoutMs = deps.timeoutMs ?? 600_000;
   const results: ProbeResult[] = [];
 
-  const run = (tool: LayerSpec, command: string, root: string): { exec: ExecResult; report?: ParsedReport } => {
-    const workspace = workspaces.checkout(repo, commit);
-    try {
-      const dir = join(deps.artifactRoot, 'probe', randomUUID());
-      mkdirSync(dir, { recursive: true });
-      const tempReport = join(dir, 'report').replaceAll('\\', '/');
-      const final = command.replaceAll('{report}', tempReport);
-      const exec = executor.run(final, join(workspace.path, root), {}, timeoutMs);
-      if (!tool.format || tool.format === 'exit' || notRunnable(exec)) return { exec };
-      const report = readToolReport({
-        format: tool.format,
-        command,
-        report: tool.report,
-        metric: tool.metric,
-        cwd: join(workspace.path, root),
-        tempReport,
-      });
-      return { exec, report };
-    } finally {
-      workspace.dispose();
-    }
-  };
+  const runner = new ToolRunner(repo, {
+    artifactRoot: join(deps.artifactRoot, 'probe'),
+    workspaces,
+    executor,
+    timeoutMs,
+  });
+  const run = (tool: LayerSpec, command: string, root: string) => runner.run(commit, tool, command, root);
 
   const probeTool = (
     tool: LayerSpec,

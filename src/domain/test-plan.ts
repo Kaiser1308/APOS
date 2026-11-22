@@ -1,6 +1,7 @@
 import type { Acceptance, ExecutionProposal, GoalSpec } from './contracts.js';
 import { globsOverlap } from './glob.js';
 import type { WorkPackageSpec } from './packages.js';
+import type { ProjectSetup } from './project-setup.js';
 
 /** How a criterion is proved; Goals written before phase 3 carry none and mean `red-green`. */
 export const acceptanceProof = (item: Acceptance): NonNullable<Acceptance['proof']> => item.proof ?? 'red-green';
@@ -57,3 +58,6 @@ export function testPlanProblems(input: {
         }
   return problems;
 }
+
+/** Whether a setup says where tests are for at least one part: without it nothing can be locked. */
+export const setupLocksTests = (setup: ProjectSetup): boolean => Object.values(setup.parts).some(part => part.tests);

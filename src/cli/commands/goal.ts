@@ -1,4 +1,5 @@
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
+import { UserError } from '../../domain/errors.js';
 import { readFileSync } from 'node:fs';
 import { newEvent } from '../../app/events.js';
 import { parseAppetite } from '../../domain/contracts.js';
@@ -34,30 +35,36 @@ export function registerGoal(ctx: CliContext): void {
   const appetiteOptions = <T extends Command>(command: T): T =>
     command
       .requiredOption('--size <S|M|L>')
-      .requiredOption('--max-spend <usd>')
       .requiredOption('--max-minutes <n>')
       .requiredOption('--max-attempts <n>')
       .option('--overrun <stop|ask>', 'what to do when a limit is hit', 'ask')
-      .option(ON_BEHALF_FLAGS, ON_BEHALF_HELP) as T;
+      .option(ON_BEHALF_FLAGS, ON_BEHALF_HELP)
+      .addOption(new Option('--max-spend <usd>').hideHelp()) as T;
   type AppetiteFlags = {
     size: string;
-    maxSpend: string;
+    maxSpend?: string;
     maxMinutes: string;
     maxAttempts: string;
     overrun: string;
     onBehalf?: string;
   };
-  const appetiteOf = (flags: AppetiteFlags) => ({
-    size: flags.size,
-    maxSpendUsd: Number(flags.maxSpend),
-    maxWallMinutes: Number(flags.maxMinutes),
-    maxAttempts: Number(flags.maxAttempts),
-    overrunPolicy: flags.overrun,
-  });
+  const appetiteOf = (flags: AppetiteFlags) => {
+    if (flags.maxSpend !== undefined)
+      throw new UserError(
+        '--max-spend no longer exists: APOS does not run agents, so it cannot measure spend. Bound the work with --max-minutes and --max-attempts',
+      );
+    return {
+      size: flags.size,
+      maxWallMinutes: Number(flags.maxMinutes),
+      maxAttempts: Number(flags.maxAttempts),
+      overrun: flags.overrun,
+    };
+  };
   appetiteOptions(goal.command('approve').argument('<id>')).action((id: string, flags: AppetiteFlags) =>
     withJournalAsync(async journal => {
+      const appetite = parseAppetite(appetiteOf(flags));
       const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
-      new GoalRegistryService(journal).approve(id, parseAppetite(appetiteOf(flags)), undefined, confirmation);
+      new GoalRegistryService(journal).approve(id, appetite, undefined, confirmation);
       write(`Approved ${id}`);
     }),
   );
@@ -65,10 +72,11 @@ export function registerGoal(ctx: CliContext): void {
     .requiredOption('--reason <text>')
     .action((id: string, flags: AppetiteFlags & { reason: string }) =>
       withJournalAsync(async journal => {
+        const appetite = parseAppetite(appetiteOf(flags));
         const confirmation = await assertHuman('goal appetite', id, flags.onBehalf);
         journal.append(
           newEvent(id, 'appetite-set', {
-            appetite: parseAppetite(appetiteOf(flags)),
+            appetite,
             reason: flags.reason,
             confirmation,
           }),

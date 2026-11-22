@@ -109,6 +109,8 @@ export type GoalState = {
   status: GoalStatus;
   approvedGoalVersion?: number;
   selected: boolean;
+  /** When `goal select` happened: the time budget runs from here to `verified`. */
+  selectedAt?: string;
   publishedDocuments?: { commit: string; files: Record<string, string> }[];
   proposal?: ExecutionProposal;
   proposalApprovedVersion?: number;
@@ -150,6 +152,33 @@ export const SOLO_PACKAGE_ID = 'WP-MAIN';
 function requireThat(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
 }
+/** How far past the approved minutes `at` is, as text; undefined while inside the budget (or when there is none). */
+export function minutesOverBudget(state: GoalState, at: string): string | undefined {
+  if (!state.appetite || !state.selectedAt) return undefined;
+  const used = Math.round((Date.parse(at) - Date.parse(state.selectedAt)) / 60_000);
+  return used > state.appetite.maxWallMinutes
+    ? `${used} min since goal select, approved ${state.appetite.maxWallMinutes} min`
+    : undefined;
+}
+
+/**
+ * Why a verified Goal cannot be closed, empty when it can. Closing needs the commit of the last green gate:
+ * the gate of WP-MAIN for Solo, the integration gate for Multi-WP. Nothing, `--on-behalf` included, waives it.
+ */
+export function closeProblems(state: GoalState): string[] {
+  const problems: string[] = [];
+  if (state.status !== 'verified') problems.push('Technical verification required');
+  const gate = state.gate;
+  const same = (a?: string, b?: string) => Boolean(a && b && a.toLowerCase() === b.toLowerCase());
+  if (gate?.result !== 'green' || !same(gate.deliveryCommit, state.verifiedCommit))
+    problems.push(
+      `The Goal is verified on ${state.verifiedCommit ?? 'no recorded commit'} but the last green gate is ${gate ? `${gate.result} on ${gate.deliveryCommit}` : 'missing'}: close only the commit that passed the gate`,
+    );
+  if (state.proposal?.mode === 'multi-wp' && !same(state.integration?.commitRef, state.verifiedCommit))
+    problems.push('A Multi-WP Goal closes only on its integration commit');
+  return problems;
+}
+
 export const attemptLimit = (state: GoalState): number => state.appetite?.maxAttempts ?? 3;
 
 const FULL_SHA = /^[0-9a-fA-F]{40,64}$/;
@@ -274,7 +303,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'goal-selected':
       requireThat(state.approvedGoalVersion === state.spec.version, 'Goal must be approved');
-      return { ...state, status: 'selected', selected: true };
+      return { ...state, status: 'selected', selected: true, selectedAt: event.at };
     case 'goal-revised': {
       const spec = parseGoalSpec(event.data);
       requireThat(spec.id === state.spec.id && spec.version > state.spec.version, 'Goal revision must advance version');
@@ -466,6 +495,10 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'package-submitted': {
       requireThat(state.status === 'executing', 'Executing Goal required to submit a package');
+      requireThat(
+        !minutesOverBudget(state, event.at),
+        `The time budget is exhausted: ${minutesOverBudget(state, event.at)}`,
+      );
       const data = event.data as { packageId?: string; version?: number; commit?: string; base?: string; by?: string };
       const item = state.packages?.[data?.packageId ?? ''];
       requireThat(item, 'Unknown package');
@@ -678,9 +711,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'human-notified':
       requireThat(event.data && typeof event.data === 'object', 'Notification details required');
       return state;
-    case 'outcome-accepted':
-      requireThat(state.status === 'verified', 'Technical verification required');
+    case 'outcome-accepted': {
+      const problems = closeProblems(state);
+      requireThat(!problems.length, problems.join('; '));
       return { ...state, status: 'closed' };
+    }
     case 'outcome-revised':
       requireThat(state.status === 'verified', 'Technical verification required');
       return {

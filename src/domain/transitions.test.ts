@@ -207,3 +207,50 @@ describe('legacy Goals', () => {
     expect(isWritableEventType('package-submitted')).toBe(true);
   });
 });
+
+describe('closing and the time budget', () => {
+  const verified = (commit = DELIVERY) =>
+    applyEvent(record(submit(executingSolo(), commit), 'green', commit), event('verified', { deliveryCommit: commit }));
+
+  it('closes only on the commit that went green', () => {
+    expect(applyEvent(verified(), event('outcome-accepted')).status).toBe('closed');
+  });
+  it('refuses to close a Goal whose verified commit is not the one the last gate passed', () => {
+    const state = verified();
+    expect(() => applyEvent({ ...state, verifiedCommit: 'c'.repeat(40) }, event('outcome-accepted'))).toThrow(
+      /last green gate/,
+    );
+    expect(() => applyEvent({ ...state, verifiedCommit: undefined }, event('outcome-accepted'))).toThrow(
+      /last green gate/,
+    );
+  });
+  it('refuses to close when the last gate is not green, even if the Goal was verified', () => {
+    const state = verified();
+    const red = { ...state, gate: { ...state.gate!, result: 'red' as const } };
+    expect(() => applyEvent(red, event('outcome-accepted'))).toThrow(/last green gate/);
+  });
+  it('refuses a Multi-WP close unless the verified commit is the integration commit', () => {
+    const state = verified();
+    const multi = {
+      ...state,
+      proposal: { ...state.proposal!, mode: 'multi-wp' as const },
+      integration: { commitRef: 'd'.repeat(40) },
+    };
+    expect(() => applyEvent(multi, event('outcome-accepted'))).toThrow(/integration commit/);
+  });
+  it('refuses a submission after the approved minutes, counted from goal select', () => {
+    const late: GoalEvent = {
+      ...event('package-submitted', {
+        packageId: SOLO_PACKAGE_ID,
+        version: 1,
+        commit: DELIVERY,
+        base: BASE,
+        by: 'lead',
+      }),
+      at: '2026-11-07T05:00:00.000Z',
+    };
+    expect(() => applyEvent(executingSolo(), late)).toThrow(/time budget/);
+    const inTime = { ...late, at: '2026-11-07T03:59:00.000Z' };
+    expect(applyEvent(executingSolo(), inTime).packages?.[SOLO_PACKAGE_ID]?.status).toBe('submitted');
+  });
+});

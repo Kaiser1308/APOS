@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { assertProposalRationale, goalApprovalBlockers, parseExecutionProposal, parseGoalSpec } from './contracts.js';
+import {
+  assertProposalRationale,
+  goalApprovalBlockers,
+  parseAppetite,
+  parseExecutionProposal,
+  parseGoalSpec,
+} from './contracts.js';
 import { proposal, spec } from './fixtures.test-support.js';
 
 const goal = spec;
@@ -96,5 +102,21 @@ describe('Execution proposal contract', () => {
   });
   it('rejects invalid version', () => {
     expect(() => parseExecutionProposal({ ...proposal, goalVersion: 0 })).toThrow();
+  });
+});
+
+describe('appetite', () => {
+  const current = { size: 'M', maxWallMinutes: 240, maxAttempts: 3, overrun: 'stop' };
+  it('is size, minutes, attempts and the overrun policy', () => {
+    expect(parseAppetite(current)).toEqual(current);
+    expect(parseAppetite({ size: 'S', maxWallMinutes: 30, maxAttempts: 2 }).overrun).toBe('ask');
+  });
+  it('still reads the budget an older APOS recorded, spend and old policy name included', () => {
+    expect(
+      parseAppetite({ size: 'L', maxSpendUsd: 20, maxWallMinutes: 600, maxAttempts: 5, overrunPolicy: 'stop' }),
+    ).toEqual({ size: 'L', maxWallMinutes: 600, maxAttempts: 5, overrun: 'stop' });
+  });
+  it('no longer carries a spend limit', () => {
+    expect(parseAppetite({ ...current, maxSpendUsd: 5 })).not.toHaveProperty('maxSpendUsd');
   });
 });

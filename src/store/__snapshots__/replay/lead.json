@@ -59,10 +59,10 @@
     "approvedGoalVersion": 1,
     "appetite": {
       "size": "S",
-      "maxSpendUsd": 5,
       "maxWallMinutes": 60,
       "maxAttempts": 2,
-      "overrunPolicy": "ask"
-    }
+      "overrun": "ask"
+    },
+    "selectedAt": "2026-11-14T12:28:35.436Z"
   }
 ]

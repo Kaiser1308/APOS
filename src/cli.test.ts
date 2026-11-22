@@ -35,8 +35,6 @@ it('refuses approval when the source snapshot was edited after drafting, or a re
       spec.id,
       '--size',
       'M',
-      '--max-spend',
-      '20',
       '--max-minutes',
       '240',
       '--max-attempts',
@@ -63,8 +61,6 @@ it('refuses approval when the source snapshot was edited after drafting, or a re
       'GOAL-002',
       '--size',
       'M',
-      '--max-spend',
-      '20',
       '--max-minutes',
       '240',
       '--max-attempts',
@@ -81,10 +77,7 @@ it('refuses a Human command without a terminal or --on-behalf, and a mistyped id
   execFileSync('git', ['init', '-q', dir]);
   const home = mkdtempSync(join(tmpdir(), 'apos-cli-human-home-'));
   dirs.push(home);
-  const approve = ['goal', 'approve', spec.id, '--size', 'M', '--max-spend', '20', '--max-minutes', '240'].concat([
-    '--max-attempts',
-    '3',
-  ]);
+  const approve = ['goal', 'approve', spec.id, '--size', 'M', '--max-minutes', '240'].concat(['--max-attempts', '3']);
   const run = (args: string[], io?: { isTTY: boolean; typed?: string }) =>
     runCli(['--repo', dir, ...args], {
       home,
@@ -106,4 +99,27 @@ it('refuses a Human command without a terminal or --on-behalf, and a mistyped id
     .split('\n')
     .find(line => line.includes('"goal-approved"'))!;
   expect(JSON.parse(approved).event).toMatchObject({ type: 'goal-approved', data: { confirmation: { by: 'human' } } });
+}, 30_000);
+
+it('approves a Goal without --max-spend and says the flag is gone when it is given, writing nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apos-cli-appetite-'));
+  dirs.push(dir);
+  execFileSync('git', ['init', '-q', dir]);
+  const home = mkdtempSync(join(tmpdir(), 'apos-cli-appetite-home-'));
+  dirs.push(home);
+  const run = (...args: string[]) => runCli(['--repo', dir, ...args], { home, write: () => undefined });
+  writeFileSync(join(dir, 'brief.md'), sourceText);
+  writeFileSync(join(dir, 'goal.json'), JSON.stringify(spec));
+  await run('init');
+  await run('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
+  const log = () => readFileSync(join(home, 'events', `${spec.id}.jsonl`), 'utf8');
+  const before = log();
+  const flags = ['--size', 'M', '--max-minutes', '240', '--max-attempts', '3', '--on-behalf', 'test'];
+  await expect(run('goal', 'approve', spec.id, ...flags, '--max-spend', '20')).rejects.toThrow(
+    /--max-spend no longer exists/,
+  );
+  expect(log()).toBe(before);
+  await run('goal', 'approve', spec.id, ...flags);
+  expect(log()).toContain('"maxWallMinutes":240');
+  expect(log()).not.toMatch(/maxSpend/);
 }, 30_000);

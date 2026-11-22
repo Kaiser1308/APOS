@@ -147,11 +147,11 @@
     "approvedGoalVersion": 1,
     "appetite": {
       "size": "S",
-      "maxSpendUsd": 5,
       "maxWallMinutes": 60,
       "maxAttempts": 3,
-      "overrunPolicy": "ask"
+      "overrun": "ask"
     },
+    "selectedAt": "2026-11-08T00:58:35.772Z",
     "proposal": {
       "id": "EXEC-SMOKE",
       "version": 1,

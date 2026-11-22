@@ -1,6 +1,6 @@
 import { parseWorkPackage, type WorkPackageSpec } from '../domain/packages.js';
 import { newEvent } from './events.js';
-import type { GoalEventType } from '../domain/transitions.js';
+import { minutesOverBudget, type GoalEventType, type GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 import type { GateResult } from '../domain/gate.js';
@@ -41,6 +41,23 @@ export class PackageService {
     return spec;
   }
 
+  /** Past the approved minutes, nothing more is gated: the Human decides (`ask`) or the Goal stops (`stop`). */
+  private enforceTimeBudget(goalId: string, state: GoalState): void {
+    const over = minutesOverBudget(state, new Date().toISOString());
+    if (!over) return;
+    const policy = state.appetite?.overrun ?? 'ask';
+    if (policy === 'stop') {
+      this.store.append(
+        newEvent(goalId, 'outcome-stopped', { by: 'budget', reason: `time budget exhausted: ${over}` }),
+      );
+      throw new UserError(`${goalId} stopped: time budget exhausted (${over}); overrun policy is stop`);
+    }
+    this.store.append(newEvent(goalId, 'blocked', { kind: 'external', note: `time budget exhausted: ${over}` }));
+    throw new UserError(
+      `${goalId} is blocked: time budget exhausted (${over}). Raise it with \`apos goal appetite\` and resolve the blocker, or stop the Goal`,
+    );
+  }
+
   /**
    * Runs the gate on `commit` right now and records the outcome. The commit is checked first and the gate runs
    * before anything is written, so an invalid commit or an interrupted gate leaves the log as it was. A solo
@@ -65,6 +82,7 @@ export class PackageService {
         `${packageId} is ${item.status}: only a pending, red or needs-human package can be submitted`,
       );
     if (!/^[0-9a-fA-F]{40,64}$/.test(commit)) throw new UserError('Submit the full commit sha');
+    this.enforceTimeBudget(goalId, state);
     const base = state.proposal?.baseCommit;
     if (!base) throw new UserError(`${goalId} has no proposal.baseCommit to gate against`);
     if (!inspector.exists(repoPath, commit)) throw new UserError(`Commit ${commit} does not exist in this repository`);

@@ -27,7 +27,11 @@ const spec: GoalSpec = {
   ],
 };
 
-async function project(maxAttempts = 3, executor?: CommandExecutor) {
+async function project(
+  maxAttempts = 3,
+  executor?: CommandExecutor,
+  budget: { selectedAgoMinutes?: number; overrun?: 'ask' | 'stop' } = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), 'apos-submit-repo-'));
   const artifacts = mkdtempSync(join(tmpdir(), 'apos-submit-art-'));
   const home = mkdtempSync(join(tmpdir(), 'apos-submit-home-'));
@@ -43,14 +47,19 @@ async function project(maxAttempts = 3, executor?: CommandExecutor) {
   const journal = new ProjectJournal(dir, store, home, newEvent);
   let n = 0;
   const add = (type: GoalEventType, data?: unknown) =>
-    journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
+    journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: new Date().toISOString() });
   journal.appendWithSource(
-    { id: `EV-${++n}`, goalId: spec.id, type: 'goal-drafted', data: spec, at: '2026-11-07T00:00:00.000Z' },
+    { id: `EV-${++n}`, goalId: spec.id, type: 'goal-drafted', data: spec, at: new Date().toISOString() },
     sourceText,
   );
   const base = git('rev-parse', 'HEAD');
-  add('goal-approved', { appetite: { ...approval.appetite, maxAttempts } });
-  add('goal-selected');
+  add('goal-approved', { appetite: { ...approval.appetite, maxAttempts, overrun: budget.overrun ?? 'ask' } });
+  journal.append({
+    id: `EV-${++n}`,
+    goalId: spec.id,
+    type: 'goal-selected',
+    at: new Date(Date.now() - (budget.selectedAgoMinutes ?? 0) * 60_000).toISOString(),
+  });
   add('proposal-drafted', { ...proposal, baseCommit: base });
   add('proposal-approved');
   const commit = (files: Record<string, string | null>, message: string) => {
@@ -148,6 +157,24 @@ describe('package submit', () => {
     interrupted = false;
     expect((await service.submit(spec.id, 'WP-MAIN', good, 'lead')).result).toBe('green');
   }, 60_000);
+
+  it.each([
+    ['ask', 'blocked', /is blocked: time budget exhausted/],
+    ['stop', 'stopped', /stopped: time budget exhausted/],
+  ] as const)(
+    'with overrun %s, refuses a submission past the approved minutes and leaves it %s',
+    async (policy, status, message) => {
+      const { commit, service, journal, types } = await project(3, undefined, {
+        selectedAgoMinutes: 300,
+        overrun: policy,
+      });
+      const good = commit({ 'feature.js': 'module.exports = 1;' }, 'feature');
+      await expect(service.submit(spec.id, 'WP-MAIN', good, 'lead')).rejects.toThrow(message);
+      expect(journal.getGoal(spec.id)?.status).toBe(status);
+      expect(types()).not.toContain('package-submitted');
+    },
+    60_000,
+  );
 
   it('can finish a submission whose gate record was lost between the two writes', async () => {
     const { commit, service, journal, add, base } = await project();

@@ -32,7 +32,7 @@ export const spec: GoalSpec = {
 };
 /** Data of a `goal-approved` event: the Human approves the Goal together with its controller-only appetite. */
 export const approval = {
-  appetite: { size: 'M', maxSpendUsd: 20, maxWallMinutes: 240, maxAttempts: 3, overrunPolicy: 'ask' },
+  appetite: { size: 'M', maxWallMinutes: 240, maxAttempts: 3, overrun: 'ask' },
 } as const;
 export const proposal: ExecutionProposal = {
   id: 'EXEC-001',
@@ -44,7 +44,7 @@ export const proposal: ExecutionProposal = {
   risks: [],
   sharedPaths: [],
   splitRationale: 'scanner and history change separate modules',
-  estimatedCost: { spendUsd: 5, wallMinutes: 60 },
+  estimatedCost: { wallMinutes: 60 },
   acceptanceMapping: [{ acceptanceId: 'AC-1', verification: 'test' }],
   verificationStrategy: 'integration test',
 };

@@ -10,6 +10,8 @@ export type CheckRun = {
   logRef: string;
   logSha256: string;
   failures: string[];
+  /** Set when the check reads a standard report and that report was missing, empty or broken. */
+  reportProblem?: string;
 };
 export type CheckStatus = 'pass' | 'fail' | 'unverifiable' | 'manual-pending';
 export type CheckResult = {
@@ -90,6 +92,8 @@ export function evaluateCommandCheck(check: CommandCheck, base: CheckRun[], deli
   if (!delivery.length) return result('unverifiable', 'delivery was not run');
   const deliveryProblem = consistent(delivery);
   if (deliveryProblem) return result('unverifiable', `delivery ${deliveryProblem}`);
+  const reportProblem = delivery.find(run => run.reportProblem)?.reportProblem;
+  if (reportProblem) return result('unverifiable', `delivery report unusable: ${reportProblem}`);
   const head = delivery[0];
   if (check.expect === 'pass')
     return head.exitCode === 0
@@ -97,6 +101,8 @@ export function evaluateCommandCheck(check: CommandCheck, base: CheckRun[], deli
       : result('fail', `exit ${head.exitCode} on delivery`);
 
   if (!base.length) return result('unverifiable', 'baseline was not run');
+  const baseReportProblem = base.find(run => run.reportProblem)?.reportProblem;
+  if (baseReportProblem) return result('unverifiable', `baseline report unusable: ${baseReportProblem}`);
   const baseProblem = consistent(base);
   if (baseProblem) return result('unverifiable', `baseline ${baseProblem}`);
   if (base[0].exitCode !== 0 && !base[0].failures.length)

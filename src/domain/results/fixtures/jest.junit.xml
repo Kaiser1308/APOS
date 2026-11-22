@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="3" failures="1" errors="0" time="1.2">
+  <testsuite name="Cart" errors="0" failures="1" skipped="0" timestamp="2026-11-22T10:00:00" time="0.9" tests="3">
+    <testcase classname="Cart totals" name="Cart totals sums items" time="0.01"></testcase>
+    <testcase classname="Cart totals" name="Cart totals applies discount" time="0.01">
+      <failure>Error: expect(received).toBe(expected)
+Expected: 90
+Received: 100
+    at Object.&lt;anonymous&gt; (cart.test.js:12:20)</failure>
+    </testcase>
+    <testcase name="loose test" time="0.01"></testcase>
+  </testsuite>
+</testsuites>

@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-export const RESULT_FORMATS = ['junit', 'sarif', 'metric', 'apos-json'] as const;
+import type { ResultFormat } from './results/types.js';
+
+export const RESULT_FORMATS = ['junit', 'sarif', 'metric', 'apos-json'] as const satisfies readonly ResultFormat[];
+/** `exit` is for tools with no report (tsc, compile, checkstyle): pass or fail by exit code only, no test ids. */
+export const TOOL_FORMATS = [...RESULT_FORMATS, 'exit'] as const;
 
 /**
  * One command that produces a standard report. `{report}` in `command` is replaced by a path APOS provides.
@@ -10,7 +14,7 @@ export const RESULT_FORMATS = ['junit', 'sarif', 'metric', 'apos-json'] as const
 export const catalogToolSchema = z.object({
   id: z.string().trim().min(1),
   command: z.string().trim().min(1),
-  format: z.enum(RESULT_FORMATS),
+  format: z.enum(TOOL_FORMATS),
   report: z.string().trim().min(1).optional(),
   metric: z.string().trim().min(1).optional(),
   runOne: z

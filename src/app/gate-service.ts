@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { newEvent } from './events.js';
@@ -19,6 +19,9 @@ import {
   type GateEnvironment,
   type GateReport,
 } from '../domain/gate.js';
+import { mergeReports, readReport } from '../domain/results/index.js';
+import { reportFailures } from '../domain/results/failures.js';
+import { readReportFiles } from './report-files.js';
 import { gateWarnings } from '../domain/reviews.js';
 import { UserError } from '../domain/errors.js';
 import { assertGitRoot } from '../store/project-history.js';
@@ -297,8 +300,10 @@ export class GateService {
     for (let n = 1; n <= check.runs; n++) {
       const workspace = this.workspaces.checkout(repoPath, commit);
       try {
-        const result = this.executor.run(check.command, workspace.path, check.env, check.timeoutMs);
-        const log = `$ ${check.command}\n# commit ${commit} (${role} run ${n}), shell ${this.executor.shell}\n${workspace.preparation ? `${workspace.preparation}\n` : ''}${result.output}\n# exit ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}\n`;
+        const tempReport = join(artifacts, `${check.id}-${role}-${n}.report`).replaceAll('\\', '/');
+        const command = check.command.replaceAll('{report}', tempReport);
+        const result = this.executor.run(command, workspace.path, check.env, check.timeoutMs);
+        const log = `$ ${command}\n# commit ${commit} (${role} run ${n}), shell ${this.executor.shell}\n${workspace.preparation ? `${workspace.preparation}\n` : ''}${result.output}\n# exit ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}\n`;
         const logRef = join(artifacts, `${check.id}-${role}-${n}.log`);
         writeFileSync(logRef, log);
         runs.push({
@@ -307,12 +312,36 @@ export class GateService {
           timedOut: result.timedOut,
           logRef,
           logSha256: createHash('sha256').update(log).digest('hex'),
-          failures: extractFailures(result.output, check.failurePattern),
+          ...this.failuresOf(check, result.output, workspace.path, tempReport),
         });
       } finally {
         workspace.dispose();
       }
     }
     return runs;
+  }
+
+  /** Failures from the standard report when the check has a `format`, else from the output by `failurePattern`. */
+  private failuresOf(
+    check: CommandCheck,
+    output: string,
+    workspace: string,
+    tempReport: string,
+  ): Pick<CheckRun, 'failures' | 'reportProblem'> {
+    if (!check.format) return { failures: extractFailures(output, check.failurePattern) };
+    const contents = check.command.includes('{report}')
+      ? existsReport(tempReport)
+      : readReportFiles(workspace, check.report ?? '');
+    const parsed = mergeReports(contents.map(content => readReport(check.format!, content)));
+    const outcome = reportFailures(parsed);
+    return 'problem' in outcome ? { failures: [], reportProblem: outcome.problem } : { failures: outcome.failures };
+  }
+}
+
+function existsReport(path: string): string[] {
+  try {
+    return [readFileSync(path, 'utf8')];
+  } catch {
+    return [];
   }
 }

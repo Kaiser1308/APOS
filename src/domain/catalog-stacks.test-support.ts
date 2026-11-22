@@ -14,8 +14,10 @@ export const STACKS: CatalogEntry[] = [
     stack: 'typescript',
     detect: { files: ['package.json'], contains: { 'package.json': '"vitest"' } },
     layers: {
+      // `tsc` and `eslint` are two tools on one layer: the first is the default a draft picks.
       // Needs `@microsoft/eslint-formatter-sarif` in the project: ESLint ships no SARIF formatter.
       L0: [
+        { id: 'tsc', command: 'npx tsc --noEmit', format: 'exit' },
         {
           id: 'eslint',
           command: 'npx eslint . --format @microsoft/eslint-formatter-sarif --output-file {report}',
@@ -71,7 +73,10 @@ export const STACKS: CatalogEntry[] = [
     stack: 'python',
     detect: { files: ['pyproject.toml'] },
     layers: {
-      L0: [{ id: 'ruff', command: 'ruff check --output-format sarif --output-file {report} .', format: 'sarif' }],
+      L0: [
+        { id: 'ruff', command: 'ruff check --output-format sarif --output-file {report} .', format: 'sarif' },
+        { id: 'mypy', command: 'mypy .', format: 'exit' },
+      ],
       L1: [
         {
           id: 'pytest',
@@ -127,6 +132,7 @@ export const STACKS: CatalogEntry[] = [
     stack: 'java-gradle',
     detect: { files: ['gradlew'] },
     layers: {
+      L0: [{ id: 'compile', command: './gradlew compileJava compileTestJava', format: 'exit' }],
       // `cleanTest` first: Gradle skips an up-to-date `test`, which would give the probe's second run nothing to compare.
       // The report is a directory of XML files; the check reads every file the glob matches and merges them.
       L1: [
@@ -178,6 +184,7 @@ export const STACKS: CatalogEntry[] = [
     stack: 'java-maven',
     detect: { files: ['pom.xml'] },
     layers: {
+      L0: [{ id: 'compile', command: 'mvn -B -q test-compile', format: 'exit' }],
       L1: [
         {
           id: 'surefire-unit',

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0" name="com.example.CartUnitTest" time="0.04" tests="3" errors="0" skipped="0" failures="1">
+  <properties>
+    <property name="java.version" value="21"/>
+  </properties>
+  <testcase name="params[1]" classname="com.example.CartUnitTest" time="0.01"/>
+  <testcase name="params[1]" classname="com.example.CartUnitTest" time="0.01"/>
+  <testcase name="fails" classname="com.example.CartUnitTest" time="0.02">
+    <failure message="expected: &lt;1&gt; but was: &lt;2&gt;" type="org.opentest4j.AssertionFailedError"><![CDATA[org.opentest4j.AssertionFailedError: expected: <1> but was: <2>
+	at com.example.CartUnitTest.fails(CartUnitTest.java:20)
+]]></failure>
+  </testcase>
+</testsuite>

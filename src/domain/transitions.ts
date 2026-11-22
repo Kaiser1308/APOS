@@ -204,6 +204,8 @@ const soloPackage = (goal: GoalSpec, proposal: ExecutionProposal): PackageState 
       checkIds: item.checkIds,
     })),
     integration: 'Solo: the package is the whole Goal',
+    ...(proposal.paths ? { paths: proposal.paths } : {}),
+    ...(proposal.stubPaths ? { stubPaths: proposal.stubPaths } : {}),
   },
   status: 'pending',
   attempts: 0,

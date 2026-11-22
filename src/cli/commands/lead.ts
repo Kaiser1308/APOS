@@ -1,6 +1,7 @@
 import { newEvent } from '../../app/events.js';
 import { assertProposalRationale, parseExecutionProposal, proposalRationale } from '../../domain/contracts.js';
 import { GitCommitInspector } from '../../app/integration.js';
+import { testPlanProblems } from '../../domain/test-plan.js';
 import { UserError } from '../../domain/errors.js';
 import type { CliContext } from '../context.js';
 
@@ -56,6 +57,13 @@ export function registerLead(ctx: CliContext): void {
           state.proposal,
           `. This saved proposal predates that field: add a "rationale" string to your execution JSON, re-run apos lead propose --file <execution.json>, then apos lead commit ${id}`,
         );
+        const problems = testPlanProblems({
+          goal: state.spec,
+          proposal: state.proposal,
+          packages: Object.values(state.packages ?? {}).map(item => item.spec),
+          pinned: state.setupVersion !== undefined,
+        });
+        if (problems.length) throw new UserError(`The plan is not ready:\n- ${problems.join('\n- ')}`);
         journal.append(newEvent(id, 'proposal-approved', { by: flags.by, proposalVersion: state.proposal.version }));
         if (state.proposal.mode === 'multi-wp') {
           const notice = {

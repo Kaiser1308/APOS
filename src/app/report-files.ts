@@ -1,24 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { globToRegExp } from '../domain/glob.js';
 import { mergeReports, readReport, type ParsedReport, type ResultFormat } from '../domain/results/index.js';
-
-const escape = (text: string) => text.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-
-/** Glob with `*`, `?` and `**`, forward slashes only; enough for report locations. */
-export function globToRegExp(pattern: string): RegExp {
-  let out = '';
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i]!;
-    if (c === '*' && pattern[i + 1] === '*') {
-      const slash = pattern[i + 2] === '/';
-      out += slash ? '(?:.*/)?' : '.*';
-      i += slash ? 2 : 1;
-    } else if (c === '*') out += '[^/]*';
-    else if (c === '?') out += '[^/]';
-    else out += escape(c);
-  }
-  return new RegExp(`^${out}$`);
-}
 
 function walk(root: string, dir: string, out: string[]): void {
   let entries;

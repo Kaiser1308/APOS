@@ -16,6 +16,10 @@ const packageSchema = z.object({
   interfaces: z.array(text).min(1),
   acceptance: z.array(z.object({ id, text, goalAcceptanceId: id.optional(), checkIds: z.array(id).optional() })).min(1),
   integration: text,
+  /** Globs of the files this package may change (the scope check). Required at `lead commit` for a Goal pinned to a setup. */
+  paths: z.array(text).min(1).optional(),
+  /** Empty skeleton files of this package's `interfaces`, committed by the tester. */
+  stubPaths: z.array(text).optional(),
 });
 
 export type WorkPackageSpec = z.infer<typeof packageSchema>;

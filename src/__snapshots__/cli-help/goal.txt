@@ -6,7 +6,8 @@ Options:
 Commands:
   create [options]
   list
-  show <id>                status, pinned setup and locked tests of one Goal
+  show <id>                status, pinned setup, locked tests and the assurance
+                           table of one Goal
   approve [options] <id>
   appetite [options] <id>
   select [options] <id>

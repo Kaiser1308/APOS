@@ -30,6 +30,8 @@ const lockSchema = z.object({
   /** sha256 of every test-infrastructure file (conftest, runner config ...) present at the lock commit. Absent on a lock from before this existed. */
   infra: z.record(z.string().min(1), sha256).optional(),
   map: testMapSchema,
+  /** Parts whose acceptance tests were not held to the declared entries because their stack has no `entryRule`: the assurance table says "chưa kiểm". */
+  unchecked: z.array(z.string()).optional(),
   by: z.string().min(1),
   /** The commit this lock replaced, for a revision. */
   revisionOf: commit.optional(),
@@ -89,6 +91,7 @@ export function applyTestLockEvent(state: GoalState, event: GoalEvent): GoalStat
   return {
     ...state,
     testLock: lock,
+    testRevisions: (state.testRevisions ?? 0) + 1,
     pendingRevision: undefined,
     packages,
     integration: undefined,

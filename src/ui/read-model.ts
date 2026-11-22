@@ -1,4 +1,5 @@
 import type { Appetite } from '../domain/contracts.js';
+import { buildAssuranceReport, renderAssuranceText, type AssuranceReport } from '../domain/assurance-report.js';
 import type { GateReport } from '../domain/gate.js';
 import { buildPlan, type PlanSummary } from '../domain/plan.js';
 import type { GoalEvent, GoalState, GoalStatus } from '../domain/transitions.js';
@@ -199,6 +200,9 @@ export type GoalDetail = GoalRow & {
   }[];
   findings: { kind: string; note: string; by: string; commit?: string }[];
   gates: GateView[];
+  /** What the Goal's guarantees rest on, from the log alone (the stacks need the setup, which a read-only view does not load). */
+  assurance: AssuranceReport;
+  assuranceText: string;
   reviews: { subject: string; packageId?: string; result: string; reviewer: string; commitRef: string; note: string }[];
   blocker?: unknown;
   timeline: { events: { id: string; type: string; at: string; data?: string }[]; nextBefore?: string };
@@ -242,6 +246,8 @@ export function buildGoalDetail(
       commit: item.commit,
     })),
     gates: gateReports(state).map(({ scope, report }) => gateView(scope, report)),
+    assurance: buildAssuranceReport(state),
+    assuranceText: renderAssuranceText(buildAssuranceReport(state)),
     reviews: state.reviews.map(item => ({
       subject: item.subject,
       packageId: item.packageId,

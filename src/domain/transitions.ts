@@ -148,6 +148,8 @@ export type GoalState = {
   findings?: Finding[];
   /** The locked acceptance tests: every package is gated on top of this commit. Absent = no test locking. */
   testLock?: TestLock;
+  /** How many times the lock was replaced after the first one. */
+  testRevisions?: number;
   /** A revision of the locked tests waiting for an approved exception. */
   pendingRevision?: TestRevisionPending;
   exceptions?: ExceptionRecord[];

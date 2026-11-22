@@ -174,6 +174,9 @@ it('never changes the controller home, even for a torn final line, and ignores t
   expect(statSync(file).size).toBe(tornSize);
   const detail = JSON.parse(route(p.home, new URL('/api/goals/GOAL-A', 'http://localhost')).body);
   expect(detail.status).toBe('draft');
+  // The assurance table is part of the read model: a Goal with no setup says so.
+  expect(detail.assuranceText).toContain('GOAL-A  không có setup');
+  expect(detail.assurance.guards).toBe(false);
   expect(JSON.stringify(detail.timeline.events)).not.toContain('EV-torn');
 });
 

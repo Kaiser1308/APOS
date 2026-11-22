@@ -31,6 +31,8 @@ export type Inspection = {
   map: TestMapEntry[];
   /** sha256 of every test-infrastructure file at the commit. */
   infra: Record<string, string>;
+  /** Parts whose acceptance tests could not be held to the declared entries (no rule for their stack). */
+  unchecked: string[];
   /** Tests per mapped layer, for the summary `apos tests show` prints. */
   testCount: number;
 };
@@ -258,6 +260,15 @@ export function inspectTests(input: InspectInput): Inspection {
     files,
     asserts,
     map,
+    unchecked: [
+      ...new Set(
+        map
+          .filter(
+            entry => entry.layer === 'L2' && setup.parts[entry.part] && !setup.parts[entry.part]!.tests?.entryRule,
+          )
+          .map(entry => entry.part),
+      ),
+    ].sort(),
     testCount: map.reduce((sum, entry) => sum + entry.testIds.length, 0),
   };
 }

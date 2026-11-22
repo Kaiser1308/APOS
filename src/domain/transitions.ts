@@ -52,6 +52,7 @@ export const GOAL_EVENT_TYPES = [
   'tests-locked',
   'tests-revision-pending',
   'exception-approved',
+  'close-gate-recorded',
 ] as const;
 export type GoalEventType = (typeof GOAL_EVENT_TYPES)[number];
 const WRITABLE: ReadonlySet<string> = new Set(GOAL_EVENT_TYPES);
@@ -150,6 +151,8 @@ export type GoalState = {
   /** A revision of the locked tests waiting for an approved exception. */
   pendingRevision?: TestRevisionPending;
   exceptions?: ExceptionRecord[];
+  /** The latest run of the close-stage layers on the verified commit (only for a Goal pinned to a setup). */
+  closeGate?: GateReport;
   /** For a `legacy` Goal: how its old log ended, so closed Goals still count as closed. */
   legacyOutcome?: 'verified' | 'closed' | 'stopped';
 };
@@ -770,6 +773,18 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return applyTestLockEvent(state, event);
     case 'exception-approved':
       return applyException(state, event);
+    case 'close-gate-recorded': {
+      const gate = event.data as GateReport | undefined;
+      requireThat(state.status === 'verified' && state.verifiedCommit, 'The close stage runs on a verified Goal');
+      requireThat(
+        gate?.phase === 'close' &&
+          gate.goalId === state.spec.id &&
+          Array.isArray(gate.checks) &&
+          gate.deliveryCommit?.toLowerCase() === state.verifiedCommit.toLowerCase(),
+        'A close gate must be for the commit the Goal was verified on',
+      );
+      return { ...state, closeGate: gate };
+    }
     default:
       // An event type this version does not know (written by a newer APOS) leaves the state as it was,
       // so a rollback can still replay the log instead of losing every Goal after it.

@@ -4,6 +4,7 @@ import { GateService } from '../../app/gate-service.js';
 import { newEvent } from '../../app/events.js';
 import { UserError } from '../../domain/errors.js';
 import { integrationGateProblem } from '../../domain/integration-gate.js';
+import { assuranceService } from '../test-lock-wiring.js';
 import type { CliContext } from '../context.js';
 
 export function registerIntegration(ctx: CliContext): void {
@@ -29,7 +30,11 @@ export function registerIntegration(ctx: CliContext): void {
             by,
           }),
         );
-        const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(goalId, repo(), {
+        const report = new GateService(journal, {
+          inspector: options.inspector,
+          ...options.gate,
+          assurance: assuranceService(ctx, journal, goalId),
+        }).run(goalId, repo(), {
           deliveryCommit: commit,
         });
         write(`Integration gate ${report.result} on ${commit}`);
@@ -54,11 +59,11 @@ export function registerIntegration(ctx: CliContext): void {
         const current = journal.getGoal(goalId)?.gate;
         // The controller gates the integration commit itself; a red result wakes the Lead on the next tick.
         if (current?.deliveryCommit !== input.commitRef || current.result !== 'green') {
-          const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(
-            goalId,
-            repo(),
-            { deliveryCommit: input.commitRef },
-          );
+          const report = new GateService(journal, {
+            inspector: options.inspector,
+            ...options.gate,
+            assurance: assuranceService(ctx, journal, goalId),
+          }).run(goalId, repo(), { deliveryCommit: input.commitRef });
           write(`Integration gate ${report.result} on ${input.commitRef}`);
           if (report.result !== 'green') throw new Error(`Integration gate is ${report.result}`);
         }

@@ -144,7 +144,8 @@ export function inspectTests(input: InspectInput): Inspection {
         map,
         proofOf: id => {
           const item = criteria.get(id);
-          return item ? acceptanceProof(item) : undefined;
+          const proof = item ? acceptanceProof(item) : undefined;
+          return proof === 'benchmark' || proof === 'scan' ? undefined : proof;
         },
         outcomes,
         patterns: Object.fromEntries(

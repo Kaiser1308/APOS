@@ -108,7 +108,14 @@ export const mapFor = (goalId: string, testIds: string[] = [ids.add]) =>
 
 /** A repo with a fake test tool, an approved setup pinned by a Goal that is `testing`, and a service to lock tests. */
 export async function testingProject(
-  options: { goal?: GoalSpec; setup?: object; files?: Record<string, string>; paths?: string[] } = {},
+  options: {
+    goal?: GoalSpec;
+    setup?: object;
+    files?: Record<string, string>;
+    paths?: string[];
+    /** Extra fields of the plan (`layers`, ...). */
+    plan?: object;
+  } = {},
 ) {
   const dir = temp('apos-lock-repo-');
   const home = temp('apos-lock-home-');
@@ -175,6 +182,7 @@ export async function testingProject(
       acceptanceMapping: goal.acceptance.map(item => ({ acceptanceId: item.id, verification: 'test' })),
       paths: options.paths ?? ['src/**', 'tests/unit/**'],
       stubPaths: ['src/stub.txt'],
+      ...options.plan,
     }),
   );
   journal.append(newEvent(goal.id, 'proposal-approved', { by: 'lead', testing: true }));

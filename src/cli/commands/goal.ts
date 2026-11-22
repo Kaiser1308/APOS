@@ -8,6 +8,8 @@ import { buildPlan } from '../../domain/plan.js';
 import { GoalRegistryService } from '../../app/registry.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import { lockSummary } from '../lock-summary.js';
+import { pinnedSetupOf } from '../test-lock-wiring.js';
+import { proofToolProblems } from '../../domain/proof-tools.js';
 import type { CliContext } from '../context.js';
 
 export function registerGoal(ctx: CliContext): void {
@@ -91,6 +93,15 @@ export function registerGoal(ctx: CliContext): void {
             throw new UserError(
               `Setup version ${flags.setupVersion} was never approved (approved: ${approvals.map(item => item.version).join(', ') || 'none'})`,
             );
+        }
+        // A benchmark or scan criterion names a tool of the setup the Goal is pinned to: approving one the setup lacks proves nothing.
+        const goalSpec = journal.getGoal(id)?.spec;
+        if (goalSpec?.acceptance.some(item => item.benchmark || item.scan)) {
+          const setup = pinnedSetupOf(ctx, journal, setupVersion);
+          const problems = setup
+            ? proofToolProblems(goalSpec, setup)
+            : [`${id} has benchmark or scan criteria but there is no approved setup to take their tools from`];
+          if (problems.length) throw new UserError(`${id} cannot be approved:\n- ${problems.join('\n- ')}`);
         }
         const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
         new GoalRegistryService(journal).approve(id, appetite, undefined, confirmation, setupVersion);

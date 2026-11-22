@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { parseSetupObject, type ProjectSetup } from './project-setup.js';
-import { DEFAULT_FLOOR, layerChoiceProblems, planLayers, type LayerRun, type Stage } from './layer-plan.js';
+import {
+  DEFAULT_FLOOR,
+  layerChoiceProblems,
+  planLayers,
+  skippedLayers,
+  type LayerRun,
+  type Stage,
+} from './layer-plan.js';
 
 const junit = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
@@ -196,5 +203,21 @@ describe('layerChoiceProblems', () => {
     expect(choose({ submit: ['L6'] })[0]).toMatch(/L6/);
     expect(choose({ nope: ['L1'] } as never)[0]).toMatch(/stage/);
     expect(choose({ submit: ['L9'] })[0]).toMatch(/L9/);
+  });
+});
+
+describe('skippedLayers', () => {
+  const skipped = (stage: Stage, over: Partial<Parameters<typeof planLayers>[0]> = {}, setup = setupOf()) => {
+    const input = { setup, stage, changed: ['api/x.py'], goalFlags: [], reductions: [], ...over };
+    return skippedLayers(input, planLayers(input));
+  };
+  it('says a flag-gated tool is off, naming the flag', () => {
+    expect(skipped('close')).toContain('api.L5.mut tắt: Goal không gắn cờ mutation');
+    expect(skipped('close', { goalFlags: ['mutation'] }).some(note => note.includes('mut'))).toBe(false);
+  });
+  it('says a floor layer has no tool anywhere in scope', () => {
+    expect(skipped('submit', { changed: ['web/y.ts'] })).toContain(
+      'L0 không chạy ở khâu submit: setup không có công cụ cho lớp này',
+    );
   });
 });

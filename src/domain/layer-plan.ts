@@ -51,6 +51,16 @@ const toolsOf = (setup: ProjectSetup, part: string, layer: LayerId): LayerSpec[]
 const flagged = (tool: LayerSpec, flags: string[]): boolean =>
   !tool.when || tool.when === 'always' || flags.includes(tool.when.slice('flag:'.length));
 
+/** The floor of a stage: the setup's own list for that stage, else the default. */
+export const floorOf = (setup: ProjectSetup, stage: Stage): LayerId[] => setup.floor?.[stage] ?? DEFAULT_FLOOR[stage];
+
+/** The parts a stage looks at: at `submit` those with a changed file, at the later stages all of them. */
+export function partsInScope(setup: ProjectSetup, stage: Stage, changed: string[]): string[] {
+  const parts = Object.keys(setup.parts);
+  const files = changed.map(normal);
+  return stage === 'submit' ? parts.filter(name => files.some(file => under(file, setup.parts[name]!.root))) : parts;
+}
+
 /**
  * What the gate runs at one stage, and why. A pure function of the pinned setup, the package, the Goal and the
  * change: the same input always gives the same plan, and the plan is recorded with the gate.
@@ -60,10 +70,8 @@ const flagged = (tool: LayerSpec, flags: string[]): boolean =>
 export function planLayers(input: PlanInput): LayerRun[] {
   const { setup, stage, goalFlags } = input;
   const changed = input.changed.map(normal);
-  const floor = setup.floor?.[stage] ?? DEFAULT_FLOOR[stage];
-  const parts = Object.keys(setup.parts);
-  const scope =
-    stage === 'submit' ? parts.filter(name => changed.some(file => under(file, setup.parts[name]!.root))) : parts;
+  const floor = floorOf(setup, stage);
+  const scope = partsInScope(setup, stage, changed);
   const reducedLayers = new Set(input.reductions.filter(item => item.stage === stage).map(item => item.layer));
 
   type Entry = { part: string; layer: LayerId; tool: LayerSpec; origins: Set<LayerWhy>; first: LayerWhy };
@@ -162,4 +170,24 @@ export function layerChoiceProblems(input: {
     }
   }
   return problems;
+}
+
+/** Floor layers and flag-gated tools that are not in the plan, and why: the table says what is off rather than leave it out. */
+export function skippedLayers(input: PlanInput, runs: LayerRun[]): string[] {
+  const { setup, stage } = input;
+  const scope = [...partsInScope(setup, stage, input.changed), ...(stage === 'submit' ? [] : [SYSTEM])];
+  const planned = new Set(runs.map(run => `${run.part}.${run.layer}.${run.tool.id}`));
+  const notes: string[] = [];
+  for (const layer of floorOf(setup, stage)) {
+    let any = false;
+    for (const part of scope) {
+      for (const tool of toolsOf(setup, part, layer)) {
+        any = true;
+        if (!planned.has(`${part}.${layer}.${tool.id}`) && tool.when?.startsWith('flag:'))
+          notes.push(`${part}.${layer}.${tool.id} tắt: Goal không gắn cờ ${tool.when.slice('flag:'.length)}`);
+      }
+    }
+    if (!any) notes.push(`${layer} không chạy ở khâu ${stage}: setup không có công cụ cho lớp này`);
+  }
+  return notes;
 }

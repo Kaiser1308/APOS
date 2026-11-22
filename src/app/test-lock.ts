@@ -1,4 +1,5 @@
 import { newEvent } from './events.js';
+import { hasException } from '../domain/exceptions.js';
 import { UserError } from '../domain/errors.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 import type { GoalState } from '../domain/transitions.js';
@@ -8,7 +9,8 @@ import { GitCommitInspector } from './integration.js';
 import type { ToolRunner } from './layer-runner.js';
 import { inspectTests } from './test-lock-checks.js';
 
-export type TestLockResult = { ok: boolean; problems: string[] };
+/** `pending`: the revision is sound but weaker than the lock, and waits for an approved `tests-weakened` exception. */
+export type TestLockResult = { ok: boolean; problems: string[]; pending?: boolean };
 export type TestLockDeps = {
   repoPath: string;
   runner: ToolRunner;
@@ -67,6 +69,48 @@ export class TestLockService {
     if (seen.problems.length) return { ok: false, problems: seen.problems };
     this.store.append(
       newEvent(goalId, 'tests-locked', { commit, files: seen.files, asserts: seen.asserts, map: seen.map, by }),
+    );
+    return { ok: true, problems: [] };
+  }
+
+  /**
+   * Replaces the lock after the public entries or the tests changed. The new commit must contain the lock it replaces and
+   * is checked like a first submission (so it is red on the old code). Weaker than the lock (a test gone or renamed,
+   * fewer tests for a criterion, fewer asserts in a file) is not refused: it waits as `tests-revision-pending` until an
+   * exception `tests-weakened` names this commit; once approved, the same command locks it.
+   */
+  async revise(goalId: string, commit: string, reason: string, by: string): Promise<TestLockResult> {
+    if (!reason.trim()) throw new UserError('--reason is required: the log keeps why the locked tests changed');
+    const { state, setup } = this.prepare(goalId, commit, 'executing');
+    const before = state.testLock;
+    if (!before) throw new UserError(`${goalId} has no locked tests yet: submit them with \`apos tests submit\``);
+    const seen = inspectTests({
+      store: this.store,
+      repo: this.deps.repoPath,
+      state,
+      setup,
+      commit,
+      from: before.commit,
+      inspector: this.inspector,
+      runner: this.deps.runner,
+      revising: before,
+    });
+    if (seen.problems.length) return { ok: false, problems: seen.problems };
+    if (seen.weakened.length && !hasException(state, 'tests-weakened', commit, commit)) {
+      if (state.pendingRevision?.commit.toLowerCase() !== commit.toLowerCase())
+        this.store.append(newEvent(goalId, 'tests-revision-pending', { commit, reason, problems: seen.weakened, by }));
+      return { ok: false, pending: true, problems: seen.weakened };
+    }
+    this.store.append(
+      newEvent(goalId, 'tests-locked', {
+        commit,
+        files: seen.files,
+        asserts: seen.asserts,
+        map: seen.map,
+        by,
+        revisionOf: before.commit,
+        reason,
+      }),
     );
     return { ok: true, problems: [] };
   }

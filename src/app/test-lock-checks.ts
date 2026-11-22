@@ -9,6 +9,9 @@ import {
   testMapSchema,
   type LayerOutcome,
   type LockedLayer,
+  lockedTestKeys,
+  testKey,
+  type TestLock,
   type TestMapEntry,
 } from '../domain/test-lock.js';
 import type { GoalState } from '../domain/transitions.js';
@@ -20,6 +23,8 @@ import { untrustedProtectedFiles } from './protected-milestones.js';
 
 export type Inspection = {
   problems: string[];
+  /** Only for a revision: ways the new suite is weaker than the locked one. They wait for an approved exception. */
+  weakened: string[];
   files: Record<string, string>;
   asserts: Record<string, number>;
   map: TestMapEntry[];
@@ -37,6 +42,8 @@ export type InspectInput = {
   from: string;
   inspector: CommitInspector;
   runner: ToolRunner;
+  /** The lock this commit would replace: deleting or weakening is then a decision to approve, not a refusal. */
+  revising?: TestLock;
 };
 
 /**
@@ -161,14 +168,42 @@ export function inspectTests(input: InspectInput): Inspection {
 
   const files: Record<string, string> = {};
   const asserts: Record<string, number> = {};
+  const weakened: string[] = [];
   for (const file of testFiles) {
     const content = fileAt(repo, commit, file);
     if (!content) {
-      problems.push(`${file}: a test file was deleted; removing a test needs an approved exception`);
+      if (input.revising?.files[file] !== undefined) weakened.push(`${file}: a locked test file was deleted`);
+      else problems.push(`${file}: a test file was deleted; removing a test needs an approved exception`);
       continue;
     }
     files[file] = sha256Of(content);
     asserts[file] = countAsserts(content.toString('utf8'), owner(file)?.[1].tests?.assertPatterns ?? []);
   }
-  return { problems, files, asserts, map, testCount: map.reduce((sum, entry) => sum + entry.testIds.length, 0) };
+  const before = input.revising;
+  if (before) {
+    // A locked file the revision did not touch is carried over unchanged.
+    for (const [path, hash] of Object.entries(before.files))
+      if (!(path in files) && !testFiles.includes(path)) {
+        files[path] = hash;
+        asserts[path] = before.asserts[path] ?? 0;
+      }
+    const now = new Set(map.flatMap(entry => entry.testIds.map(id => testKey(entry.part, entry.layer, id))));
+    for (const key of lockedTestKeys(before))
+      if (!now.has(key)) weakened.push(`locked test removed or renamed: ${key}`);
+    const count = (list: TestMapEntry[], id: string) =>
+      list.filter(entry => entry.acceptanceId === id).reduce((sum, entry) => sum + entry.testIds.length, 0);
+    for (const id of new Set(before.map.map(entry => entry.acceptanceId)))
+      if (count(map, id) < count(before.map, id))
+        weakened.push(`${id} has fewer tests than before (${count(map, id)} < ${count(before.map, id)})`);
+    for (const [path, old] of Object.entries(before.asserts))
+      if ((asserts[path] ?? 0) < old) weakened.push(`${path}: asserts fell from ${old} to ${asserts[path] ?? 0}`);
+  }
+  return {
+    problems,
+    weakened,
+    files,
+    asserts,
+    map,
+    testCount: map.reduce((sum, entry) => sum + entry.testIds.length, 0),
+  };
 }

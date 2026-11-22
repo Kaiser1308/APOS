@@ -55,3 +55,43 @@ it('refuses a bad suite with exit 1 and every problem, then locks a good one and
   await p.invoke('goal', 'show', p.goalId);
   expect(p.out[0]).toBe(`${p.goalId}\texecuting\tcheck in`);
 }, 90_000);
+
+it('revise: exit 3 with the command to approve when weaker, exit 1 when refused, exit 0 when locked', async () => {
+  const { lockedProject, mapFor, ids } = await import('../app/test-lock.test-support.js');
+  const p = await lockedProject();
+  p.close();
+  const out: string[] = [];
+  const invoke = async (...args: string[]) => {
+    process.exitCode = undefined;
+    await runCli(['--repo', p.dir, ...args], {
+      home: p.home,
+      gate: { artifactRoot: p.artifacts },
+      write: line => out.push(line),
+    });
+    return process.exitCode as number | undefined;
+  };
+  const revise = (files: Record<string, string>) => {
+    p.git('checkout', '-q', '--detach', p.lockCommit);
+    return p.commit({ ...files, [`.apos/goals/${p.goalId}/tests.json`]: mapFor(p.goalId, [ids.add]) }, 'revision');
+  };
+  const renamed = p.commit(
+    {
+      'tests/acceptance/calc.t': 'case plus needs add\n',
+      [`.apos/goals/${p.goalId}/tests.json`]: mapFor(p.goalId, ['tests.acceptance.calc::plus']),
+    },
+    'rename',
+  );
+  p.git('checkout', '-q', '--detach', p.lockCommit);
+  expect(await invoke('tests', 'revise', p.goalId, '--commit', renamed, '--reason', 'rename')).toBe(3);
+  expect(out.at(-1)).toBe(
+    `Approve with: apos exception approve ${p.goalId} --kind tests-weakened --ref ${renamed} --reason <why> (--by agent:<name> | --human), then run this command again.`,
+  );
+  out.length = 0;
+  const green = revise({ 'tests/acceptance/calc.t': 'case add pass\n' });
+  expect(await invoke('tests', 'revise', p.goalId, '--commit', green, '--reason', 'x')).toBe(1);
+  expect(out[0]).toBe(`tests revision refused on ${green}: nothing changed`);
+  out.length = 0;
+  const stronger = revise({ 'tests/acceptance/calc.t': 'case add needs add\ncase add needs add\n' });
+  expect(await invoke('tests', 'revise', p.goalId, '--commit', stronger, '--reason', 'more')).toBeUndefined();
+  expect(out[0]).toMatch(/^Tests locked on [0-9a-f]{40} \(revision\)/);
+}, 240_000);

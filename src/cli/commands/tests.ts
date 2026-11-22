@@ -37,6 +37,48 @@ export function registerTests(ctx: CliContext): void {
     );
 
   tests
+    .command('revise')
+    .argument('<goalId>')
+    .requiredOption(
+      '--commit <sha>',
+      'the full sha of a commit that contains the locked one and changes tests, stubs or tests.json',
+    )
+    .requiredOption('--reason <text>', 'why the locked tests change (the public entry changed, ...)')
+    .option('--by <name>', 'who revises, for the log', 'tester')
+    .description('replace the lock; exits 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception')
+    .action((goalId: string, flags: { commit: string; reason: string; by: string }) =>
+      withJournalAsync(async journal => {
+        const service = testLockService(ctx, journal, goalId);
+        const held = await withGateLease(ctx.home(), () =>
+          service.revise(goalId, flags.commit, flags.reason, flags.by),
+        );
+        if (!held.ran)
+          throw new UserError(
+            `Another gate is running for this project (pid ${held.holder}): wait for it, then try again`,
+          );
+        const outcome = held.value;
+        if (outcome.pending) {
+          process.exitCode = 3;
+          write(`tests revision ${flags.commit} is weaker than the lock and waits for approval:`);
+          for (const problem of outcome.problems) write(`  ${problem}`);
+          write(
+            `Approve with: apos exception approve ${goalId} --kind tests-weakened --ref ${flags.commit} --reason <why> (--by agent:<name> | --human), then run this command again.`,
+          );
+          return;
+        }
+        if (!outcome.ok) {
+          process.exitCode = 1;
+          write(`tests revision refused on ${flags.commit}: nothing changed`);
+          for (const problem of outcome.problems) write(`  ${problem}`);
+          return;
+        }
+        write(
+          `Tests locked on ${flags.commit} (revision). Every package is gated again: rebase each onto it and submit.`,
+        );
+      }),
+    );
+
+  tests
     .command('show')
     .argument('<goalId>')
     .description('the locked commit, tests per layer, and which tests prove which criterion')

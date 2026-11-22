@@ -95,3 +95,17 @@ describe('package gate with locked tests', () => {
     expect(result.result).toBe('green');
   }, 120_000);
 });
+
+describe('the Goal-level gate (Multi-WP integration reads the diff from the plan base)', () => {
+  it('trusts tests.json while it is the blob that was locked, and no longer once it changes', async () => {
+    const p = await lockedProject();
+    const ok = p.commit({ 'src/impl.txt': 'add\n' }, 'work');
+    const report = p.gate.run(p.goalId, p.dir, { deliveryCommit: ok });
+    expect(report.changedFiles).toContain(`.apos/goals/${p.goalId}/tests.json`);
+    expect(report.checks.map(check => check.checkId)).not.toContain('APOS-PROTECTED');
+    const tampered = p.commit({ [`.apos/goals/${p.goalId}/tests.json`]: '[]' }, 'empty the map');
+    expect(p.gate.run(p.goalId, p.dir, { deliveryCommit: tampered }).checks.map(check => check.checkId)).toContain(
+      'APOS-PROTECTED',
+    );
+  }, 120_000);
+});

@@ -70,3 +70,17 @@ it('commits the same plan once it names paths, and without paths for a Goal that
   await loose.propose({});
   await expect(loose.invoke('lead', 'commit', spec.id)).resolves.toBeUndefined();
 });
+
+it('refuses a plan whose Lead-added layer is not in the setup, naming the layer, and accepts one the setup has', async () => {
+  const { invoke, propose } = await plannedGoal(true);
+  await propose({ paths: ['src/**'], layers: { submit: ['L3'] } });
+  await expect(invoke('lead', 'commit', spec.id)).rejects.toThrow(
+    /WP-MAIN adds L3 at submit, but no part its paths touch \(and not system\) defines L3/,
+  );
+});
+
+it('refuses added layers for a Goal that has no setup: they would run nothing', async () => {
+  const { invoke, propose } = await plannedGoal(false);
+  await propose({ layers: { submit: ['L1'] } });
+  await expect(invoke('lead', 'commit', spec.id)).rejects.toThrow(/not pinned to a setup/);
+});

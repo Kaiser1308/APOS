@@ -1,4 +1,5 @@
-import { globToRegExp } from './glob.js';
+import { z } from 'zod';
+import { globToRegExp, globsOverlap } from './glob.js';
 import { LAYER_IDS, type LayerId } from './layers.js';
 import type { LayerSpec, ProjectSetup } from './project-setup.js';
 
@@ -115,4 +116,50 @@ export function planLayers(input: PlanInput): LayerRun[] {
         ...(reduced ? { reduced: true } : {}),
       };
     });
+}
+
+/** The layers a Lead adds to a package, by stage: what `proposal.layers` and a package's `layers` hold. */
+export const stageLayersSchema = z.partialRecord(z.enum(STAGES), z.array(z.enum(LAYER_IDS)).min(1));
+
+const touches = (root: string, paths: string[] | undefined): boolean =>
+  root === '.' || !paths?.length || paths.some(path => globsOverlap(`${root}/**`, path));
+
+/**
+ * Why the layers a Lead adds to one package cannot run: a layer that no part its paths touch, and not `system`,
+ * defines. The Lead can only add what the approved setup already has.
+ */
+export function layerChoiceProblems(input: {
+  setup: ProjectSetup;
+  /** The package id, for the message. */
+  id: string;
+  layers: Partial<Record<string, string[]>> | undefined;
+  paths: string[] | undefined;
+}): string[] {
+  const problems: string[] = [];
+  for (const [stage, wanted] of Object.entries(input.layers ?? {})) {
+    if (!(STAGES as readonly string[]).includes(stage)) {
+      problems.push(`${input.id} adds layers at "${stage}", which is not a stage (${STAGES.join(', ')})`);
+      continue;
+    }
+    for (const layer of wanted ?? []) {
+      if (layer === 'L6') {
+        problems.push(`${input.id} adds L6 at ${stage}: L6 is a manual check of the Goal, not a tool the gate runs`);
+        continue;
+      }
+      if (!(LAYER_IDS as readonly string[]).includes(layer)) {
+        problems.push(`${input.id} adds ${layer} at ${stage}, which is not a layer (${LAYER_IDS.join(', ')})`);
+        continue;
+      }
+      const defined =
+        (input.setup.system?.[layer as LayerId]?.length ?? 0) > 0 ||
+        Object.values(input.setup.parts).some(
+          part => touches(part.root, input.paths) && (part.layers[layer as LayerId]?.length ?? 0) > 0,
+        );
+      if (!defined)
+        problems.push(
+          `${input.id} adds ${layer} at ${stage}, but no part its paths touch (and not system) defines ${layer} in the setup`,
+        );
+    }
+  }
+  return problems;
 }

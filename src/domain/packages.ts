@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ExecutionProposal, GoalSpec } from './contracts.js';
+import { stageLayersSchema } from './layer-plan.js';
 
 const text = z.string().trim().min(1);
 const id = z.string().regex(/^[A-Z][A-Z0-9-]+$/);
@@ -20,6 +21,8 @@ const packageSchema = z.object({
   paths: z.array(text).min(1).optional(),
   /** Empty skeleton files of this package's `interfaces`, committed by the tester. */
   stubPaths: z.array(text).optional(),
+  /** Layers the Lead adds to this package, by stage, on top of the setup's floor. Each must exist in the pinned setup. */
+  layers: stageLayersSchema.optional(),
 });
 
 export type WorkPackageSpec = z.infer<typeof packageSchema>;

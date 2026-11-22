@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseSetupObject, type ProjectSetup } from './project-setup.js';
-import { DEFAULT_FLOOR, planLayers, type LayerRun, type Stage } from './layer-plan.js';
+import { DEFAULT_FLOOR, layerChoiceProblems, planLayers, type LayerRun, type Stage } from './layer-plan.js';
 
 const junit = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
@@ -171,5 +171,30 @@ describe('planLayers: tools a criterion needs', () => {
   });
   it('a tool that is not in the setup is ignored here (goal approve refuses it earlier)', () => {
     expect(() => plan('close', { requiredTools: ['api.L5.nope'] })).not.toThrow();
+  });
+});
+
+describe('layerChoiceProblems', () => {
+  const choose = (
+    layers: Partial<Record<Stage, string[]>>,
+    paths?: string[],
+    setup: ProjectSetup = setupOf(),
+  ): string[] => layerChoiceProblems({ setup, id: 'WP-A', layers, paths });
+  it('accepts a layer some part of the package (or system) defines', () => {
+    expect(choose({ submit: ['L3'] }, ['api/**'])).toEqual([]);
+    expect(choose({ close: ['L4'] }, ['api/**'])).toEqual([]);
+  });
+  it('names a layer the setup does not define for the package, and the package', () => {
+    expect(choose({ submit: ['L5'] }, ['web/**'])).toEqual([
+      'WP-A adds L5 at submit, but no part its paths touch (and not system) defines L5 in the setup',
+    ]);
+  });
+  it('a package without paths may use any part', () => {
+    expect(choose({ submit: ['L5'] })).toEqual([]);
+  });
+  it('refuses L6 (a manual check, not a tool) and an unknown stage or layer', () => {
+    expect(choose({ submit: ['L6'] })[0]).toMatch(/L6/);
+    expect(choose({ nope: ['L1'] } as never)[0]).toMatch(/stage/);
+    expect(choose({ submit: ['L9'] })[0]).toMatch(/L9/);
   });
 });

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UserError } from './errors.js';
+import { stageLayersSchema } from './layer-plan.js';
 
 const namedText = z.string().trim().min(1);
 const id = z
@@ -94,6 +95,8 @@ const goalSchema = z
     checks: z.array(checkSchema).default([]),
     dependencies: z.array(id).default([]),
     priority: z.number().int().nonnegative().default(1),
+    /** Switches the Human approves with the Goal (`mutation`, `perf`): a setup tool that says `when: flag:x` runs only with `x`. */
+    flags: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/, 'a flag is a word')).optional(),
   })
   .superRefine((goal, ctx) => {
     const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
@@ -180,6 +183,8 @@ const proposalSchema = z
     stubPaths: z.array(namedText).optional(),
     /** The public entry points acceptance tests may call. */
     entries: z.array(namedText).optional(),
+    /** Solo: layers added to WP-MAIN, by stage, on top of the setup's floor. Each must exist in the pinned setup. */
+    layers: stageLayersSchema.optional(),
     acceptanceMapping: z
       .array(z.object({ acceptanceId: id, verification: namedText, level: z.literal('goal').optional() }))
       .min(1),

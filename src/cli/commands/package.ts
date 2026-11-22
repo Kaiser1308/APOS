@@ -3,7 +3,7 @@ import { withGateLease } from '../../store/lease.js';
 import { GateService } from '../../app/gate-service.js';
 import { PackageService } from '../../app/package-service.js';
 import { parseWorkPackage } from '../../domain/packages.js';
-import { assuranceService } from '../test-lock-wiring.js';
+import { assuranceService, pinnedSetupOf } from '../test-lock-wiring.js';
 import { ExceptionService } from '../../app/exceptions.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
@@ -89,8 +89,11 @@ export function registerPackage(ctx: CliContext): void {
   exception
     .command('approve')
     .argument('<goalId>')
-    .requiredOption('--kind <kind>', 'needs-human | tests-weakened | tests-infra | floor-reduced (phase 4)')
-    .requiredOption('--ref <ref>', 'the package id (needs-human) or the revision commit (tests-weakened)')
+    .requiredOption('--kind <kind>', 'needs-human | tests-weakened | tests-infra | floor-reduced')
+    .requiredOption(
+      '--ref <ref>',
+      'the package id (needs-human, tests-infra), the revision commit (tests-weakened), <package>:<stage>:<layer> (floor-reduced; <goal>:<stage>:<layer> for integrate and close)',
+    )
     .requiredOption('--reason <text>', 'why; the log keeps it')
     .option('--by <agent:name>', 'an agent approves for the Human (spec 7.3); logged as agent:<name>')
     .option('--human', 'the Human approves: confirmed in a terminal or with --on-behalf')
@@ -106,15 +109,18 @@ export function registerPackage(ctx: CliContext): void {
           const confirmation = flags.human
             ? await assertHuman('exception approve', flags.ref, flags.onBehalf)
             : undefined;
-          const done = new ExceptionService(journal).approve(goalId, {
-            kind: flags.kind,
-            ref: flags.ref,
-            reason: flags.reason,
-            by: flags.human ? 'human' : flags.by!,
-            confirmation,
-          });
+          const done = new ExceptionService(journal, state => pinnedSetupOf(ctx, journal, state.setupVersion)).approve(
+            goalId,
+            {
+              kind: flags.kind,
+              ref: flags.ref,
+              reason: flags.reason,
+              by: flags.human ? 'human' : flags.by!,
+              confirmation,
+            },
+          );
           write(
-            `Approved ${done.kind} for ${done.ref} on ${done.commit} by ${flags.human ? 'the Human' : flags.by}. ${done.kind === 'needs-human' || done.kind === 'tests-infra' ? `Submit ${done.ref} again with the same commit.` : 'Submit the revision again.'}`,
+            `Approved ${done.kind} for ${done.ref} on ${done.commit} by ${flags.human ? 'the Human' : flags.by}. ${done.kind === 'needs-human' || done.kind === 'tests-infra' ? `Submit ${done.ref} again with the same commit.` : done.kind === 'floor-reduced' ? 'It counts for every gate that runs from now on.' : 'Submit the revision again.'}`,
           );
         }),
     );

@@ -1,7 +1,9 @@
 import { newEvent } from './events.js';
 import { INFRA_CHECK, SCOPE_CHECK } from '../domain/assurance.js';
 import { UserError } from '../domain/errors.js';
-import { AGENT_MAY_APPROVE, EXCEPTION_KINDS, type ExceptionKind } from '../domain/exceptions.js';
+import { AGENT_MAY_APPROVE, EXCEPTION_KINDS, floorRefProblem, type ExceptionKind } from '../domain/exceptions.js';
+import type { ProjectSetup } from '../domain/project-setup.js';
+import type { GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
 export type ExceptionRequest = {
@@ -16,7 +18,11 @@ export type ExceptionRequest = {
 
 /** Records the approvals the Human reserved (spec 7.3): a sensitive file changed, or tests were weakened. */
 export class ExceptionService {
-  constructor(private readonly store: GoalRepository) {}
+  /** `loadSetup` gives the setup a Goal is pinned to: `floor-reduced` is judged against its floor. */
+  constructor(
+    private readonly store: GoalRepository,
+    private readonly loadSetup?: (state: GoalState) => ProjectSetup | undefined,
+  ) {}
 
   approve(goalId: string, request: ExceptionRequest): { kind: ExceptionKind; ref: string; commit: string } {
     const state = this.store.getGoal(goalId);
@@ -48,10 +54,21 @@ export class ExceptionService {
           `--ref must be the commit of a revision waiting for approval${pending ? ` (${pending.commit})` : ': there is none'}`,
         );
       commit = pending.commit;
-    } else
-      throw new UserError(
-        'floor-reduced is reserved for phase 4: no gate reads it yet, so approving it would change nothing',
-      );
+    } else {
+      // The reduction is read by every gate that runs after this event; it names no commit of the work, so it carries the one the tests were locked on.
+      const setup = this.loadSetup?.(state);
+      if (!setup) throw new UserError(`${goalId} has no setup: there is no floor to reduce`);
+      const problem = floorRefProblem({
+        ref: request.ref,
+        goalId,
+        packages: Object.keys(state.packages ?? {}),
+        setup,
+      });
+      if (problem) throw new UserError(problem);
+      const anchor = state.testLock?.commit ?? state.proposal?.baseCommit;
+      if (!anchor) throw new UserError(`${goalId} has no plan yet: reduce the floor once the plan is committed`);
+      commit = anchor;
+    }
     this.store.append(
       newEvent(goalId, 'exception-approved', {
         kind,

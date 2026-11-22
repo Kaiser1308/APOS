@@ -218,6 +218,7 @@ const soloPackage = (goal: GoalSpec, proposal: ExecutionProposal): PackageState 
     integration: 'Solo: the package is the whole Goal',
     ...(proposal.paths ? { paths: proposal.paths } : {}),
     ...(proposal.stubPaths ? { stubPaths: proposal.stubPaths } : {}),
+    ...(proposal.layers ? { layers: proposal.layers } : {}),
   },
   status: 'pending',
   attempts: 0,

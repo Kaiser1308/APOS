@@ -116,6 +116,24 @@ describe('buildAssuranceReport', () => {
     expect(rows.every(row => row.stage === 'close' && row.scope === 'goal')).toBe(true);
   });
 
+  it('a tool with several metrics shows the worst of its checks, with every note', () => {
+    const state: GoalState = {
+      ...base,
+      status: 'verified',
+      closeGate: gate(
+        { stage: 'close', runs: [run('L5', 'bench', 'metric')], skipped: [] },
+        [
+          check('app.L5.bench', 'pass', { metric: { name: 'p95_ms', value: 150 } }),
+          check('app.L5.bench:throughput', 'fail', { metric: { name: 'throughput', value: 900 } }),
+        ],
+        'close',
+      ),
+    };
+    expect(buildAssuranceReport(state).layers).toEqual([
+      expect.objectContaining({ tool: 'bench', status: 'fail', note: 'p95_ms 150; throughput 900' }),
+    ]);
+  });
+
   it('lists the close layers as not run yet when the setup is given', () => {
     const parsed = parseSetupObject({
       schemaVersion: 2,

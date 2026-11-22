@@ -35,7 +35,8 @@ export function judgeTests(input: {
 }): Verdict & { newFailures: string[] } {
   const { label, head } = input;
   const unverifiable = (reason: string) => ({ status: 'unverifiable' as const, reason, newFailures: [] });
-  if (!head.length || head.every(run => !run.length))
+  // A report of skipped tests ran nothing: it must not turn a layer green.
+  if (!head.length || head.every(run => run.every(test => test.status === 'skip')))
     return unverifiable(`${label}: no test ran, so the layer proves nothing`);
   const differing = disagreement(head);
   if (differing.length)

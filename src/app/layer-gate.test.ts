@@ -24,7 +24,7 @@ const [out, counter] = process.argv.slice(2);
 const values = fs.readFileSync('src/bench.txt', 'utf8').trim().split(',').map(Number);
 const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
 fs.writeFileSync(counter, String(n + 1));
-fs.writeFileSync(out, JSON.stringify({ p95_ms: values[n % values.length] }));
+fs.writeFileSync(out, JSON.stringify({ p95_ms: values[n % values.length], throughput: 2000 }));
 `;
 const dirs: string[] = [];
 afterEach(() => {
@@ -299,6 +299,29 @@ describe("non-functional criteria (the thresholds are the Goal's)", () => {
     );
     expect(report?.result).toBe('red');
   }, 120_000);
+  it("a criterion on another metric is judged by its own numbers; the setup's threshold stays on the tool's own metric", async () => {
+    const goal = goalWith({
+      proof: 'benchmark',
+      benchmark: { tool: 'app.L5.bench', metric: 'throughput', op: '>', value: 1000 },
+    });
+    const tool = { ...bench(), metric: 'p95_ms', threshold: { op: '<', value: 200 } };
+    const { report } = await closeWith(
+      { goal, layers: { L5: [tool] }, top: closeOnly },
+      { 'src/bench.txt': '150,150,150' },
+    );
+    expect(report?.result).toBe('green');
+    expect(
+      report?.checks.filter(check => check.checkId.startsWith('app.L5.bench')).map(check => check.checkId),
+    ).toEqual(['app.L5.bench', 'app.L5.bench:throughput']);
+    expect(report?.checks.find(check => check.checkId === 'app.L5.bench:throughput')).toMatchObject({
+      status: 'pass',
+      metric: { name: 'throughput', value: 2000 },
+    });
+    const slow = await closeWith({ goal, layers: { L5: [tool] }, top: closeOnly }, { 'src/bench.txt': '250,250,250' });
+    expect(slow.report?.result).toBe('red');
+    expect(slow.report?.checks.find(check => check.checkId === 'app.L5.bench')?.status).toBe('fail');
+    expect(slow.report?.checks.find(check => check.checkId === 'app.L5.bench:throughput')?.status).toBe('pass');
+  }, 240_000);
   it('a scan criterion makes the tool block from the level the Goal names', async () => {
     const goal = goalWith({ proof: 'scan', scan: { tool: 'app.L5.scan', failOn: 'warning' } });
     const scan = { id: 'scan', command: 'node sarif.js {report}', format: 'sarif' };

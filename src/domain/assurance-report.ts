@@ -55,13 +55,23 @@ function noteOf(check: CheckResult): string | undefined {
 
 function rowsOf(stage: Stage, scope: string, gate: GateReport): LayerRow[] {
   return (gate.layers?.runs ?? []).map(run => {
-    const check = gate.checks.find(item => item.checkId === `${run.part}.${run.layer}.${run.tool}`);
+    const key = `${run.part}.${run.layer}.${run.tool}`;
+    // A metric tool with several benchmark criteria has one check per metric (`<key>:<metric>`): the row is the worst of them.
+    const checks = gate.checks.filter(item => item.checkId === key || item.checkId.startsWith(`${key}:`));
+    const statuses = checks.map(item => STATUS_OF[item.status] ?? 'unverifiable');
     const status: LayerStatus = run.reduced
       ? 'reduced'
-      : check
-        ? (STATUS_OF[check.status] ?? 'unverifiable')
-        : 'not-run';
-    const note = check ? noteOf(check) : undefined;
+      : !checks.length
+        ? 'not-run'
+        : statuses.includes('fail')
+          ? 'fail'
+          : statuses.every(item => item === 'pass')
+            ? 'pass'
+            : 'unverifiable';
+    const note = checks
+      .map(noteOf)
+      .filter((item): item is string => item !== undefined)
+      .join('; ');
     return {
       stage,
       scope,

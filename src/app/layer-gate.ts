@@ -151,11 +151,15 @@ export class LayerGate {
     head: string,
     demand: ProofDemand | undefined,
   ): CheckResult[] {
-    // The Goal's numbers come on top of the setup's own threshold: every one of them must hold.
+    // The setup's threshold belongs to the metric the tool is configured with: the Goal's numbers for that same metric
+    // come on top of it (every one must hold), and a criterion on another metric is judged by its own numbers only.
     const own: Threshold[] = tool.threshold ? [tool.threshold] : [];
-    const asked = demand?.metrics.length
-      ? demand.metrics
-      : [{ name: tool.metric ?? '', thresholds: [] as Threshold[], criteria: [] as string[] }];
+    const asked: { name: string; thresholds: Threshold[] }[] = (demand?.metrics ?? []).map(item => ({
+      name: item.name,
+      thresholds: item.thresholds,
+    }));
+    if (!asked.length || (own.length && tool.metric && !asked.some(item => item.name === tool.metric)))
+      asked.unshift({ name: tool.metric ?? '', thresholds: [] });
     return asked.map((wanted, index) => {
       const id = index === 0 ? checkId : `${checkId}:${wanted.name}`;
       const measured = { ...tool, ...(wanted.name ? { metric: wanted.name } : {}) };
@@ -174,7 +178,7 @@ export class LayerGate {
       const verdict = judgeMetric({
         name: wanted.name || tool.metric || 'value',
         values,
-        thresholds: [...own, ...wanted.thresholds],
+        thresholds: [...(!tool.metric || wanted.name === tool.metric ? own : []), ...wanted.thresholds],
       });
       return result(
         id,

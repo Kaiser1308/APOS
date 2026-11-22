@@ -26,6 +26,13 @@ describe('judgeTests', () => {
       reason: expect.stringContaining('api.L2: no test ran') as unknown,
     });
   });
+  it('a report of skipped tests only ran nothing: unverifiable, never green', () => {
+    expect(judge([[t('a', 'skip'), t('b', 'skip')]], [t('a')])).toMatchObject({
+      status: 'unverifiable',
+      reason: expect.stringContaining('api.L2: no test ran') as unknown,
+    });
+    expect(judge([[t('a', 'skip'), t('b')]], [t('a'), t('b')]).status).toBe('pass');
+  });
   it('a locked test must pass even though it was red at the base', () => {
     const result = judge([[t('x', 'fail'), t('y')]], [t('x', 'fail'), t('y', 'fail')], ['x', 'y']);
     expect(result).toMatchObject({ status: 'fail', newFailures: [] });

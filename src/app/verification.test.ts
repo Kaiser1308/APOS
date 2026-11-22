@@ -87,6 +87,8 @@ describe('verification gate', () => {
     const { store, green } = executing();
     const service = new VerificationService(store);
     green();
+    // The green gate of the one Solo package verified the Goal; verifying again changes nothing.
+    expect(store.getGoal(spec.id)?.status).toBe('verified');
     expect(service.verify(spec.id, DELIVERY).passed).toBe(true);
     expect(store.getGoal(spec.id)?.status).toBe('verified');
     service.recordOutcome(spec.id, 'close');
@@ -95,7 +97,6 @@ describe('verification gate', () => {
   it('does not infer merge permission from a green gate or verification', () => {
     const { store, add, green } = executing();
     green();
-    new VerificationService(store).verify(spec.id);
     expect(store.getGoal(spec.id)?.mergeAuthorization).toBeUndefined();
     expect(() => add('merge-completed', { sourceRef: DELIVERY, targetBranch: 'main', mergeCommit: DELIVERY })).toThrow(
       /Human merge authorization/,

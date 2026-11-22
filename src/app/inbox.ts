@@ -56,6 +56,25 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
         detail: JSON.stringify({ kind: 'attention', warnings }),
         at: events.at(-1)?.at,
       });
+    for (const [packageId, item] of Object.entries(state.packages ?? {})) {
+      if (item.status !== 'needs-human' || !item.gate) continue;
+      const commit = item.gate.deliveryCommit;
+      const reasons = item.gate.checks
+        .filter(check => check.status !== 'pass')
+        .map(check =>
+          check.status === 'manual-pending'
+            ? (state.manualConfirmations ?? []).some(c => c.checkId === check.checkId && c.deliveryCommit === commit)
+              ? `manual check ${check.checkId} is confirmed on ${commit}: submit again`
+              : `manual check ${check.checkId} awaits confirmation on ${commit} (apos gate confirm), then submit again`
+            : `${check.checkId} ${check.status}: ${check.reason}`,
+        );
+      items.push({
+        goalId,
+        kind: 'needs-decision',
+        detail: JSON.stringify({ why: 'package-needs-human', packageId, reasons }),
+        at: item.gate.at,
+      });
+    }
     const answered = new Set(
       events
         .filter(item => item.type === 'decision-logged')

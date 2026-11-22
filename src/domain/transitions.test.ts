@@ -169,7 +169,8 @@ describe('package submissions', () => {
   });
   it('refuses to submit a green package or a short commit', () => {
     const green = record(submit(executingSolo()), 'green');
-    expect(() => submit(green)).toThrow(/green/);
+    expect(green.status).toBe('verified');
+    expect(() => submit(green)).toThrow(/Executing Goal required/);
     expect(() => submit(executingSolo(), 'abc')).toThrow(/Full commit/);
   });
 });

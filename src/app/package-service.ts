@@ -7,7 +7,6 @@ import type { GateResult } from '../domain/gate.js';
 import { UserError } from '../domain/errors.js';
 import type { GateService } from './gate-service.js';
 import { GitCommitInspector } from './integration.js';
-import { VerificationService } from './verification.js';
 
 export type SubmitResult = { result: GateResult; reasons: string[]; warnings: string[] };
 type Delivery = { gate: GateService; repoPath: string; inspector?: CommitInspector };
@@ -115,8 +114,6 @@ export class PackageService {
           .join('|'),
       }),
     );
-    if (report.result === 'green' && state.proposal?.mode !== 'multi-wp')
-      new VerificationService(this.store).verify(goalId, commit);
     return {
       result: report.result,
       reasons: report.checks

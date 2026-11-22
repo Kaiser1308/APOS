@@ -51,3 +51,46 @@ it('shows the warnings a gate report carries as one attention notice, and nothin
   expect(JSON.parse(item.detail)).toEqual({ kind: 'attention', warnings: gate.warnings });
   expect(buildInbox(repo('legacy'))).toEqual([]);
 });
+
+it('lists every needs-human package with why: the manual check waiting on a commit, or the unverifiable check', () => {
+  const gate = (checks: unknown[]) => ({ at: '2026-11-14T00:00:00.000Z', deliveryCommit: 'a'.repeat(40), checks });
+  const repo = (status: string) =>
+    ({
+      listGoals: () => [
+        {
+          spec: { id: 'GOAL-1' },
+          status,
+          packages: {
+            'WP-A': {
+              status: 'needs-human',
+              gate: gate([{ checkId: 'CHK-M', status: 'manual-pending', reason: 'awaiting manual confirmation' }]),
+            },
+            'WP-B': {
+              status: 'needs-human',
+              gate: gate([
+                { checkId: 'CHK-U', status: 'unverifiable', reason: 'delivery flaky: repeated runs disagree' },
+              ]),
+            },
+            'WP-C': { status: 'green', gate: gate([]) },
+          },
+        },
+      ],
+      events: () => [],
+    }) as unknown as GoalRepository;
+  const items = buildInbox(repo('executing')).map(item => ({ kind: item.kind, ...JSON.parse(item.detail) }));
+  expect(items).toEqual([
+    {
+      kind: 'needs-decision',
+      packageId: 'WP-A',
+      why: 'package-needs-human',
+      reasons: [`manual check CHK-M awaits confirmation on ${'a'.repeat(40)} (apos gate confirm), then submit again`],
+    },
+    {
+      kind: 'needs-decision',
+      packageId: 'WP-B',
+      why: 'package-needs-human',
+      reasons: ['CHK-U unverifiable: delivery flaky: repeated runs disagree'],
+    },
+  ]);
+  expect(buildInbox(repo('legacy'))).toEqual([]);
+});

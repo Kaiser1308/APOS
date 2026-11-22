@@ -125,7 +125,8 @@ export class ProjectJournal implements GoalRepository {
     const next = applyEvent(this.store.getGoal(event.goalId), event);
     this.log.append(event);
     this.store.append(event);
-    if (MILESTONES.has(event.type)) this.publish(event.goalId, next, `apos: ${event.goalId} ${event.type}`);
+    if (MILESTONES.has(event.type) || (event.type === 'package-gate-recorded' && next.status === 'verified'))
+      this.publish(event.goalId, next, `apos: ${event.goalId} ${event.type}`);
   }
 
   /** Renders the readable Goal record from controller state. Appetite never leaves the controller. */

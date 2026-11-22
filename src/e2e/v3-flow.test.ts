@@ -130,6 +130,34 @@ describe('Solo Goal without any agent runtime', () => {
   }, 120_000);
 });
 
+describe('a package that needs a Human', () => {
+  it('shows in apos inbox and ends inbox --wait, with the manual check and the commit it waits on', async () => {
+    const manual = {
+      id: 'CHK-M',
+      kind: 'manual' as const,
+      procedure: 'open the page and look',
+      expectedResult: 'it looks right',
+    };
+    const spec: GoalSpec = {
+      ...baseSpec,
+      checks: [check('CHK-1', 'harness.js'), manual],
+      acceptance: [{ ...baseSpec.acceptance[0], checkIds: ['CHK-1', 'CHK-M'] }],
+    };
+    const p = await project(spec, { 'harness.js': exists('feature.js') });
+    await p.invoke('lead', 'propose', '--file', p.json('plan.json', { ...proposal, baseCommit: p.base }));
+    await p.invoke('lead', 'commit', spec.id);
+    const done = p.commit({ 'feature.js': 'module.exports = 1;' }, 'feature');
+    expect(await p.invoke('package', 'submit', spec.id, 'WP-MAIN', '--commit', done)).toBe(3);
+    expect(p.state().packages?.['WP-MAIN']?.status).toBe('needs-human');
+    p.out.length = 0;
+    await p.invoke('inbox');
+    expect(p.out.join('\n')).toMatch(new RegExp(`${spec.id}\\tneeds-decision\\t.*CHK-M.*${done}`));
+    p.out.length = 0;
+    expect(await p.invoke('inbox', '--wait', '--timeout', '5s')).toBe(0);
+    expect(p.out.join('\n')).toContain('CHK-M');
+  }, 120_000);
+});
+
 describe('Multi-WP Goal without any agent runtime', () => {
   const spec: GoalSpec = {
     ...baseSpec,

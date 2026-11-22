@@ -538,15 +538,17 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       );
       const report = data.report;
       const solo = state.proposal?.mode !== 'multi-wp';
-      if (report.result === 'green')
-        return {
-          ...state,
-          ...(solo ? { gate: report } : {}),
-          packages: {
-            ...state.packages,
-            [item.spec.id]: { ...item, status: 'green', gate: report, finding: undefined },
-          },
+      if (report.result === 'green') {
+        const packages = {
+          ...state.packages,
+          [item.spec.id]: { ...item, status: 'green' as const, gate: report, finding: undefined },
         };
+        // A Solo Goal is the one package: its green gate verifies the Goal in this same event, so no crash between the
+        // gate record and a separate `verified` can leave a green package under an executing Goal.
+        return solo
+          ? { ...state, gate: report, packages, status: 'verified', verifiedCommit: report.deliveryCommit }
+          : { ...state, packages };
+      }
       const finding = report.checks
         .filter(check => check.status !== 'pass')
         .map(
@@ -648,6 +650,14 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return { ...state, integration: data };
     }
     case 'verified': {
+      // Idempotent for a Solo Goal the green gate already verified.
+      const same = (event.data as { deliveryCommit?: string } | undefined)?.deliveryCommit;
+      if (
+        state.status === 'verified' &&
+        state.verifiedCommit &&
+        (!same || same.toLowerCase() === state.verifiedCommit.toLowerCase())
+      )
+        return state;
       requireThat(state.status === 'executing', 'Execution required');
       const multi = state.proposal?.mode === 'multi-wp';
       requireThat(!multi || state.integration, 'Integrated Multi-WP evidence required');

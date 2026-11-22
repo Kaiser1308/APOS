@@ -34,6 +34,16 @@ export class VerificationService {
    */
   verify(goalId: GoalId, deliveryCommit?: string): VerificationResult {
     const state = this.store.getGoal(goalId);
+    if (
+      state?.status === 'verified' &&
+      state.verifiedCommit &&
+      (!deliveryCommit || deliveryCommit.toLowerCase() === state.verifiedCommit.toLowerCase())
+    )
+      return {
+        passed: true,
+        acceptanceIds: state.spec.acceptance.map(item => item.id),
+        deliveryCommit: state.verifiedCommit,
+      };
     if (!state || state.status !== 'executing') throw new Error('Goal must be executing to verify');
     const expected = state.proposal?.mode === 'multi-wp' ? state.integration?.commitRef : deliveryCommit;
     if (state.proposal?.mode === 'multi-wp' && !expected)

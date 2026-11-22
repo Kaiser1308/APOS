@@ -101,7 +101,6 @@ describe('package submit', () => {
       'package-gate-recorded',
       'package-submitted',
       'package-gate-recorded',
-      'verified',
     ]);
   }, 60_000);
 
@@ -176,6 +175,24 @@ describe('package submit', () => {
     },
     60_000,
   );
+
+  it('verifies a Solo Goal with the one event that records the green gate: a process dying right after it loses nothing', async () => {
+    const { commit, service, journal, add, base, types } = await project();
+    const good = commit({ 'feature.js': 'module.exports = 1;' }, 'feature');
+    const real = await service.submit(spec.id, 'WP-MAIN', good, 'lead');
+    expect(real.result).toBe('green');
+    expect(types()).not.toContain('verified');
+    expect(journal.getGoal(spec.id)).toMatchObject({ status: 'verified', verifiedCommit: good });
+    // Same thing as a crash after the gate record: only the two events exist, and replay verifies.
+    const other = await project();
+    const done = other.commit({ 'feature.js': 'module.exports = 1;' }, 'feature');
+    other.add('package-submitted', { packageId: 'WP-MAIN', version: 1, commit: done, base: other.base, by: 'lead' });
+    const report = (await import('../domain/fixtures.test-support.js')).gateReport(done);
+    other.add('package-gate-recorded', { packageId: 'WP-MAIN', report });
+    expect(other.journal.getGoal(spec.id)).toMatchObject({ status: 'verified', verifiedCommit: done });
+    void add;
+    void base;
+  }, 60_000);
 
   it('can finish a submission whose gate record was lost between the two writes', async () => {
     const { commit, service, journal, add, base } = await project();

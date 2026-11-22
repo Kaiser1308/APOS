@@ -30,7 +30,11 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
 | Manual check confirmed by whoever submitted the work | refused | `gate-service.test.ts` › accepts manual confirmation only for a declared manual check … |
 | Tests, oracles, check-run files or build manifests changed | **warning in the gate report, the inbox and the UI; not blocked** for a Goal with no locked tests (a locked test changing is red: see [phase 3](#locked-tests-inventory-and-scope-phase-3)) | `v2-rules.test.ts` › warns when the gated diff changes tests …; `inbox.test.ts` › shows the warnings a gate report carries |
-| A review says `changes` | recorded as advice; gates nothing | `v2-rules.test.ts` › records a review as advice only; `integration.test.ts` › no longer needs a review to integrate |
+| A review (a person, a model or a tool) says `changes` in words | recorded as advice; gates nothing | `review-flow.test.ts` › advice is not a block; `integration.test.ts` › no longer needs a review to integrate |
+| A review commit with a red test | the package is red (`blocked by review: <ids>`), the Goal executing again; the tests are locked into the next delivery | `review-flow.test.ts` › a red test blocks, is locked into the next delivery, and a fix on top of it passes; `review-tests.test.ts` › review-blocked |
+| A review test that cannot load; a review that edits a test, adds a non-test file, or has another parent | refused, nothing recorded | `review-flow.test.ts` › a review may only add tests that load … |
+| The delivery that was blocked sent again without the review commit; the review's test edited | refused; red `APOS-REVIEW` | `review-flow.test.ts`; `review-tests.test.ts` › the review check of a delivery |
+| A Lead overrides a block | the delivery goes through; the table says `review bị bỏ qua: <ids>, duyệt bởi <by>` | `review-flow.test.ts`; `review-tests.test.ts` › the assurance table |
 
 ## Submitting a package
 

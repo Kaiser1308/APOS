@@ -23,11 +23,12 @@ Commands:
   integration
   gate             controller-run checks on exact commits; owner claims are not
                    evidence
-  review
   metrics
   evidence
   decision
   blocker
+  review           a review blocks only with a test that is red when APOS runs
+                   it; anything else is advice
   outcome
   inbox [options]  what needs the Human: notices, blocked Goals, verified Goals
                    awaiting outcome

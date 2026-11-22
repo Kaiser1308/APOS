@@ -85,8 +85,6 @@ describe('skills', () => {
     for (const file of files) {
       const text = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
       for (const [, span] of text.matchAll(/`apos ([^`.]+)`/g)) {
-        // Task 1 of the plan adds `review block` and `review note`; the skills already describe them. Remove with it.
-        if (/^review (?:block|note)\b/.test(span!)) continue;
         const { path, flags } = parseSpan(span!, '');
         if (!path) {
           problems.push(`${file}: \`apos ${span}\` is not a command`);

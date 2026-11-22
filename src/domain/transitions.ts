@@ -12,6 +12,7 @@ import { parseWorkPackage, validatePackageGraph, type WorkPackageSpec } from './
 import { parseReview, type ReviewRecord } from './reviews.js';
 import { applyIntegrationGateRequest } from './integration-gate.js';
 import { applyException, type ExceptionRecord } from './exceptions.js';
+import { applyReviewBlocked, type ReviewTestLock } from './review-tests.js';
 import { applyTestLockEvent, type TestLock, type TestRevisionPending } from './test-lock.js';
 import { LEGACY_EVENT_TYPES, type LegacyEventType } from './legacy-events.js';
 
@@ -48,6 +49,7 @@ export const GOAL_EVENT_TYPES = [
   'outcome-revised',
   'outcome-stopped',
   'review-submitted',
+  'review-blocked',
   'merge-completed',
   'tests-locked',
   'tests-revision-pending',
@@ -153,6 +155,8 @@ export type GoalState = {
   /** A revision of the locked tests waiting for an approved exception. */
   pendingRevision?: TestRevisionPending;
   exceptions?: ExceptionRecord[];
+  /** The tests reviewers added with `apos review block`: locked into the next delivery of their package. */
+  reviewTests?: ReviewTestLock[];
   /** The latest run of the close-stage layers on the verified commit (only for a Goal pinned to a setup). */
   closeGate?: GateReport;
   /** For a `legacy` Goal: how its old log ended, so closed Goals still count as closed. */
@@ -627,6 +631,8 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'review-submitted':
       // Advisory since v3: a review no longer gates anything, so it only needs to be well formed.
       return { ...state, reviews: [...state.reviews, parseReview(event.data)] };
+    case 'review-blocked':
+      return applyReviewBlocked(state, event, attemptLimit(state));
     case 'gate-recorded': {
       const gate = event.data as GateReport;
       if (gate?.phase === 'post-merge') {

@@ -1,6 +1,7 @@
 import type { CheckResult, GateReport } from './gate.js';
 import type { LayerId } from './layers.js';
 import { planLayers, type LayerRun, type LayerWhy, type PlanInput, type Stage } from './layer-plan.js';
+import { reviewOverrideBy } from './review-tests.js';
 import { proofDemands } from './proof-tools.js';
 import type { ProjectSetup } from './project-setup.js';
 import { acceptanceProof } from './test-plan.js';
@@ -33,6 +34,8 @@ export type AssuranceReport = {
     approvedWeakenings: number;
   };
   layers: LayerRow[];
+  /** Present when a review blocked a delivery with a test: how many times, how many tests it locked, and the blocks a Lead overrode. */
+  reviews?: { blocks: number; lockedTests: number; overridden: { ids: string[]; by: string }[] };
   /** `by` is `human`, `on-behalf:<where they agreed>` or `agent:<name>`. */
   exceptions: { kind: string; ref: string; by: string; reason: string }[];
   /** What is off, and why. */
@@ -124,6 +127,18 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
   const approvedWeakenings = exceptions.filter(entry => entry.kind === 'tests-weakened').length;
   const revisions = state.testRevisions ?? 0;
 
+  const blocks = state.reviewTests ?? [];
+  const reviews = blocks.length
+    ? {
+        blocks: blocks.length,
+        lockedTests: blocks.reduce((sum, block) => sum + block.tests.length, 0),
+        overridden: blocks.flatMap(block => {
+          const by = reviewOverrideBy(state, block);
+          return by ? [{ ids: block.blocking.map(test => test.id), by }] : [];
+        }),
+      }
+    : undefined;
+
   const gates = gatesOf(state);
   const layers = gates.flatMap(({ stage, scope, gate }) => rowsOf(stage, scope, gate));
   const off = new Set<string>();
@@ -190,6 +205,7 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
       approvedWeakenings,
     },
     layers,
+    ...(reviews ? { reviews } : {}),
     exceptions,
     off: [...off],
     exitOnly,
@@ -248,6 +264,10 @@ export function renderAssuranceText(report: AssuranceReport): string {
       );
     }
   }
+  if (report.reviews)
+    lines.push(
+      `${label('Review chặn')}${report.reviews.blocks} lần bằng test đỏ, ${report.reviews.lockedTests} test đã khoá vào lần giao sau${report.reviews.overridden.map(item => `; review bị bỏ qua: ${item.ids.join(', ')}, duyệt bởi ${item.by}`).join('')}`,
+    );
   const agent = report.exceptions.filter(entry => entry.by.startsWith('agent:'));
   if (report.exceptions.length)
     lines.push(

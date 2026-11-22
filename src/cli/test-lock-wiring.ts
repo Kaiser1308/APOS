@@ -3,6 +3,7 @@ import { loadPinnedSetup } from '../app/pinned-setup.js';
 import { AssuranceService } from '../app/assurance-service.js';
 import { GitCommitInspector } from '../app/integration.js';
 import { ToolRunner } from '../app/layer-runner.js';
+import { ReviewBlockService } from '../app/review-block.js';
 import { TestLockService } from '../app/test-lock.js';
 import { UserError } from '../domain/errors.js';
 import { yamlCodec } from '../domain/setup-codec.js';
@@ -43,6 +44,20 @@ export function testLockService(ctx: CliContext, journal: ProjectJournal, goalId
     loadSetup: state => {
       const setup = pinnedSetupOf(ctx, journal, state.setupVersion);
       if (!setup) throw new UserError(`${goalId} is not pinned to a setup: there are no tests to lock`);
+      return setup;
+    },
+  });
+}
+
+/** Wires the review service to the repo, the Goal's pinned setup and a runner whose logs stay outside the repo. */
+export function reviewBlockService(ctx: CliContext, journal: ProjectJournal, goalId: string): ReviewBlockService {
+  return new ReviewBlockService(journal, {
+    repoPath: ctx.repo(),
+    runner: runnerFor(ctx, journal, goalId, 'review'),
+    inspector: ctx.options.inspector,
+    loadSetup: state => {
+      const setup = pinnedSetupOf(ctx, journal, state.setupVersion);
+      if (!setup) throw new UserError(`${goalId} is not pinned to a setup: a review cannot run its tests`);
       return setup;
     },
   });

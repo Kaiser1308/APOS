@@ -5,6 +5,7 @@ import { registerIntegration } from './cli/commands/integration.js';
 import { registerLead } from './cli/commands/lead.js';
 import { registerOutcome } from './cli/commands/outcome.js';
 import { registerPackage } from './cli/commands/package.js';
+import { registerReview } from './cli/commands/review.js';
 import { registerTests } from './cli/commands/tests.js';
 import { registerSetup } from './cli/commands/setup.js';
 import { registerSetupFlow } from './cli/commands/setup-flow.js';
@@ -30,6 +31,7 @@ export function buildProgram(options: CliOptions = {}): Command {
   registerPackage(ctx);
   registerIntegration(ctx);
   registerChecks(ctx);
+  registerReview(ctx);
   registerOutcome(ctx);
   return program;
 }

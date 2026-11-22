@@ -1,11 +1,13 @@
 import type { CheckResult } from './gate.js';
 import { matchesAny } from './glob.js';
+import { testRefKey, type ReviewTestLock } from './review-tests.js';
 import { testKey, type LayerOutcome, type TestLock } from './test-lock.js';
 
 export const LOCKED_CHECK = 'APOS-LOCKED';
 export const INVENTORY_CHECK = 'APOS-INVENTORY';
 export const SCOPE_CHECK = 'APOS-SCOPE';
 export const INFRA_CHECK = 'APOS-INFRA';
+export const REVIEW_CHECK = 'APOS-REVIEW';
 
 const result = (checkId: string, status: CheckResult['status'], reason: string): CheckResult => ({
   checkId,
@@ -146,4 +148,47 @@ export function infraCheck(input: {
   return touched.length
     ? result(INFRA_CHECK, 'needs-human', `hạ tầng test bị sửa: ${touched.join(', ')}`)
     : result(INFRA_CHECK, 'pass', 'test infrastructure unchanged since the lock');
+}
+
+/**
+ * The tests reviewers added to this package are locked like the tester's: the delivery holds each file unchanged and
+ * every test passes. A block the Lead overrode (`overridden` says by whom) asks for nothing, and the table says so.
+ */
+export function reviewTestsCheck(input: {
+  reviews: ReviewTestLock[];
+  overriddenBy: (review: ReviewTestLock) => string | undefined;
+  deliveryFiles: (review: ReviewTestLock) => Record<string, string | undefined>;
+  delivery: TestSet;
+}): CheckResult {
+  const problems: string[] = [];
+  const waived: string[] = [];
+  let kept = 0;
+  for (const review of input.reviews) {
+    const by = input.overriddenBy(review);
+    if (by) {
+      waived.push(`review bị bỏ qua: ${review.blocking.map(test => test.id).join(', ')}, duyệt bởi ${by}`);
+      continue;
+    }
+    for (const [path, hash] of Object.entries(review.files)) {
+      const now = input.deliveryFiles(review)[path];
+      if (now !== hash)
+        problems.push(
+          `review test modified: ${path}${now === undefined ? ' (missing: build on the review commit)' : ''}`,
+        );
+    }
+    for (const test of review.tests) {
+      const status = input.delivery[testRefKey(test)];
+      kept += 1;
+      if (status !== 'pass')
+        problems.push(
+          `review test ${test.id}: ${status === undefined ? 'not in the delivery report' : `is ${status}, not pass`}`,
+        );
+    }
+  }
+  if (problems.length) return result(REVIEW_CHECK, 'fail', problems.join('; '));
+  return result(
+    REVIEW_CHECK,
+    'pass',
+    [kept ? `${kept} review test(s) unchanged and passing` : '', ...waived].filter(Boolean).join('; '),
+  );
 }

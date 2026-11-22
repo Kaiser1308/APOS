@@ -1,6 +1,5 @@
 import { newEvent } from '../../app/events.js';
 import type { Evidence } from '../../domain/contracts.js';
-import { ReviewService } from '../../app/review.js';
 import { MetricsService } from '../../app/metrics.js';
 import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
@@ -65,19 +64,6 @@ export function registerChecks(ctx: CliContext): void {
           });
           write(`Confirmed ${checkId} on ${commit}`);
         }),
-    );
-  const review = program.command('review');
-  review
-    .command('submit')
-    .argument('<goalId>')
-    .requiredOption('--file <json>')
-    .option(ON_BEHALF_FLAGS, ON_BEHALF_HELP)
-    .action((goalId: string, { file, onBehalf }: { file: string; onBehalf?: string }) =>
-      withJournalAsync(async journal => {
-        await assertHuman('review submit', goalId, onBehalf);
-        const result = new ReviewService(journal).submit(goalId, readJsonFile(file));
-        write(`Reviewed ${result.subject}${result.packageId ? ` ${result.packageId}` : ''}: ${result.result}`);
-      }),
     );
   const metrics = program.command('metrics');
   metrics

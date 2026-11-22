@@ -101,7 +101,7 @@ flowchart TD
 
 ### Human-only commands
 
-`goal approve`, `goal appetite`, `goal select`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base`, `review submit` and `blocker resolve`) are Human decisions. Each one makes you **type the Goal id back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
+`goal approve`, `goal appetite`, `goal select`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base` and `blocker resolve`) are Human decisions. Each one makes you **type the Goal id back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
 
 `goal appetite` is the Human's decision to change the budget, never the scope.
 
@@ -264,7 +264,7 @@ For a Goal pinned to a setup whose parts say where their tests are (`tests.paths
 2. **`apos tests submit <goalId> --commit <sha>`** runs the layers of the mapped tests at that commit, twice, and checks in order, reporting every problem: the commit contains the plan base; the diff touches only test files, declared stubs and `tests.json`; every criterion that needs a test has one; every mapped test is in the report; a `red-green` test **fails** (or errors with the stack's "not implemented" pattern) and does not match the stack's load-error patterns (a test that is already green, or red because it never loaded, is refused and named); a `stays-green` test passes; two runs agree. If everything holds it records `tests-locked` (commit, sha256 of every test file, a count of assertions per file, the map). If not, nothing is written.
 3. **Packages** are now gated on top of the locked commit (a commit that does not contain it is refused with "rebase onto it"), and the gate adds: **`APOS-LOCKED`** (no locked file differs by a byte, deleted included, and the package's mapped tests pass on a full run of their layer), **`APOS-INVENTORY`** (every test that ran at the base, L1 included, is still there and not skipped; no `forbid` pattern in an added line) and **`APOS-SCOPE`** (no file changed outside the package's `paths` and stubs; a file that matches the setup's `needsHuman` makes the package **`needs-human`**, exit 3, instead of red).
 4. **Test infrastructure.** `tests.infra` in the setup lists files such as `conftest.py` or `vitest.config.*`; `tests submit` hashes them, and a package that changes, adds or deletes one gets `needs-human` (`APOS-INFRA`, `hạ tầng test bị sửa: <path>`), because such a file can turn a locked red test green without touching it. Approve with `--kind tests-infra`.
-5. **Exceptions.** `apos exception approve <goalId> --kind needs-human|tests-infra|tests-weakened --ref <package|commit> --reason <text> (--by agent:<name> | --human)`. An agent may approve on the Human's behalf (logged as `agent:<name>`); `--human` needs a terminal or `--on-behalf`. A `needs-human` exception for a package and commit makes the same commit green on submit without running the gate again; it waits in `apos inbox` until then. `floor-reduced` cuts one floor layer (see [Layers by stage](#layers-by-stage)): `--ref <package>:<stage>:<layer>` (`<goalId>:<stage>:<layer>` at integrate and close); it counts for every gate that runs after it is recorded.
+5. **Exceptions.** `apos exception approve <goalId> --kind needs-human|tests-infra|tests-weakened --ref <package|commit> --reason <text> (--by agent:<name> | --human)`. An agent may approve on the Human's behalf (logged as `agent:<name>`); `--human` needs a terminal or `--on-behalf`. A `needs-human` exception for a package and commit makes the same commit green on submit without running the gate again; it waits in `apos inbox` until then. `floor-reduced` cuts one floor layer (see [Layers by stage](#layers-by-stage)): `--ref <package>:<stage>:<layer>` (`<goalId>:<stage>:<layer>` at integrate and close); it counts for every gate that runs after it is recorded. `review-overridden` waives one review block (`--ref <package>:<review commit>`, see [Reviews](#reviews)).
 6. **Changing locked tests.** `apos tests revise <goalId> --commit <sha> --reason <text>`: the commit contains the locked one and is checked like a submission (so it is red again on the old code). It must keep every locked test id (a rename is a deletion), at least as many tests for each criterion and at least as many assertions in each file. If it does, it re-locks (`revisionOf`) and every package goes back to `pending`. If it does not, it waits as `tests-revision-pending` until a `tests-weakened` exception names the commit; then the same command locks it.
 
 `apos tests show <goalId>` prints the locked commit, tests per layer and which tests prove which criterion.
@@ -354,7 +354,7 @@ The repo gets readable Goal documents (`.apos/goals/<id>/`) committed only at mi
 - **The log is tamper-evident, not a security boundary.** Each event carries the hash of its predecessor, so an edit breaks the chain and is detected; a process running as the same OS user can still read or delete files. APOS assumes a single host operated by a trusted developer.
 - **The Human decides through a person, not through a process.** Human commands need the Goal id typed back in a terminal, or an explicit `--on-behalf "<why>"` that is written to the log. A script or agent without a terminal cannot do either by accident. This stops a mistake or a prompt-injected agent, not a process determined to pass `--on-behalf`; the log shows when it did.
 - **Lead commands are not authenticated.** `lead *`, `package *` and `integration gate` take `--by <name>` (default `lead`) for the log only. They can only describe a plan and submit commits; the gate, not the caller, decides.
-- **An LLM's word is never evidence.** Verification needs a green gate APOS ran on the exact commit. Owner-submitted evidence is a report. A review is advice and gates nothing.
+- **An LLM's word is never evidence.** Verification needs a green gate APOS ran on the exact commit. Owner-submitted evidence is a report. A review (a person, a model or an AI tool) is advice, and blocks only through a test that APOS runs and finds red: see [Reviews](#reviews).
 - **The gate protects its own rules.** A delivery that rewrites APOS-managed files (`.apos/`: skills, Goal documents, sources) is red (`APOS-PROTECTED`). Source snapshots are hashed with line endings normalized; a changed or missing snapshot refuses approval and gating.
 - **Closing is tied to a gate.** Nothing, `--on-behalf` included, closes a Goal on a commit that is not the last green gate.
 
@@ -382,7 +382,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `tests submit <goalId> --commit <sha> [--by <name>]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
 | `tests revise <goalId> --commit <sha> --reason <text> [--by <name>]` | Replace the lock. Exit 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception. |
 | `tests show <goalId>` | The locked commit, tests per layer, the criterion-to-test map. |
-| `exception approve <goalId> --kind <kind> --ref <ref> --reason <text> (--by agent:<name> \| --human)` | An agent, or the Human (**H** with `--human`), approves a sensitive-file change, weakened locked tests, a change to test infrastructure, or cutting a floor layer. |
+| `exception approve <goalId> --kind <kind> --ref <ref> --reason <text> (--by agent:<name> \| --human)` | An agent, or the Human (**H** with `--human`), approves a sensitive-file change, weakened locked tests, a change to test infrastructure, cutting a floor layer, or overriding a review block (`review-overridden`, `--ref <package>:<review commit>`). |
 | `goal show <id>` | Status, pinned setup, locked tests and the [assurance table](#the-assurance-table) of one Goal. |
 | `package add --file <json> --reason <text> [--by <name>]`, `package revise <goalId> --file <json> --reason <text> [--by <name>]`, `package remove <goalId> <packageId> --reason <text> [--by <name>]`, `package list <goalId>` | Plan the packages of a Multi-WP Goal. |
 | `package submit <goalId> <packageId> --commit <sha> [--by <name>] [--json]` | Gate a commit now. Exit 0 green, 1 red, 3 needs-human or unverifiable. |
@@ -393,13 +393,30 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `evidence add <id> --file <json>`, `evidence show <id>` | Owner-reported evidence (a report, not proof). |
 | `decision record <id> --note <text>`, `blocker report <id> --kind <kind> --note <text>`, `blocker resolve <id> --note <text>` | Decisions and blockers (`resolve` is **H**). |
 | `finding record <id> --kind <intent_gap\|bad_plan\|patch\|defer> --note <text> [--by <name>]` | Record a finding. |
-| `review submit <goalId> --file <json>` | **H.** Record a review; it is advice and gates nothing. |
+| `review block <goalId> [<packageId>] --commit <sha> --by <name> [--integration] [--note <text>]` | Run the tests a review added on top of the delivery. Red for a reason in the code: the package is red and the tests are locked into its next delivery (exit 1). Green: advice, nothing blocked. |
+| `review note <goalId> [<packageId>] --by <name> --note <text>` | A remark with no test: advice only. |
 | `outcome close <id> [--merge-to <branch>] [--by <name>]`, `outcome revise <id>`, `outcome stop <id>` | **Gate D (H).** `close` needs the last green gate's commit. |
 | `inbox [--wait] [--timeout <dur>] [--since <cursor>] [--json]` | What needs the Human: blocked Goals, verified Goals, gate A/B waiting, notices and gate warnings (`--since` takes the cursor printed last time; `--wait` blocks read-only and exits 2 on timeout). |
 | `ui [--port <n>]` | Read-only local web view. |
 | `metrics show <goalId>` | Submits per package, red gates and minutes. |
 
 Run `apos <command> --help` for the exact options of any command.
+
+## Reviews
+
+A review gives advice; it blocks a delivery only with a test. The reviewer (a person, a model, an AI tool) writes tests in **one commit whose only parent is the delivery commit** the gate last ran on, and adds test files only: a changed or deleted test, or any file that is not a test of the setup, is refused. Then:
+
+```sh
+apos review block <goalId> <packageId> --commit <review sha> --by <reviewer> [--note <text>]
+```
+
+APOS runs the tests the commit adds, in the layers of their part:
+
+- **Red for a reason in the code**: the package goes back to red (it spends an attempt), the Goal to `executing`, and the reviewer's tests are locked into the package's next delivery: it must contain the review commit, the files unchanged, and every test passing (`APOS-REVIEW`). The message says `blocked by review: <ids>`. APOS also runs the tests laid over the plan's base commit; when they are red there too, the message adds `also red before the Goal: may be an existing defect`, and the package is blocked all the same.
+- **A test that cannot load** (an import or syntax error) proves nothing: refused, nothing recorded.
+- **Every test green**: advice, nothing is blocked.
+
+`apos review note` records a remark with no test; it is advice. For a Multi-WP Goal, `apos review block <goalId> --integration --commit <sha>` does the same to the integration commit. A Lead who does not accept a block approves `apos exception approve <goalId> --kind review-overridden --ref <package>:<review sha> --reason <text> --by agent:<name>`; the delivery that was blocked can then be submitted again, and the assurance table says `review bị bỏ qua: <ids>, duyệt bởi <by>`.
 
 ## Old logs (legacy Goals)
 
@@ -449,4 +466,4 @@ Phase 1 (this version) removed the orchestration layer and put `package submit`,
 2. ~~Result formats, a tool catalogue and a project setup with draft, probe and approve~~ (done: see [Project setup](#project-setup)). 
 3. ~~Locking the acceptance tests before the code is written, red-for-the-right-reason checks, test inventory and scope guards~~ (done: see [Locked tests](#locked-tests)).
 4. ~~Test layers L0 to L6 per stage, non-functional proofs and a per-Goal table of what the machine proves and what you confirmed by hand~~ (done: see [Layers by stage](#layers-by-stage) and [The assurance table](#the-assurance-table)).
-5. Reviews and AI tools that can block only with a red test, and mutation testing.
+5. Reviews and AI tools that can block only with a red test (done: see [Reviews](#reviews)), and mutation testing.

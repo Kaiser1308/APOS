@@ -4,11 +4,14 @@ import {
   infraCheck,
   inventoryCheck,
   lockedTestsCheck,
+  reviewTestsCheck,
   scopeCheck,
   testSetOf,
   INVENTORY_CHECK,
+  REVIEW_CHECK,
   type TestSet,
 } from '../domain/assurance.js';
+import { reviewOverrideBy } from '../domain/review-tests.js';
 import { matchesAny, rootedGlobs } from '../domain/glob.js';
 import type { CheckResult } from '../domain/gate.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
@@ -17,6 +20,7 @@ import type { GoalState, PackageState } from '../domain/transitions.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 import { fileAt, filesAt, sha256Of } from './git-files.js';
 import type { ToolRunner } from './layer-runner.js';
+import type { LayerId } from '../domain/layers.js';
 import { LayerGate, type LayerGateInput } from './layer-gate.js';
 
 export type AssuranceDeps = {
@@ -98,11 +102,15 @@ export class AssuranceService {
     if (!setup) return [];
     const { repo, runner } = this.deps;
     const lock = state.testLock;
-    const wanted = new Map<string, { part: string; layer: LockedLayer | 'L1' }>();
+    const reviews = (state.reviewTests ?? []).filter(review => review.packageId === item.spec.id);
+    const wanted = new Map<string, { part: string; layer: LayerId }>();
     for (const [part, where] of Object.entries(setup.parts))
       if (where.layers.L1?.length) wanted.set(`${part}.L1`, { part, layer: 'L1' });
     for (const entry of lock?.map ?? [])
       wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
+
+    for (const review of reviews)
+      for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
 
     const run = (commit: string) => {
       const outcomes: LayerOutcome[] = [];
@@ -139,6 +147,24 @@ export class AssuranceService {
         }),
       );
     }
+    if (reviews.length) {
+      checks.push(
+        delivery.problems.length
+          ? unverifiable(REVIEW_CHECK, `the layers did not run: ${delivery.problems.join('; ')}`)
+          : reviewTestsCheck({
+              reviews,
+              overriddenBy: review => reviewOverrideBy(state, review),
+              deliveryFiles: review =>
+                Object.fromEntries(
+                  Object.keys(review.files).map(path => {
+                    const content = fileAt(repo, head, path);
+                    return [path, content ? sha256Of(content) : undefined];
+                  }),
+                ),
+              delivery: delivery.set,
+            }),
+      );
+    }
     const problems = [...delivery.problems, ...atBase.problems];
     checks.push(
       problems.length
@@ -168,7 +194,7 @@ export class AssuranceService {
           changed: changed.filter(file => !inherited.has(file)),
           paths: [...paths, ...(item.spec.stubPaths ?? [])],
           needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
-          lockedFiles: Object.keys(lock?.files ?? {}),
+          lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
         }),
       );
     return checks;

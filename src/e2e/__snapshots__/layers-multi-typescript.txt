@@ -1,0 +1,16 @@
+GOAL-001	closed	check in
+setup v1
+khoá test: commit <commit>, 2 test, 2 file, 2 assert (đếm dòng, chỉ gần đúng)
+
+GOAL-001  setup v1  (app: typescript)
+  Tiêu chí           2   máy chứng minh 2 · anh xác nhận tay 0
+  Test đã khoá       L2 2
+  Kiểm kê / phạm vi  bật
+  Lớp khâu submit    WP-A: L1 vitest ✓ · L2 vitest-acceptance ✓
+  Lớp khâu submit    WP-B: L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration (Lead thêm) ✓
+  Lớp khâu ghép      L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration ✓
+  Lớp khâu đóng      L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration ✓ · L4 system e2e ✓ · L5 scan ✓
+  Agent duyệt thay   0 chỗ
+  Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    app.L5.bench tắt: Goal không gắn cờ perf

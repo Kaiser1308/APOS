@@ -205,8 +205,12 @@ export class LayerGate {
     const inReport = new Set((head[0] ?? []).map(test => test.id));
     // With two tools in one layer a locked test lives in only one of them: this tool answers for the ones it reports.
     const shared = (setup.parts[run.part]?.layers[run.layer]?.length ?? 0) > 1;
+    // A package answers for the locked tests of its own criteria; at the later stages the Goal answers for all of them.
+    const mine = state.packages?.[input.scope];
+    const answersFor = (acceptanceId: string) =>
+      !mine || mine.spec.acceptance.some(criterion => criterion.goalAcceptanceId === acceptanceId);
     const locked = (state.testLock?.map ?? [])
-      .filter(entry => entry.part === run.part && entry.layer === run.layer)
+      .filter(entry => entry.part === run.part && entry.layer === run.layer && answersFor(entry.acceptanceId))
       .flatMap(entry => entry.testIds)
       .filter(id => !shared || inReport.has(id));
     const verdict = judgeTests({

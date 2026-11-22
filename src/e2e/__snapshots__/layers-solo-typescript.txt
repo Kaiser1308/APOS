@@ -1,0 +1,14 @@
+GOAL-001	closed	check in
+setup v1
+khoá test: commit <commit>, 1 test, 1 file, 1 assert (đếm dòng, chỉ gần đúng)
+
+GOAL-001  setup v1  (app: typescript)
+  Tiêu chí           3   máy chứng minh 3 · anh xác nhận tay 0
+  Test đã khoá       L2 1
+  Kiểm kê / phạm vi  bật
+  Lớp khâu submit    WP-MAIN: L1 vitest ✓ · L2 vitest-acceptance bớt · L3 vitest-integration (Lead thêm) ✓ · L4 system e2e (kích hoạt theo file) ✓ · L5 bench (Lead thêm) ✓ (p95_ms 150) · L5 scan (Lead thêm) ✓ (1 finding dưới mức chặn)
+  Lớp khâu đóng      L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration ✓ · L4 system e2e ✓ · L5 bench ✓ (p95_ms 150) · L5 scan ✓ (1 finding dưới mức chặn)
+  Ngoại lệ           floor-reduced WP-MAIN:submit:L2 (agent:lead): the locked tests are judged by APOS-LOCKED already
+  Agent duyệt thay   1 chỗ: floor-reduced WP-MAIN:submit:L2 (agent:lead)
+  Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này

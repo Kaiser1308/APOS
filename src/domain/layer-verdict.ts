@@ -105,7 +105,11 @@ export function judgeMetric(input: {
 }): Verdict & { metric?: { name: string; value: number } } {
   const { name, values, thresholds } = input;
   if (!values.length) return { status: 'unverifiable', reason: `${name}: no measurement` };
-  if (!thresholds.length) return { status: 'unverifiable', reason: `${name}: no threshold to judge it against` };
+  if (!thresholds.length)
+    return {
+      status: 'unverifiable',
+      reason: `${name}: no threshold to judge it against (give the tool a threshold in the setup, or the Goal a benchmark criterion)`,
+    };
   const wanted = thresholds.map(item => describeThreshold(name, item)).join(' and ');
   const inside = values.map(value => thresholds.every(item => holds(value, item)));
   const metric = { name, value: median(values) };

@@ -43,6 +43,7 @@ The file format is the one the build injects as `SetupCodec` (JSON today; see [s
 | `testPaths` | Globs, relative to the part's root, of the files that hold tests: what a tester may commit and what gets locked (Python `tests/**`, `**/test_*.py`; TypeScript `**/*.test.ts`, `**/*.spec.ts`, `tests/**`; Java `src/test/**`). |
 | `testInfra` | Globs of test infrastructure: `conftest.py`, `pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`, `**/__init__.py` (Python); `vitest.config.*`, `vite.config.*`, `jest.config.*`, `**/vitest.setup.*`, `**/setupTests.*`, `tsconfig*.json` (TypeScript); `src/test/resources/**`, build files (Java). Copied to `tests.infra` by `draft`; changing one after the lock needs a decision. |
 | `assertPatterns`, `notImplementedPatterns`, `loadErrorPatterns` | Regexes that count assertions line by line (rough), recognise a stub's "not implemented", and recognise a test that never loaded. Used by `apos tests submit`. |
+| `entryRule` | How to read an import in an acceptance test; see [below](#entryrule). Absent: the stack's tests are not held to the declared entries, and the assurance table says "chưa kiểm". |
 | `forbid` | Regexes forbidden in added diff lines: the strict floor a draft starts with. |
 | `needsHuman` | Globs of sensitive files (dependencies, build config) that need a Human. |
 | `notes` | Free text: which tool versions the commands were checked against, and what was not. |
@@ -88,3 +89,18 @@ A missing, empty or broken report is `unverifiable`, never "0 tests, green".
 3. Run `apos setup draft`, edit the result, commit it, then `apos setup probe` (see [setup.md](setup.md)). The probe is what proves a command on a real project.
 
 Commands that Gradle or Maven run need care: Gradle skips an up-to-date `test`, so the shipped commands use `cleanTest test`; both write a directory of XML files, so they set `report` to a glob.
+
+
+## `entryRule`
+
+A test may call the code only through the entries the plan declares (`stubPaths`). The catalogue says how to see what a test imports; the core knows no language.
+
+| Field | Meaning |
+| --- | --- |
+| `importPattern` | Regex matched on each line of an L2 test file; group 1 is the module imported (Python `^\s*(?:from\|import)\s+([\w.]+)`, TypeScript `from\s+['"]([^'"]+)['"]`). |
+| `allowImports` | Regexes on the module text: libraries and the standard library, never judged. A module that does not exist as a file in the repo is not judged either, so this list only matters for a repo file that shadows a library. |
+| `moduleSeparator` | `.` (Python) or `/` (TypeScript): what separates the parts of a module path. A leading `.` is relative to the test file. |
+| `moduleFiles` | The files a module may be, `{path}` standing for its path with `/`: `{path}.py`, `{path}/__init__.py`; `{path}.ts`, `{path}/index.ts`. |
+| `stripExtension` | A regex removed from the end of an import first (`.js` in TypeScript's `./calc.js`). |
+
+An import that resolves to a file of the repo is allowed when that file matches a declared `stubPaths` glob or the part's `tests.paths`; otherwise `tests submit` (and `tests revise`) refuse it with `<file>:<line>: imports "<module>" (<path>), an internal module that is not a declared entry`. The rule reads import lines: a dynamic import or a call through a re-export is not seen. Java has no rule yet.

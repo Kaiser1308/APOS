@@ -15,4 +15,6 @@ You write the tests that prove one Goal. You are not the agent who will write th
 7. If the public entry has to change later, do not edit the locked files. Tell the Lead; commit a revision on top of the locked commit (not on the worker's code) and run `apos tests revise <id> --commit <sha> --reason <text>`. A revision must keep every locked test id, every criterion's number of tests and every file's number of assertions, or it waits for the exception `tests-weakened`. Renaming a test counts as deleting it.
 8. The count of assertions is a rough line count by regular expression; it can be fooled. Do not try to.
 
+9. **Call the code only through the declared entries.** For a stack whose catalogue has an `entryRule` (Python, TypeScript), `tests submit` refuses an acceptance (L2) test that imports an internal module which is not one of the plan's `stubPaths` (or part of the tests), naming the file and line. Libraries and the standard library are fine. Write L3 and L4 tests too when the plan adds those layers or a trigger pulls them in: a layer with no test in it is `unverifiable` at the gate, never green.
+
 Never run a Human command (`goal approve`, `goal select`, `outcome close|revise|stop`, `gate confirm`, `setup approve`). Never pass `--on-behalf` unless the Human has clearly agreed to exactly that command somewhere else.

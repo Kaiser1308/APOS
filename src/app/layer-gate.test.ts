@@ -338,6 +338,15 @@ fs.writeFileSync(out, JSON.stringify({ mutationScore: ok ? values[n % values.len
     expect(got.result).toBe('unverifiable');
     expect(got.reasons.join('\n')).toContain('differs by more than 1 point between two runs (70, 72)');
   }, 120_000);
+  it('mutation: a part with no changed source has nothing to mutate, which blocks nothing', async () => {
+    const p = await mutating();
+    await p.submit(p.commit({ 'tests/extra.txt': 'more\n' }));
+    expect(checkOf(p, 'app.L0.mutate')).toMatchObject({
+      status: 'pass',
+      reason: expect.stringContaining('nothing to mutate'),
+    });
+  }, 120_000);
+
   it('mutation: a Goal without the flag does not run the tool at all', async () => {
     const p = await mutating({}, []);
     expect((await p.submit(p.commit({ ...work, 'src/bench.txt': '10,10' }))).result).toBe('green');

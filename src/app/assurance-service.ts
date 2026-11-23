@@ -66,7 +66,55 @@ export class AssuranceService {
 
   /** The layers the stage plans (floor, Lead's, triggers, criteria), run and judged. Empty for a Goal without a setup. */
   layerChecks(state: GoalState, input: LayerGateInput): ReturnType<LayerGate['run']> {
-    return this.layerGate.run(state, input);
+    const ran = this.layerGate.run(state, input);
+    if (input.stage !== 'integrate') return ran;
+    // A review of the integration commit locks its tests into every later integration commit, like a package's.
+    const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
+    const setup = this.deps.loadSetup(state);
+    if (!reviews.length || !setup) return ran;
+    const wanted = new Map<string, { part: string; layer: LayerId }>();
+    for (const review of reviews)
+      for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
+    const delivery = this.runTests(setup, wanted, input.head);
+    return { ...ran, checks: [...ran.checks, this.reviewCheck(state, reviews, input.head, delivery)] };
+  }
+
+  /** Every test of the given layers, run once on `commit` in a clean worktree. */
+  private runTests(setup: ProjectSetup, wanted: Map<string, { part: string; layer: LayerId }>, commit: string) {
+    const outcomes: LayerOutcome[] = [];
+    const problems: string[] = [];
+    for (const { part, layer } of wanted.values()) {
+      const where = setup.parts[part];
+      if (!where) continue;
+      const result = this.deps.runner.layerTests(commit, part, where.root, layer, where.layers[layer] ?? []);
+      problems.push(...result.problems);
+      outcomes.push({ part, layer: layer as LockedLayer, tests: result.tests });
+    }
+    return { set: testSetOf(outcomes) as TestSet, problems };
+  }
+
+  /** The reviewers' tests are untouched and pass on `head`, or the review was waived by an exception. */
+  private reviewCheck(
+    state: GoalState,
+    reviews: NonNullable<GoalState['reviewTests']>,
+    head: string,
+    delivery: { set: TestSet; problems: string[] },
+  ): CheckResult {
+    const { repo } = this.deps;
+    return delivery.problems.length
+      ? unverifiable(REVIEW_CHECK, `the layers did not run: ${delivery.problems.join('; ')}`)
+      : reviewTestsCheck({
+          reviews,
+          overriddenBy: review => reviewOverrideBy(state, review),
+          deliveryFiles: review =>
+            Object.fromEntries(
+              Object.keys(review.files).map(path => {
+                const content = fileAt(repo, head, path);
+                return [path, content ? sha256Of(content) : undefined];
+              }),
+            ),
+          delivery: delivery.set,
+        });
   }
 
   /**
@@ -100,7 +148,7 @@ export class AssuranceService {
   checks(state: GoalState, item: PackageState, head: string, base: string, changed: string[]): CheckResult[] {
     const setup = this.deps.loadSetup(state);
     if (!setup) return [];
-    const { repo, runner } = this.deps;
+    const { repo } = this.deps;
     const lock = state.testLock;
     const reviews = (state.reviewTests ?? []).filter(review => review.packageId === item.spec.id);
     const wanted = new Map<string, { part: string; layer: LayerId }>();
@@ -112,18 +160,7 @@ export class AssuranceService {
     for (const review of reviews)
       for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
 
-    const run = (commit: string) => {
-      const outcomes: LayerOutcome[] = [];
-      const problems: string[] = [];
-      for (const { part, layer } of wanted.values()) {
-        const where = setup.parts[part];
-        if (!where) continue;
-        const result = runner.layerTests(commit, part, where.root, layer, where.layers[layer] ?? []);
-        problems.push(...result.problems);
-        outcomes.push({ part, layer: layer as LockedLayer, tests: result.tests });
-      }
-      return { set: testSetOf(outcomes) as TestSet, problems };
-    };
+    const run = (commit: string) => this.runTests(setup, wanted, commit);
     const delivery = run(head);
     const atBase = run(base);
     const checks: CheckResult[] = [];
@@ -147,24 +184,7 @@ export class AssuranceService {
         }),
       );
     }
-    if (reviews.length) {
-      checks.push(
-        delivery.problems.length
-          ? unverifiable(REVIEW_CHECK, `the layers did not run: ${delivery.problems.join('; ')}`)
-          : reviewTestsCheck({
-              reviews,
-              overriddenBy: review => reviewOverrideBy(state, review),
-              deliveryFiles: review =>
-                Object.fromEntries(
-                  Object.keys(review.files).map(path => {
-                    const content = fileAt(repo, head, path);
-                    return [path, content ? sha256Of(content) : undefined];
-                  }),
-                ),
-              delivery: delivery.set,
-            }),
-      );
-    }
+    if (reviews.length) checks.push(this.reviewCheck(state, reviews, head, delivery));
     const problems = [...delivery.problems, ...atBase.problems];
     checks.push(
       problems.length

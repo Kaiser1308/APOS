@@ -185,7 +185,10 @@ export class LayerGate {
       const metricPath = wanted.name && (tool.metric || wanted.name !== 'value') ? { metric: wanted.name } : {};
       const measured = { ...tool, ...metricPath };
       if (needsChanged && !changed)
-        return unverifiable(id, `${label}: no source file changed from the base, so there is nothing to mutate`);
+        return result(id, {
+          status: 'pass',
+          reason: `${label}: no source file of this part changed from the base, so there is nothing to mutate`,
+        });
       const values: number[] = [];
       for (let n = 0; n < (tool.runs ?? (mutation ? 2 : 3)); n++) {
         const { exec, report } = this.deps.runner.run(head, measured, tool.command, root, { changed });

@@ -52,6 +52,8 @@ export type Stack = {
   prepare?: (dir: string) => void;
   /** A file the integration test fails on when it exists. */
   breakFlag: string;
+  /** A reviewer's test that is red on any integration commit: where it goes and what it holds. */
+  integrationReview: { file: string; red: string };
 };
 
 export const python: Stack = {
@@ -94,6 +96,7 @@ export const python: Stack = {
     l4: 'pytest -o junit_family=xunit1 e2e --junitxml={report}',
   },
   breakFlag: 'break.flag',
+  integrationReview: { file: 'tests/test_review_integration.py', red: 'def test_review():\n    assert 1 == 2\n' },
 };
 
 export const typescript: Stack = {
@@ -142,6 +145,10 @@ export const typescript: Stack = {
   prepare: dir =>
     symlinkSync(resolve('node_modules'), join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir'),
   breakFlag: 'break.flag',
+  integrationReview: {
+    file: 'src/review.integration-check.test.ts',
+    red: "import { it, expect } from 'vitest';\nit('review', () => expect(1).toBe(2));\n",
+  },
 };
 
 export type Said = { code: number | undefined; text: string };

@@ -22,6 +22,10 @@ function disagreement(runs: TestOutcome[][]): string[] {
   return sorted(differing);
 }
 
+/** The ids whose status differs between two runs of the same layer on the same commit. */
+export const baseDisagreement = (first: TestOutcome[], second: TestOutcome[]): string[] =>
+  disagreement([first, second]);
+
 /**
  * A test layer is green when its tests show no failure the base did not already have, and every locked test passes.
  * The locked tests were red at the base by design, so "already failing" never excuses them. Repeated runs that

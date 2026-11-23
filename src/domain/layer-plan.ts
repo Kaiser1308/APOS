@@ -17,7 +17,7 @@ export const DEFAULT_FLOOR: Record<Stage, LayerId[]> = {
  * Why a layer runs: the setup's floor, a layer the Lead added to the package, a trigger that fired on a changed file
  * or on a Goal flag, or a criterion of the Goal that names the tool (`benchmark`, `scan`).
  */
-export type LayerWhy = 'floor' | 'lead' | 'trigger' | 'goal-flag' | 'proof';
+export type LayerWhy = 'floor' | 'lead' | 'trigger' | 'goal-flag' | 'goal-kind' | 'proof';
 export type LayerRun = {
   /** A part name, or `system` for the layers that span parts. */
   part: string;
@@ -28,8 +28,13 @@ export type LayerRun = {
   reduced?: boolean;
 };
 
+/** The layers a maintenance Goal runs at the submit stage on every part it touches, whatever the floor says. */
+export const MAINTENANCE_LAYERS: readonly LayerId[] = ['L1', 'L2', 'L3', 'L5'];
+
 export type PlanInput = {
   setup: ProjectSetup;
+  /** The kind of the Goal: a `maintenance` Goal adds `MAINTENANCE_LAYERS` at the submit stage. */
+  kind?: string;
   stage: Stage;
   /** Files changed from the base: at `submit` they pick the parts; a trigger's globs match them at every stage. */
   changed: string[];
@@ -90,6 +95,8 @@ export function planLayers(input: PlanInput): LayerRun[] {
     for (const part of scope) addLayer(part, layer, 'floor');
     if (stage !== 'submit') addLayer(SYSTEM, layer, 'floor');
   }
+  if (input.kind === 'maintenance' && stage === 'submit')
+    for (const layer of MAINTENANCE_LAYERS) for (const part of scope) addLayer(part, layer, 'goal-kind');
   for (const layer of input.packageLayers?.[stage] ?? []) {
     for (const part of scope) addLayer(part, layer, 'lead');
     addLayer(SYSTEM, layer, 'lead');

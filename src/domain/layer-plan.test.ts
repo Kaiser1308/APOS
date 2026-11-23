@@ -221,3 +221,20 @@ describe('skippedLayers', () => {
     );
   });
 });
+
+describe('a maintenance Goal at submit', () => {
+  it('adds L1, L2, L3 and the scan of every part it touches, with the reason goal-kind', () => {
+    const runs = plan('submit', { kind: 'maintenance', changed: ['api/package.json'] });
+    expect(names(runs)).toEqual(['api.L0.lint', 'api.L1.unit', 'api.L2.acc', 'api.L3.integ', 'api.L5.scan']);
+    expect(runs.find(run => run.layer === 'L3')?.why).toBe('goal-kind');
+    expect(runs.find(run => run.layer === 'L1')?.why).toBe('floor');
+  });
+  it('leaves out a tool a flag switches on, and a part nothing changed in', () => {
+    const runs = plan('submit', { kind: 'maintenance', changed: ['web/package.json'] });
+    expect(names(runs)).toEqual(['web.L1.webunit', 'web.L2.webacc']);
+  });
+  it('changes nothing for another kind or another stage', () => {
+    expect(names(plan('submit', { changed: ['api/x.py'] }))).toEqual(['api.L0.lint', 'api.L1.unit', 'api.L2.acc']);
+    expect(names(plan('integrate', { kind: 'maintenance' }))).toEqual(names(plan('integrate')));
+  });
+});

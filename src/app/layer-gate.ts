@@ -203,6 +203,8 @@ export class LayerGate {
     for (let n = 0; n < (tool.runs ?? 1); n++) {
       const got = runner.layerTests(input.head, run.part, root, run.layer, [tool]);
       if (got.problems.length) return unverifiable(checkId, `the layer did not run: ${got.problems.join('; ')}`);
+      if (got.processFailures.length)
+        return result(checkId, { status: 'fail', reason: got.processFailures.join('; ') });
       head.push(got.tests);
     }
     const atBase = input.base ? runner.layerTests(input.base, run.part, root, run.layer, [tool]) : undefined;

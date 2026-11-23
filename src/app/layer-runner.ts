@@ -76,9 +76,10 @@ export class ToolRunner {
     root: string,
     layer: string,
     tools: LayerSpec[],
-  ): { tests: TestOutcome[]; problems: string[] } {
+  ): { tests: TestOutcome[]; problems: string[]; processFailures: string[] } {
     const tests: TestOutcome[] = [];
     const problems: string[] = [];
+    const processFailures: string[] = [];
     for (const tool of tools) {
       const { exec, report } = this.run(commit, tool, tool.command, root);
       const label = `${part}.${layer} ${tool.id}`;
@@ -90,10 +91,10 @@ export class ToolRunner {
       else {
         const reportedFailure = report.tests.some(test => test.status === 'fail' || test.status === 'error');
         if (exec.exitCode !== 0 && !reportedFailure)
-          problems.push(`${label}: command exited ${exec.exitCode} without test failures in its report`);
+          processFailures.push(`${label}: command exited ${exec.exitCode} without test failures in its report`);
         tests.push(...report.tests);
       }
     }
-    return { tests, problems };
+    return { tests, problems, processFailures };
   }
 }

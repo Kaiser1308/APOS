@@ -101,9 +101,9 @@ describe('layers at the submit stage', () => {
       },
     });
     const result = await p.submit(p.commit(work));
-    expect(result.result).toBe('unverifiable');
+    expect(result.result).toBe('red');
     expect(checkOf(p, 'app.L1.unit')).toMatchObject({
-      status: 'unverifiable',
+      status: 'fail',
       reason: expect.stringContaining('command exited 1 without test failures in its report'),
     });
   }, 120_000);

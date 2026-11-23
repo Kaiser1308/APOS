@@ -72,8 +72,8 @@ export class AssuranceService {
   layerChecks(state: GoalState, input: LayerGateInput): ReturnType<LayerGate['run']> {
     const ran = this.layerGate.run(state, input);
     // A refactor holds the captured tests at every later stage too: the close stage reads them on the verified commit.
-    const kept = input.stage === 'submit' ? undefined : this.characterized(state, input.head, input.base);
-    if (kept) ran.checks = [...ran.checks, kept];
+    // The scope the Human approved with a legacy Goal binds the integration commit and the close stage like a package.
+    if (input.stage !== 'submit') ran.checks = [...ran.checks, ...this.legacyChecks(state, input)];
     if (input.stage !== 'integrate') return ran;
     // A review of the integration commit locks its tests into every later integration commit, like a package's.
     const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
@@ -84,6 +84,30 @@ export class AssuranceService {
       for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
     const delivery = this.runTests(setup, wanted, input.head);
     return { ...ran, checks: [...ran.checks, this.reviewCheck(state, reviews, input.head, delivery)] };
+  }
+
+  /** The checks of a characterize or refactor Goal at a stage that sees the whole Goal (the integration commit, the close). */
+  private legacyChecks(state: GoalState, input: LayerGateInput): CheckResult[] {
+    const setup = this.deps.loadSetup(state);
+    if (!setup) return [];
+    const lock = state.testLock;
+    const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
+    const checks: CheckResult[] = [];
+    if (state.spec.kind === 'refactor') {
+      const kept = this.characterized(state, input.head, input.base);
+      if (kept) checks.push(kept);
+      checks.push(
+        refactorScopeCheck({
+          changed: input.changed,
+          paths: state.spec.paths ?? [],
+          needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
+          lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
+        }),
+      );
+    }
+    if (state.spec.kind === 'characterize' && input.base)
+      checks.push(characterizeScopeCheck({ repo: this.deps.repo, setup, base: input.base, head: input.head }));
+    return checks;
   }
 
   /** The layers the captured tests of a refactor live in, added to `wanted`: the base and the delivery both run them. */

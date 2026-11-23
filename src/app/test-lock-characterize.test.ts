@@ -116,3 +116,24 @@ describe('the package gate of a characterize Goal', () => {
     expect(seen.reason).toMatch(/src\/legacy\.txt \(commit \w{7}\)/);
   }, 60_000);
 });
+
+describe('what a rename hides (Codex review of #45)', () => {
+  it('sees the source of a production file moved into the tests directory: tests submit and the package gate', async () => {
+    const { characterizeScopeCheck } = await import('./characterized-gate.js');
+    const p = await project();
+    const lock = p.commit(capture(p.goalId), 'capture');
+    p.git('mv', 'src/legacy.txt', 'tests/unit/legacy.t');
+    p.git('commit', '-qm', 'move the code into the tests');
+    const head = p.git('rev-parse', 'HEAD');
+    const seen = characterizeScopeCheck({ repo: p.dir, setup: p.loadSetup(p.state()), base: lock, head });
+    expect(seen.status).toBe('fail');
+    expect(seen.reason).toContain('src/legacy.txt');
+    // The same move on the way to the lock.
+    const q = await project();
+    q.git('mv', 'src/legacy.txt', 'tests/unit/legacy.t');
+    const commit = q.commit(capture(q.goalId), 'capture, and move the code into the tests');
+    const refused = await q.service.submit(q.goalId, commit, 'tester');
+    expect(refused.ok).toBe(false);
+    expect(refused.problems.join('\n')).toContain('src/legacy.txt: characterize: the Tester adds tests only');
+  }, 90_000);
+});

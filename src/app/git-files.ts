@@ -38,6 +38,7 @@ export function filesByCommit(repo: string, from: string, to: string): { commit:
       'core.quotepath=off',
       'log',
       '--no-merges',
+      '--no-renames',
       '--name-only',
       '--format=@@%H',
       `${from}..${to}`,

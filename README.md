@@ -101,7 +101,7 @@ flowchart TD
 
 ### Human-only commands
 
-`goal approve`, `goal appetite`, `goal select`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base` and `blocker resolve`) are Human decisions. Each one makes you **type the Goal id back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
+`goal approve`, `goal appetite`, `goal select`, `bug approve`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base` and `blocker resolve`) are Human decisions. Each one makes you **type the Goal id back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
 
 `goal appetite` is the Human's decision to change the budget, never the scope.
 
@@ -245,6 +245,24 @@ The wall-clock budget runs from `goal select` to `verified`. Past it, `package s
 For a Goal pinned to a setup the gate adds up to three checks next to the Goal's own: `APOS-LOCKED` (only when the Goal has locked tests), `APOS-INVENTORY` (L1 of every part, plus the locked layers; the setup's `forbid` patterns on added lines) and `APOS-SCOPE` (only when the plan names `paths`), and then one check per layer of the submit stage (see [Layers by stage](#layers-by-stage)). With locked tests (see [Locked tests](#locked-tests)) the base of the package is the commit that locked them. A Goal pinned to no setup gets none of these.
 
 A green gate also prints **warnings** (`needs attention: ...`) when the diff changes tests or oracles, shared paths or the files the checks run. They block nothing and also appear in `apos inbox` and the UI. See [Limits](#limits).
+
+### Fixing a bug (`apos bug`)
+
+A bug is one Goal of its own kind, `bugfix`, with one criterion proved by a red-green test. Two commands instead of five, then the ordinary flow:
+
+```sh
+apos bug open "Total is 0 with the code FREE0" --given "a cart of 40 and FREE0" --when "the total is computed" --then "the total is 40" --repro-hint src/orders.ts
+apos bug approve GOAL-BUG-001            # the Human: gate A, the appetite (S, 60 min, 3 attempts) and gate B in one go
+apos lead propose --bugfix --goal GOAL-BUG-001   # the Lead's Solo plan: the Tester reproduces, the Worker fixes
+apos lead commit GOAL-BUG-001
+apos tests submit GOAL-BUG-001 --commit <sha>    # the Tester's reproduction: red on the bug, locked
+apos package submit GOAL-BUG-001 WP-MAIN --commit <sha>   # the fix: green
+apos outcome close GOAL-BUG-001
+```
+
+`bug open` drafts the Goal `GOAL-BUG-<n>` (its own counter, apart from `GOAL-<n>`): the description and the three flags are its verbatim, hashed source, and the check it is delivered against comes from the approved setup (`--check "<command>"` only for a project with none; with a setup it is refused, so there is one source of truth). `--repro-hint` is where the bug shows: a hint for the Tester, and the module the reproduction may import. `bug approve` is a Human decision like `goal approve` (type the id back, or `--on-behalf "<why>"`), checks everything `goal approve` checks before it writes anything, and then writes the same three events as `goal approve`, `goal appetite` and `goal select`, each with the same confirmation, marked `via: bug approve`. The assurance table says so (`duyệt gộp bằng bug approve`).
+
+Nothing about the gate is shortcut. Two rules are stricter for a bug, because its test must show the bug and not a stub: the Tester's commit may change tests and `tests.json` and nothing else (no code, stub or test infrastructure; so the test is red on the code as it is, the plan's base), and a reproduction that is already green is refused as "test không tái hiện lỗi". A bug that needs more than one criterion, a benchmark or a dependency is an ordinary Goal (a `bugfix` with two criteria is refused, also by `goal revise`). The assurance table ends the story with `lỗi được tái hiện bằng test <id>: đỏ trên <base>, xanh trên <delivery>`, or `lỗi chưa được tái hiện bằng test` while the evidence is not whole. `npm run demo:bug` runs it with vitest; see [docs/demo.md](docs/demo.md).
 
 ### Multi-WP
 
@@ -433,7 +451,7 @@ Mutation testing is the second net under the assertion count: it changes the cod
 
 ## Demo
 
-`npm run demo:ts` and `npm run demo:py` run an example Goal (`examples/ts-orders`, `examples/py-parking`) through the whole flow with the real binary and a real test runner, and print the assurance table. The output of both is in [docs/demo.md](docs/demo.md).
+`npm run demo:ts`, `npm run demo:py` and `npm run demo:bug` run an example Goal (`examples/ts-orders`, `examples/py-parking`, `examples/ts-bug`) through the whole flow with the real binary and a real test runner, and print the assurance table. The output of all three is in [docs/demo.md](docs/demo.md).
 
 ## Old logs (legacy Goals)
 

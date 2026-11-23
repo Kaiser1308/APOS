@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs one example Goal (examples/<name>) through the whole APOS v3 flow with the real binary and a real test runner:
-//   node scripts/demo-goal.mjs <ts-orders|py-parking> [--keep] [--bin <path to cli.js>]
+//   node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug> [--keep] [--bin <path to cli.js>]
 // It copies the example to a temp directory, `git init`s it, and drives APOS with the commands a Lead, a Tester, a Worker
 // and a Reviewer would run. Every step prints what APOS said and checks the exit code it expected; a surprise exits 1.
 // A machine without a tool the example needs stops at once with exit 2 and says which (it never reports a pass it did not see).
@@ -23,8 +23,8 @@ const usage = (message, code) => {
   console.error(message);
   process.exit(code);
 };
-if (!source || !existsSync(join(source, 'goal.json')))
-  usage('usage: node scripts/demo-goal.mjs <ts-orders|py-parking> [--keep] [--bin <cli.js>]', 2);
+const hasStory = source && ['goal.json', 'bug.json'].some(file => existsSync(join(source, file)));
+if (!hasStory) usage('usage: node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug> [--keep] [--bin <cli.js>]', 2);
 if (!existsSync(bin)) usage(`demo: ${bin} does not exist: run \`npm run build\` first`, 2);
 
 const demo = JSON.parse(readFileSync(join(source, 'demo.json'), 'utf8'));
@@ -102,6 +102,98 @@ const expectText = (text, wanted) => {
 };
 const human = ['--on-behalf', 'demo'];
 
+/**
+ * The bug story: one command opens the Goal, one the Human approves, and the usual flow follows. The Tester's test
+ * reproduces the bug on the code as it is (red, locked); the Worker's fix turns it green; the Human closes.
+ */
+function bugStory(base) {
+  const bug = JSON.parse(readFileSync(join(source, 'bug.json'), 'utf8'));
+  const id = 'GOAL-BUG-001';
+  expectText(
+    apos(
+      0,
+      'the PM opens a bugfix Goal from what was seen',
+      'bug',
+      'open',
+      bug.description,
+      '--given',
+      bug.given,
+      '--when',
+      bug.when,
+      '--then',
+      bug.then,
+      '--repro-hint',
+      bug.reproHint,
+    ),
+    `apos bug approve ${id}`,
+  );
+  expectText(apos(0, 'it waits for the Human in the inbox', 'inbox'), `apos bug approve ${id}`);
+  apos(0, 'the Human approves, sets the default appetite and selects, in one command', 'bug', 'approve', id, ...human);
+  apos(0, 'the Lead plans it: one Solo package, base is the current HEAD', 'lead', 'propose', '--bugfix', '--goal', id);
+  apos(0, 'the Lead commits the plan: the Goal waits for the reproduction test', 'lead', 'commit', id);
+
+  const step = (branch, parent, patch) => {
+    git('checkout', '-q', '-B', branch, parent);
+    git('apply', '--index', join(source, 'steps', `${patch}.patch`));
+    return commit(patch);
+  };
+  const green = step('tester-green', 'main', '00-green-test');
+  expectText(
+    apos(
+      1,
+      'a Tester hands over a test that is green on the bug: it does not reproduce it, so it is refused',
+      'tests',
+      'submit',
+      id,
+      '--commit',
+      green,
+    ),
+    'test không tái hiện lỗi',
+  );
+  const edit = step('tester-edit', 'main', '00b-code-edit');
+  expectText(
+    apos(
+      1,
+      'a Tester who also edits the code is refused: only tests may change, so red here is red on the base',
+      'tests',
+      'submit',
+      id,
+      '--commit',
+      edit,
+    ),
+    'the Tester adds tests only',
+  );
+  const repro = step('tester', 'main', '01-repro-test');
+  apos(
+    0,
+    'the Tester hands over a test that fails on the bug as it is (only tests changed): it is locked',
+    'tests',
+    'submit',
+    id,
+    '--commit',
+    repro,
+  );
+  const fix = step('worker', repro, '02-fix');
+  expectText(
+    apos(
+      0,
+      'the Worker delivers the fix: the locked test is green, the Goal is verified',
+      'package',
+      'submit',
+      id,
+      'WP-MAIN',
+      '--commit',
+      fix,
+    ),
+    'verified',
+  );
+  apos(0, 'the Human closes the Goal on the commit that passed the gate', 'outcome', 'close', id, ...human);
+  expectText(
+    apos(0, 'the assurance table says which test reproduced the bug, red before and green after', 'goal', 'show', id),
+    'lỗi được tái hiện bằng test',
+  );
+}
+
 try {
   console.log(`demo ${name}: working in <tmp> (a temp directory; --keep leaves it)`);
   if (demo.tools.includes('npx'))
@@ -120,147 +212,151 @@ try {
   const setup = parse(readFileSync(setupFile, 'utf8'));
   const app = setup.parts.app;
   delete app.layers.L0;
-  const benchTool = { ...demo.bench, command: demo.bench.command.replace(/^python /, `${python} `) };
-  app.layers.L5 = [benchTool];
+  if (demo.bench) {
+    const benchTool = { ...demo.bench, command: demo.bench.command.replace(/^python /, `${python} `) };
+    app.layers.L5 = [benchTool];
+  } else delete app.layers.L5;
   writeFileSync(setupFile, stringify(setup));
   const base = commit('setup');
   apos(0, 'probe every tool of the setup in a clean worktree', 'setup', 'probe', '--commit', base);
   apos(0, 'the Human approves the probed setup', 'setup', 'approve', '--commit', base, ...human);
-
-  apos(
-    0,
-    'the PM drafts the Goal from the brief',
-    'goal',
-    'create',
-    '--file',
-    join(source, 'goal.json'),
-    '--source',
-    join(source, 'brief.md'),
-  );
-  apos(
-    0,
-    'the Human approves the Goal and its appetite',
-    'goal',
-    'approve',
-    'GOAL-001',
-    '--size',
-    'M',
-    '--max-minutes',
-    '240',
-    '--max-attempts',
-    '5',
-    ...human,
-  );
-  apos(0, 'the Human selects it', 'goal', 'select', 'GOAL-001', ...human);
-  const plan = JSON.parse(readFileSync(join(source, 'plan.json'), 'utf8'));
-  const planFile = join(work, 'plan.json');
-  writeFileSync(planFile, JSON.stringify({ ...plan, baseCommit: base }));
-  apos(0, 'the Lead proposes a Solo plan', 'lead', 'propose', '--file', planFile);
-  apos(0, 'the Lead commits the plan: the Goal waits for locked tests', 'lead', 'commit', 'GOAL-001');
-
-  /** A branch from `parent` with the patch of `step` applied and committed: what that person would hand over. */
-  const step = (branch, parent, patch) => {
-    git('checkout', '-q', '-B', branch, parent);
-    git('apply', '--index', join(source, 'steps', `${patch}.patch`));
-    return commit(patch);
-  };
-  const locked = step('tester', 'main', '01-tests-and-stub');
-  apos(
-    0,
-    'the Tester hands over acceptance tests and a stub: red for the right reason, so they are locked',
-    'tests',
-    'submit',
-    'GOAL-001',
-    '--commit',
-    locked,
-  );
-
-  const edit = step('worker-edits-test', locked, '02-locked-test-edit');
-  expectText(
-    apos(
-      1,
-      'a Worker makes the test pass by weakening it: red',
-      'package',
-      'submit',
-      'GOAL-001',
-      'WP-MAIN',
-      '--commit',
-      edit,
-    ),
-    'locked test modified',
-  );
-  const buggy = step('worker-buggy', locked, '03-buggy-code');
-  expectText(
-    apos(
-      1,
-      'a Worker delivers code with a bug: the locked test is red',
-      'package',
-      'submit',
-      'GOAL-001',
-      'WP-MAIN',
-      '--commit',
-      buggy,
-    ),
-    'APOS-LOCKED fail',
-  );
-  const good = step('worker', locked, '04-correct-code');
-  expectText(
+  if (demo.story === 'bugfix') bugStory(base);
+  else {
     apos(
       0,
-      'a Worker delivers code that meets every acceptance test: green, the Goal is verified',
-      'package',
-      'submit',
-      'GOAL-001',
-      'WP-MAIN',
-      '--commit',
-      good,
-    ),
-    'verified',
-  );
-
-  const review = step('reviewer', good, '05-review-test');
-  expectText(
-    apos(
-      1,
-      'a Reviewer finds what the tests missed and says it with a test: it is red, so the package is blocked',
-      'review',
-      'block',
-      'GOAL-001',
-      'WP-MAIN',
-      '--commit',
-      review,
-      '--by',
-      'reviewer',
-    ),
-    'blocked by review',
-  );
-  const fixed = step('worker-fix', review, '06-final-fix');
-  expectText(
+      'the PM drafts the Goal from the brief',
+      'goal',
+      'create',
+      '--file',
+      join(source, 'goal.json'),
+      '--source',
+      join(source, 'brief.md'),
+    );
     apos(
       0,
-      'the final fix, built on the review commit: its test is locked and passes',
-      'package',
-      'submit',
+      'the Human approves the Goal and its appetite',
+      'goal',
+      'approve',
       'GOAL-001',
-      'WP-MAIN',
-      '--commit',
-      fixed,
-    ),
-    'verified',
-  );
-
-  expectText(
-    apos(
-      0,
-      'the Human closes the Goal: the close-stage layers (the benchmark among them) run on the verified commit',
-      'outcome',
-      'close',
-      'GOAL-001',
+      '--size',
+      'M',
+      '--max-minutes',
+      '240',
+      '--max-attempts',
+      '5',
       ...human,
-    ),
-    'Close-stage layers green',
-  );
-  apos(0, 'the assurance table: what the machine proved, and what it did not', 'goal', 'show', 'GOAL-001');
+    );
+    apos(0, 'the Human selects it', 'goal', 'select', 'GOAL-001', ...human);
+    const plan = JSON.parse(readFileSync(join(source, 'plan.json'), 'utf8'));
+    const planFile = join(work, 'plan.json');
+    writeFileSync(planFile, JSON.stringify({ ...plan, baseCommit: base }));
+    apos(0, 'the Lead proposes a Solo plan', 'lead', 'propose', '--file', planFile);
+    apos(0, 'the Lead commits the plan: the Goal waits for locked tests', 'lead', 'commit', 'GOAL-001');
+
+    /** A branch from `parent` with the patch of `step` applied and committed: what that person would hand over. */
+    const step = (branch, parent, patch) => {
+      git('checkout', '-q', '-B', branch, parent);
+      git('apply', '--index', join(source, 'steps', `${patch}.patch`));
+      return commit(patch);
+    };
+    const locked = step('tester', 'main', '01-tests-and-stub');
+    apos(
+      0,
+      'the Tester hands over acceptance tests and a stub: red for the right reason, so they are locked',
+      'tests',
+      'submit',
+      'GOAL-001',
+      '--commit',
+      locked,
+    );
+
+    const edit = step('worker-edits-test', locked, '02-locked-test-edit');
+    expectText(
+      apos(
+        1,
+        'a Worker makes the test pass by weakening it: red',
+        'package',
+        'submit',
+        'GOAL-001',
+        'WP-MAIN',
+        '--commit',
+        edit,
+      ),
+      'locked test modified',
+    );
+    const buggy = step('worker-buggy', locked, '03-buggy-code');
+    expectText(
+      apos(
+        1,
+        'a Worker delivers code with a bug: the locked test is red',
+        'package',
+        'submit',
+        'GOAL-001',
+        'WP-MAIN',
+        '--commit',
+        buggy,
+      ),
+      'APOS-LOCKED fail',
+    );
+    const good = step('worker', locked, '04-correct-code');
+    expectText(
+      apos(
+        0,
+        'a Worker delivers code that meets every acceptance test: green, the Goal is verified',
+        'package',
+        'submit',
+        'GOAL-001',
+        'WP-MAIN',
+        '--commit',
+        good,
+      ),
+      'verified',
+    );
+
+    const review = step('reviewer', good, '05-review-test');
+    expectText(
+      apos(
+        1,
+        'a Reviewer finds what the tests missed and says it with a test: it is red, so the package is blocked',
+        'review',
+        'block',
+        'GOAL-001',
+        'WP-MAIN',
+        '--commit',
+        review,
+        '--by',
+        'reviewer',
+      ),
+      'blocked by review',
+    );
+    const fixed = step('worker-fix', review, '06-final-fix');
+    expectText(
+      apos(
+        0,
+        'the final fix, built on the review commit: its test is locked and passes',
+        'package',
+        'submit',
+        'GOAL-001',
+        'WP-MAIN',
+        '--commit',
+        fixed,
+      ),
+      'verified',
+    );
+
+    expectText(
+      apos(
+        0,
+        'the Human closes the Goal: the close-stage layers (the benchmark among them) run on the verified commit',
+        'outcome',
+        'close',
+        'GOAL-001',
+        ...human,
+      ),
+      'Close-stage layers green',
+    );
+    apos(0, 'the assurance table: what the machine proved, and what it did not', 'goal', 'show', 'GOAL-001');
+  }
   console.log(`\ndemo ${name}: every step ended as expected.`);
 } catch (error) {
   console.error(`\ndemo ${name} FAILED: ${failed ?? (error instanceof Error ? error.message : String(error))}`);

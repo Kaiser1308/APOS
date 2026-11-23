@@ -1,0 +1,42 @@
+diff --git a/.apos/goals/GOAL-BUG-001/tests.json b/.apos/goals/GOAL-BUG-001/tests.json
+new file mode 100644
+index 0000000..ceac7f6
+--- /dev/null
++++ b/.apos/goals/GOAL-BUG-001/tests.json
+@@ -0,0 +1,8 @@
++[
++  {
++    "acceptanceId": "AC-1",
++    "part": "app",
++    "layer": "L2",
++    "testIds": ["src/orders.acceptance.test.ts::AC-1: the code FREE0 takes nothing off the total"]
++  }
++]
+diff --git a/src/orders.acceptance.test.ts b/src/orders.acceptance.test.ts
+new file mode 100644
+index 0000000..9ef1095
+--- /dev/null
++++ b/src/orders.acceptance.test.ts
+@@ -0,0 +1,10 @@
++import { expect, it } from 'vitest';
++import { orderTotal } from './orders.ts';
++
++it('AC-1: the code FREE0 takes nothing off the total', () => {
++  const cart = [
++    { sku: 'A', price: 10, qty: 3 },
++    { sku: 'B', price: 5, qty: 2 },
++  ];
++  expect(orderTotal(cart, 'FREE0')).toBe(40);
++});
+diff --git a/src/orders.ts b/src/orders.ts
+index 2f18cf1..5e1b93c 100644
+--- a/src/orders.ts
++++ b/src/orders.ts
+@@ -6,6 +6,6 @@ const DISCOUNTS: Record<string, number> = { SAVE10: 10, HALF: 50, FREE0: 0 };
+ /** The total of an order: the items, less the percent the discount code gives. A code that is not known gives nothing. */
+ export function orderTotal(items: Item[], code?: string): number {
+   const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);
+-  const percent = code === undefined ? 0 : DISCOUNTS[code] || 100;
++  const percent = code === undefined ? 0 : DISCOUNTS[code] ?? 0;
+   return subtotal - (subtotal * percent) / 100;
+ }

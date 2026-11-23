@@ -1,6 +1,6 @@
-# Demo: two example Goals, run for real
+# Demo: three example Goals, run for real
 
-`npm run demo:ts` and `npm run demo:py` copy an example from `examples/` to a temp directory, `git init` it and drive the **real** APOS binary (`dist/cli.js`, so run `npm run build` first) with a real test runner (vitest, pytest). Every step prints the command, its exit code and what APOS said, and checks the exit code it expected; a surprise exits 1. A machine without a tool the example needs (`git`, `npx`/vitest, `python`/pytest) stops at once with exit 2 and names it: the script never reports a pass it did not see. `--keep` leaves the temp directory in place. See `examples/README.md` for the files of an example.
+`npm run demo:ts`, `npm run demo:py` and `npm run demo:bug` copy an example from `examples/` to a temp directory, `git init` it and drive the **real** APOS binary (`dist/cli.js`, so run `npm run build` first) with a real test runner (vitest, pytest). Every step prints the command, its exit code and what APOS said, and checks the exit code it expected; a surprise exits 1. A machine without a tool the example needs (`git`, `npx`/vitest, `python`/pytest) stops at once with exit 2 and names it: the script never reports a pass it did not see. `--keep` leaves the temp directory in place. See `examples/README.md` for the files of an example.
 
 The story, in order: setup draft, probe, approve; Goal create, approve, select; the Lead proposes and commits a plan; the Tester submits the acceptance tests (locked); a delivery that edits a locked test is red; a delivery with wrong code is red; the right code is green; a reviewer blocks with a red test; the final fix (the review's test is now locked and green) is green; the Human closes the Goal; `goal show` prints the assurance table.
 
@@ -222,3 +222,101 @@ GOAL-001  setup v1  (app: python)
 demo py-parking: every step ended as expected.
 ```
 
+
+## A bug (`ts-bug`: the code `FREE0`, 0% off, makes an order's total 0)
+
+`npm run demo:bug` tells a different story: no Goal file, no plan file. `bug open` and `bug approve` replace `goal create`, `approve`, `select` and the plan; two Tester commits that do not reproduce the bug are refused (one is green on the bug, one also edits the code); then the usual flow. The story: setup; `bug open`; the inbox shows `apos bug approve`; the Human approves in one command; `lead propose --bugfix` and `lead commit`; the two refusals; the reproduction is locked; the fix is green; close; the assurance table says which test reproduced the bug. Output as printed:
+
+```text
+demo ts-bug: working in <tmp> (a temp directory; --keep leaves it)
+
+# init the project
+$ apos init  # exit 0
+Initialized <repo>
+
+# draft the setup from the catalog
+$ apos setup draft  # exit 0
+Wrote .apos/project.yaml: app
+Not committed. Edit it, commit it, then: apos setup probe --commit <sha>
+
+# probe every tool of the setup in a clean worktree
+$ apos setup probe --commit 2b5d805a53  # exit 0
+ok   app.L1 vitest: 2 tests, stable over 2 runs
+ok   app.L2 vitest-acceptance: 1 tests, runOne ok, stable over 2 runs
+ok   app.L3 vitest-integration: 1 tests, runOne ok
+ok   app.tests patterns: 11 patterns compile; tests under **/*.test.ts, **/*.spec.ts, tests/**
+setup b62a0e8889b0 at 2b5d805a53a3: probe passed
+
+# the Human approves the probed setup
+$ apos setup approve --commit 2b5d805a53 --on-behalf demo  # exit 0
+Approved setup v1 (b62a0e8889b0) at 2b5d805a53a3
+
+# the PM opens a bugfix Goal from what was seen
+$ apos bug open An order's total is 0 when the customer types the code FREE0, a code that gives 0% off --given a cart of 40 and the discount code FREE0 (0% off) --when the total of the order is computed --then the total is 40: a 0% code takes nothing off --repro-hint src/orders.ts  # exit 0
+Drafted GOAL-BUG-001 (bugfix)
+Next: the Human runs `apos bug approve GOAL-BUG-001`
+
+# it waits for the Human in the inbox
+$ apos inbox  # exit 0
+GOAL-BUG-001	awaiting-approval	gates A and B in one go: apos bug approve GOAL-BUG-001
+
+# the Human approves, sets the default appetite and selects, in one command
+$ apos bug approve GOAL-BUG-001 --on-behalf demo  # exit 0
+Approved and selected GOAL-BUG-001 on setup v1 (S, 60 min, 3 attempts)
+Next: the Lead plans it with `apos lead propose --bugfix --goal GOAL-BUG-001`
+
+# the Lead plans it: one Solo package, base is the current HEAD
+$ apos lead propose --bugfix --goal GOAL-BUG-001  # exit 0
+Proposed EXEC-BUG-001
+
+# the Lead commits the plan: the Goal waits for the reproduction test
+$ apos lead commit GOAL-BUG-001  # exit 0
+Accepted GOAL-BUG-001. Next the tester writes the acceptance tests and stubs: `apos tests submit GOAL-BUG-001 --commit <sha>`. Packages open once they are locked.
+
+# a Tester hands over a test that is green on the bug: it does not reproduce it, so it is refused
+$ apos tests submit GOAL-BUG-001 --commit f9db211021  # exit 1
+tests refused on f9db211021f5e2a4010bc31f44babdcc3c54ca56: nothing is locked
+  AC-1 app.L2 src/orders.acceptance.test.ts::AC-1: the code FREE0 takes nothing off the total: the test does not reproduce the bug (test không tái hiện lỗi): it is already green on the current code. Make it fail on the bug, for the reason in the bug report
+
+# a Tester who also edits the code is refused: only tests may change, so red here is red on the base
+$ apos tests submit GOAL-BUG-001 --commit 3f159b6c85  # exit 1
+tests refused on 3f159b6c85cd42a14ebe7c9db10487436632bc86: nothing is locked
+  src/orders.ts: bugfix: the Tester adds tests only (tests.paths and tests.json), never code, a stub or test infrastructure: the bug must be red on the code as it is
+  AC-1 app.L2 src/orders.acceptance.test.ts::AC-1: the code FREE0 takes nothing off the total: the test does not reproduce the bug (test không tái hiện lỗi): it is already green on the current code. Make it fail on the bug, for the reason in the bug report
+
+# the Tester hands over a test that fails on the bug as it is (only tests changed): it is locked
+$ apos tests submit GOAL-BUG-001 --commit ea72a7f506  # exit 0
+Locked 1 tests in 1 files on ea72a7f506e8d2db063122719ca624a5afdaa6cf. Packages are gated on top of this commit.
+
+# the Worker delivers the fix: the locked test is green, the Goal is verified
+$ apos package submit GOAL-BUG-001 WP-MAIN --commit ffa5865219  # exit 0
+WP-MAIN green on ffa5865219ef7252ae1027d389804fd12281952b; GOAL-BUG-001 verified
+  needs attention: declared risks: The test passes for another reason than the bug, or the fix reaches past the bug
+
+# the Human closes the Goal on the commit that passed the gate
+$ apos outcome close GOAL-BUG-001 --on-behalf demo  # exit 0
+Close-stage layers green on ffa5865219ef7252ae1027d389804fd12281952b
+close GOAL-BUG-001
+
+# the assurance table says which test reproduced the bug, red before and green after
+$ apos goal show GOAL-BUG-001  # exit 0
+GOAL-BUG-001	closed	An order's total is 0 when the customer types the code FREE0, a code that gives 0% off
+setup v1
+khoá test: commit ea72a7f506e8d2db063122719ca624a5afdaa6cf, 1 test, 1 file, 1 assert (đếm dòng, chỉ gần đúng)
+
+GOAL-BUG-001  setup v1  (app: typescript)
+  Tiêu chí           1   máy chứng minh 1 · anh xác nhận tay 0
+  Test đã khoá       L2 1
+  Kiểm kê / phạm vi  bật
+  Lớp khâu submit    WP-MAIN: L1 vitest ✓ · L2 vitest-acceptance ✓
+  Lớp khâu đóng      L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration ✓
+  Lỗi                lỗi được tái hiện bằng test app.L2::src/orders.acceptance.test.ts::AC-1: the code FREE0 takes nothing off the total: đỏ trên ed17be4, xanh trên ffa5865
+  Duyệt              duyệt gộp bằng bug approve (on-behalf:demo)
+  Agent duyệt thay   0 chỗ
+  Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L4 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L5 không chạy ở khâu close: setup không có công cụ cho lớp này
+
+demo ts-bug: every step ended as expected.
+```

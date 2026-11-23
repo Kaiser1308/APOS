@@ -28,7 +28,9 @@ if (!source || !existsSync(join(source, 'goal.json')))
 if (!existsSync(bin)) usage(`demo: ${bin} does not exist: run \`npm run build\` first`, 2);
 
 const demo = JSON.parse(readFileSync(join(source, 'demo.json'), 'utf8'));
-const works = (command, ...argv) => spawnSync(command, argv, { encoding: 'utf8', shell: false }).status === 0;
+// On Windows `npx` is `npx.cmd`, which node starts only through a shell.
+const works = (command, ...argv) =>
+  spawnSync(command, argv, { encoding: 'utf8', shell: process.platform === 'win32' }).status === 0;
 
 // What the example needs on this machine. Python is `python` on one system and `python3` on another.
 const missing = [];
@@ -38,8 +40,7 @@ for (const tool of demo.tools) {
   if (tool === 'python') {
     python = works('python', '--version') ? 'python' : works('python3', '--version') ? 'python3' : '';
     if (!python) missing.push('python (python or python3)');
-  } else if (!works(tool, '--version') && !(process.platform === 'win32' && works(`${tool}.cmd`, '--version')))
-    missing.push(tool);
+  } else if (!works(tool, '--version')) missing.push(tool);
 }
 const vitest = join(root, 'node_modules', '.bin', 'vitest');
 if (demo.tools.includes('npx') && !existsSync(vitest)) missing.push('vitest (run `npm ci` in the APOS repo)');

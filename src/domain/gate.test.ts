@@ -91,3 +91,16 @@ describe('gate shortfalls', () => {
     expect(sourceDigest('a\r\nb\r\n')).toBe(sourceDigest('a\nb\n'));
   });
 });
+
+describe('checks that read a standard report', () => {
+  const reported: CommandCheck = { ...regression, failurePattern: undefined, format: 'junit', report: 'r.xml' };
+  it('is unverifiable when the delivery report is unusable, even on exit 0', () => {
+    const bad = { ...run(0), reportProblem: 'junit report is empty' };
+    expect(evaluateCommandCheck(reported, [run(0)], [bad])).toMatchObject({ status: 'unverifiable' });
+    expect(evaluateCommandCheck({ ...reported, expect: 'pass' }, [], [bad]).reason).toMatch(/empty/);
+  });
+  it('is unverifiable when the baseline report is unusable', () => {
+    const bad = { ...run(0), reportProblem: 'no tests' };
+    expect(evaluateCommandCheck(reported, [bad], [run(0)]).reason).toMatch(/baseline report unusable/);
+  });
+});

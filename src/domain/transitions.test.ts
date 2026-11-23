@@ -255,3 +255,18 @@ describe('closing and the time budget', () => {
     expect(applyEvent(executingSolo(), inTime).packages?.[SOLO_PACKAGE_ID]?.status).toBe('submitted');
   });
 });
+
+describe('Goal pins a setup version at approval', () => {
+  it('records the pinned version, and a revision (which must be approved again) drops it', () => {
+    const approved = applyEvent(start(), event('goal-approved', { ...approval, setupVersion: 2 }));
+    expect(approved.setupVersion).toBe(2);
+    expect(applyEvent(start(), event('goal-approved', approval)).setupVersion).toBeUndefined();
+    const revised = applyEvent(approved, event('goal-revised', { ...spec, version: 2 }));
+    expect(revised.setupVersion).toBeUndefined();
+    expect(revised.status).toBe('draft');
+  });
+  it('refuses a pin that is not a positive integer', () => {
+    for (const setupVersion of [0, -1, 1.5, '1'])
+      expect(() => applyEvent(start(), event('goal-approved', { ...approval, setupVersion }))).toThrow(/setupVersion/);
+  });
+});

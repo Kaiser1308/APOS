@@ -110,7 +110,7 @@ details > summary { cursor:pointer; color:var(--accent); }
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
   function budget(g) {
     var a = g.appetite; if (!a) return "no appetite yet";
-    return "submit đỏ nhiều nhất ở một gói " + g.attempts + "/" + a.maxAttempts + ", " + g.elapsedMinutes + "/" + a.maxWallMinutes + " phút";
+    return "submit đỏ nhiều nhất ở một gói " + g.attempts + "/" + a.maxAttempts + ", " + g.elapsedMinutes + "/" + a.maxWallMinutes + " phút, " + (g.setupVersion ? "setup v" + g.setupVersion : "không có setup");
   }
   function get(path) {
     return fetch(path, { cache: "no-store" }).then(function (r) {

@@ -19,6 +19,8 @@ import {
   type GateEnvironment,
   type GateReport,
 } from '../domain/gate.js';
+import { reportFailures } from '../domain/results/failures.js';
+import { readToolReport } from './report-files.js';
 import { gateWarnings } from '../domain/reviews.js';
 import { UserError } from '../domain/errors.js';
 import { assertGitRoot } from '../store/project-history.js';
@@ -147,6 +149,7 @@ export class GateService {
       baseCommit: base,
       deliveryCommit: head,
       attemptKey: `${item.spec.id}@${item.spec.version}:${item.attempts}`,
+      ...(state.setupVersion === undefined ? {} : { setupVersion: state.setupVersion }),
       phase: 'delivery',
       changedFiles,
       warnings: gateWarnings({ spec: state.spec, proposal: state.proposal, changedFiles }),
@@ -228,6 +231,7 @@ export class GateService {
       baseCommit,
       deliveryCommit: input.deliveryCommit,
       attemptKey: attempt,
+      ...(state.setupVersion === undefined ? {} : { setupVersion: state.setupVersion }),
       phase,
       changedFiles,
       warnings: phase === 'delivery' ? gateWarnings({ spec: state.spec, proposal: state.proposal, changedFiles }) : [],
@@ -267,6 +271,13 @@ export class GateService {
     const first = evaluateCommandCheck(check, base, this.runMany(check, repoPath, commit, 'delivery', artifacts));
     if (first.status !== 'fail' || check.expect !== 'no-new-failures' || !first.newFailures.length) return first;
     const [again] = this.runMany({ ...check, runs: 1 }, repoPath, commit, 'recheck', artifacts);
+    if (again?.reportProblem)
+      return {
+        ...first,
+        delivery: [...first.delivery, again],
+        status: 'unverifiable',
+        reason: `the recheck of the new failure(s) has an unusable report: ${again.reportProblem}`,
+      };
     const seen = new Set(again && !again.timedOut ? again.failures : first.newFailures);
     const persistent = first.newFailures.filter(item => seen.has(item));
     const delivery = again ? [...first.delivery, again] : first.delivery;
@@ -297,8 +308,10 @@ export class GateService {
     for (let n = 1; n <= check.runs; n++) {
       const workspace = this.workspaces.checkout(repoPath, commit);
       try {
-        const result = this.executor.run(check.command, workspace.path, check.env, check.timeoutMs);
-        const log = `$ ${check.command}\n# commit ${commit} (${role} run ${n}), shell ${this.executor.shell}\n${workspace.preparation ? `${workspace.preparation}\n` : ''}${result.output}\n# exit ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}\n`;
+        const tempReport = join(artifacts, `${check.id}-${role}-${n}.report`).replaceAll('\\', '/');
+        const command = check.command.replaceAll('{report}', tempReport);
+        const result = this.executor.run(command, workspace.path, check.env, check.timeoutMs);
+        const log = `$ ${command}\n# commit ${commit} (${role} run ${n}), shell ${this.executor.shell}\n${workspace.preparation ? `${workspace.preparation}\n` : ''}${result.output}\n# exit ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}\n`;
         const logRef = join(artifacts, `${check.id}-${role}-${n}.log`);
         writeFileSync(logRef, log);
         runs.push({
@@ -307,12 +320,32 @@ export class GateService {
           timedOut: result.timedOut,
           logRef,
           logSha256: createHash('sha256').update(log).digest('hex'),
-          failures: extractFailures(result.output, check.failurePattern),
+          ...this.failuresOf(check, result.output, workspace.path, tempReport),
         });
       } finally {
         workspace.dispose();
       }
     }
     return runs;
+  }
+
+  /** Failures from the standard report when the check has a `format`, else from the output by `failurePattern`. */
+  private failuresOf(
+    check: CommandCheck,
+    output: string,
+    workspace: string,
+    tempReport: string,
+  ): Pick<CheckRun, 'failures' | 'reportProblem'> {
+    if (!check.format) return { failures: extractFailures(output, check.failurePattern) };
+    const outcome = reportFailures(
+      readToolReport({
+        format: check.format,
+        command: check.command,
+        report: check.report,
+        cwd: workspace,
+        tempReport,
+      }),
+    );
+    return 'problem' in outcome ? { failures: [], reportProblem: outcome.problem } : { failures: outcome.failures };
   }
 }

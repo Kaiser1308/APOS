@@ -33,19 +33,19 @@ export function controllerHome(
   );
 }
 
-type Line = { event: GoalEvent; prev: string; hash: string };
+type Line<E = GoalEvent> = { event: E; prev: string; hash: string };
 const GENESIS = '0'.repeat(64);
-const chain = (prev: string, event: GoalEvent) =>
+const chain = (prev: string, event: unknown) =>
   createHash('sha256').update(prev).update(JSON.stringify(event)).digest('hex');
 
 /** Parses and verifies complete JSONL lines; any corrupt line or break in the chain is reported as tampering. */
-export function verifyChain(goalId: string, complete: string[]): Line[] {
-  const lines: Line[] = [];
+export function verifyChain<E = GoalEvent>(goalId: string, complete: string[]): Line<E>[] {
+  const lines: Line<E>[] = [];
   let prev = GENESIS;
   for (const [index, text] of complete.entries()) {
-    let line: Line;
+    let line: Line<E>;
     try {
-      line = JSON.parse(text) as Line;
+      line = JSON.parse(text) as Line<E>;
     } catch {
       throw new Error(`APOS event log ${goalId} is corrupt at line ${index + 1}`);
     }
@@ -58,17 +58,55 @@ export function verifyChain(goalId: string, complete: string[]): Line[] {
 }
 
 /**
- * Append-only, fsync'd, hash-chained event log: one JSONL file per Goal. A torn final line (crash
- * mid-write) is dropped on read; any other break in the chain is reported as tampering.
+ * One append-only, fsync'd, hash-chained JSONL file. A torn final line (crash mid-write) is dropped on
+ * read; any other break in the chain is reported as tampering.
  */
+export class ChainFile<E> {
+  constructor(
+    private readonly path: string,
+    private readonly name: string,
+  ) {}
+
+  private lines(repair = true): Line<E>[] {
+    if (!existsSync(this.path)) return [];
+    const raw = readFileSync(this.path, 'utf8');
+    const parts = raw.split('\n');
+    const complete = parts.slice(0, -1);
+    const torn = raw.endsWith('\n') ? '' : parts.at(-1)!;
+    if (torn && repair) truncateSync(this.path, Buffer.byteLength(raw) - Buffer.byteLength(torn));
+    return verifyChain<E>(this.name, complete);
+  }
+
+  read(): E[] {
+    return this.lines().map(line => line.event);
+  }
+
+  /** Like `read`, but never writes: a torn final line is ignored, not truncated. */
+  peek(): E[] {
+    return this.lines(false).map(line => line.event);
+  }
+
+  append(event: E): void {
+    const prev = this.lines().at(-1)?.hash ?? GENESIS;
+    const fd = openSync(this.path, 'a');
+    try {
+      writeSync(fd, `${JSON.stringify({ event, prev, hash: chain(prev, event) } satisfies Line<E>)}\n`);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  }
+}
+
+/** One chained log per Goal under `events/`. */
 export class EventLog {
   constructor(readonly dir: string) {
     mkdirSync(join(dir, 'events'), { recursive: true });
   }
 
-  private file(goalId: string): string {
+  private file(goalId: string): ChainFile<GoalEvent> {
     if (!/^GOAL-[A-Z0-9-]+$/.test(goalId)) throw new Error('Invalid Goal identity');
-    return join(this.dir, 'events', `${goalId}.jsonl`);
+    return new ChainFile(join(this.dir, 'events', `${goalId}.jsonl`), goalId);
   }
 
   goals(): string[] {
@@ -78,30 +116,11 @@ export class EventLog {
       .sort();
   }
 
-  private lines(goalId: string): Line[] {
-    const path = this.file(goalId);
-    if (!existsSync(path)) return [];
-    const raw = readFileSync(path, 'utf8');
-    const parts = raw.split('\n');
-    const complete = raw.endsWith('\n') ? parts.slice(0, -1) : parts.slice(0, -1);
-    const torn = raw.endsWith('\n') ? '' : parts.at(-1)!;
-    if (torn) truncateSync(path, Buffer.byteLength(raw) - Buffer.byteLength(torn));
-    return verifyChain(goalId, complete);
-  }
-
   read(goalId: string): GoalEvent[] {
-    return this.lines(goalId).map(line => line.event);
+    return this.file(goalId).read();
   }
 
   append(event: GoalEvent): void {
-    const prior = this.lines(event.goalId);
-    const prev = prior.at(-1)?.hash ?? GENESIS;
-    const fd = openSync(this.file(event.goalId), 'a');
-    try {
-      writeSync(fd, `${JSON.stringify({ event, prev, hash: chain(prev, event) } satisfies Line)}\n`);
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
+    this.file(event.goalId).append(event);
   }
 }

@@ -52,7 +52,8 @@ const acceptanceSchema = z.object({
 /**
  * A check the controller runs itself. `expect: 'pass'` means the command must exit 0 on the delivery commit.
  * `expect: 'no-new-failures'` runs base and delivery and fails only on failures that are new at delivery;
- * failure identities come from `failurePattern` (regex, capture group 1 = test id, one match per failure).
+ * failure identities come from `failurePattern` (regex, capture group 1 = test id, one match per failure),
+ * or, with `format`, from the failed and errored tests of the standard report the command writes.
  */
 const checkSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -61,6 +62,10 @@ const checkSchema = z.discriminatedUnion('kind', [
     command: namedText,
     expect: z.enum(['pass', 'no-new-failures']),
     failurePattern: namedText.optional(),
+    /** Read failures from a standard report instead of `failurePattern`. */
+    format: z.enum(['junit', 'apos-json']).optional(),
+    /** Report location: a path or glob relative to the worktree. Without it, the command must contain `{report}`. */
+    report: namedText.optional(),
     runs: z.number().int().min(1).max(5).default(1),
     timeoutMs: z.number().int().min(1000).max(3_600_000).default(600_000),
     env: z.record(z.string(), z.string()).default({}),
@@ -122,8 +127,10 @@ const goalSchema = z
         if (!checks.has(checkId)) issue(['acceptance', index], `Acceptance ${item.id} names unknown check ${checkId}`);
     }
     for (const [index, item] of goal.checks.entries()) {
+      if (item.kind === 'command' && item.format && !item.report && !item.command.includes('{report}'))
+        issue(['checks', index], `Check ${item.id} has a report format but no report path or {report} in its command`);
       if (item.kind !== 'command' || !item.failurePattern) {
-        if (item.kind === 'command' && item.expect === 'no-new-failures')
+        if (item.kind === 'command' && item.expect === 'no-new-failures' && !item.format)
           issue(['checks', index], `Check ${item.id} needs failurePattern to compare base and delivery failures`);
         continue;
       }

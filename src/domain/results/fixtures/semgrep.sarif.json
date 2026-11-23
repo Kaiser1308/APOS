@@ -1,0 +1,18 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": { "driver": { "name": "semgrep", "rules": [] } },
+      "results": [
+        {
+          "ruleId": "javascript.lang.security.audit.eval",
+          "message": { "text": "eval is dangerous" },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "web/app.js" }, "region": { "startLine": 12 } } }
+          ]
+        },
+        { "ruleId": "generic.secrets.token", "level": "note", "message": { "text": "token" } }
+      ]
+    }
+  ]
+}

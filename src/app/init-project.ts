@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { jsonCodec, type SetupCodec } from '../domain/setup-codec.js';
 import { assertGitRoot } from '../store/project-history.js';
 
 /** The skill/controller contract this build implements; every APOS skill declares it in frontmatter. */
@@ -41,13 +42,13 @@ export function resolveSkills(skillsRoot: string = process.env.APOS_SKILLS || BU
   };
 }
 
-export async function initProject(repoPath: string, skillsRoot?: string): Promise<void> {
+export async function initProject(repoPath: string, skillsRoot?: string, codec: SetupCodec = jsonCodec): Promise<void> {
   const repo = assertGitRoot(repoPath);
   const skills = resolveSkills(skillsRoot);
   const dir = join(repo, '.apos');
   mkdirSync(join(dir, 'goals'), { recursive: true });
   const config = join(dir, 'project.yaml');
-  if (!existsSync(config)) writeFileSync(config, 'schemaVersion: 1\n', 'utf8');
+  if (!existsSync(config)) writeFileSync(config, codec.stringify({ schemaVersion: 2, parts: {} }), 'utf8');
   const ignore = join(dir, '.gitignore');
   if (!existsSync(ignore)) writeFileSync(ignore, 'state.sqlite*\n', 'utf8');
   const files = [config, ignore];

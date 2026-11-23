@@ -21,6 +21,8 @@ import {
   type DocumentUpdate,
 } from './project-history.js';
 import { EventLog, controllerHome } from './event-log.js';
+import { ProjectLog } from './project-log.js';
+import type { ProjectEvent, SetupHistory } from '../domain/setup-history.js';
 import { SqliteStore } from './sqlite.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
@@ -42,6 +44,7 @@ export const MILESTONES: ReadonlySet<string> = new Set<GoalEventType>([
 export class ProjectJournal implements GoalRepository {
   readonly home: string;
   private readonly log: EventLog;
+  private readonly projectLog: ProjectLog;
 
   constructor(
     private readonly repoPath: string,
@@ -52,6 +55,7 @@ export class ProjectJournal implements GoalRepository {
     assertGitRoot(repoPath);
     this.home = home ?? controllerHome(repoPath);
     this.log = new EventLog(this.home);
+    this.projectLog = new ProjectLog(this.home);
     withLock(this.home, () => this.rebuildIndex());
   }
 
@@ -107,6 +111,20 @@ export class ProjectJournal implements GoalRepository {
     return path && existsSync(path) ? sourceDigest(readFileSync(path, 'utf8')) : undefined;
   }
 
+  /** The project-level stream (`_project`): setup probes and approvals, oldest first. */
+  projectEvents(): ProjectEvent[] {
+    return this.projectLog.read();
+  }
+
+  setupHistory(): SetupHistory {
+    return this.projectLog.history();
+  }
+
+  /** Appends a setup probe or approval; an approval without a passing probe of the same sha256 is refused. */
+  appendProjectEvent(event: ProjectEvent): void {
+    withLock(this.home, () => this.projectLog.append(event));
+  }
+
   artifactRoot(): string {
     return join(this.home, 'artifacts');
   }
@@ -122,6 +140,11 @@ export class ProjectJournal implements GoalRepository {
       );
     if (MILESTONES.has(event.type) && !this.createEvent)
       throw new Error('Controller event factory required to publish milestones');
+    if (event.type === 'goal-approved') {
+      const pinned = (event.data as { setupVersion?: number } | undefined)?.setupVersion;
+      if (pinned !== undefined && !this.projectLog.history().approvals.some(item => item.version === pinned))
+        throw new UserError(`Setup version ${pinned} was never approved: a Goal can only pin an approved setup`);
+    }
     const next = applyEvent(this.store.getGoal(event.goalId), event);
     this.log.append(event);
     this.store.append(event);

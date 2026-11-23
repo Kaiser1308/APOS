@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="4" failures="1" errors="0" time="0.02">
+    <testsuite name="src/math.test.ts" timestamp="2026-11-22T17:39:07.705Z" hostname="host" tests="4" failures="1" errors="0" skipped="1" time="0.02">
+        <testcase classname="src/math.test.ts" name="add &gt; adds two numbers" time="0.001">
+        </testcase>
+        <testcase classname="src/math.test.ts" name="add &gt; rejects &quot;NaN&quot;" time="0.001">
+            <failure message="expected 1 to be 2" type="AssertionError">
+AssertionError: expected 1 to be 2
+ ❯ src/math.test.ts:9:17
+            </failure>
+        </testcase>
+        <testcase classname="src/math.test.ts" name="sub" time="0.001">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/math.test.ts" name="mul" time="0.001">
+        </testcase>
+    </testsuite>
+</testsuites>

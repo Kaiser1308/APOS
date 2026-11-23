@@ -6,6 +6,7 @@ import { registerLead } from './cli/commands/lead.js';
 import { registerOutcome } from './cli/commands/outcome.js';
 import { registerPackage } from './cli/commands/package.js';
 import { registerSetup } from './cli/commands/setup.js';
+import { registerSetupFlow } from './cli/commands/setup-flow.js';
 import { createContext } from './cli/context.js';
 import type { CliOptions } from './cli/options.js';
 
@@ -20,6 +21,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     .option('--repo <path>', 'managed Git project', process.cwd());
   const ctx = createContext(program, options);
   registerSetup(ctx);
+  registerSetupFlow(ctx);
   registerGoal(ctx);
   registerLead(ctx);
   registerPackage(ctx);

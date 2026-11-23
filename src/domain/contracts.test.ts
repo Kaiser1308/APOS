@@ -61,6 +61,15 @@ describe('Goal contract', () => {
       runs: 1,
     });
   });
+  it('lets a standard report replace the failure pattern, if it says where the report is', () => {
+    const check = { id: 'CHK-1', kind: 'command', command: 'pytest', expect: 'no-new-failures', format: 'junit' };
+    expect(() => parseGoalSpec({ ...goal, checks: [check] })).toThrow(/no report path/);
+    expect(parseGoalSpec({ ...goal, checks: [{ ...check, report: 'r.xml' }] }).checks[0]).toMatchObject({
+      format: 'junit',
+    });
+    const inCommand = { ...check, command: 'pytest --junitxml={report}' };
+    expect(parseGoalSpec({ ...goal, checks: [inCommand] }).checks[0]).toMatchObject({ format: 'junit' });
+  });
 });
 
 describe('Goal approval readiness', () => {

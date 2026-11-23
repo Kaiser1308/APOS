@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyEvent, type GoalEvent, type GoalState } from '../domain/transitions.js';
 import { verifyChain } from './event-log.js';
+import { readProjectEvents } from './project-log.js';
+import type { ProjectEvent } from '../domain/setup-history.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
 const GOAL_FILE = /^GOAL-[A-Z0-9-]+\.jsonl$/;
@@ -51,6 +53,14 @@ export class ReadOnlyJournal implements GoalRepository {
   }
   events(id: string): GoalEvent[] {
     return this.loaded.get(id)?.events ?? [];
+  }
+  /** The project-level stream, or [] when absent or broken (a broken chain must not take the UI down). */
+  projectEvents(): ProjectEvent[] {
+    try {
+      return readProjectEvents(this.home);
+    } catch {
+      return [];
+    }
   }
   append(): never {
     throw new Error('The UI journal is read-only');

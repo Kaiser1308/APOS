@@ -1,0 +1,84 @@
+{
+  "stack": "python",
+  "notes": [
+    "verified: pytest 9.0.2 (-o junit_family=xunit1 gives the file attribute; runOne by node id \"file::Class::name\"). Not verified: ruff (--output-format sarif), mypy, bandit."
+  ],
+  "detect": {
+    "files": ["pyproject.toml"]
+  },
+  "layers": {
+    "L0": [
+      {
+        "id": "ruff",
+        "command": "ruff check --output-format sarif --output-file {report} .",
+        "format": "sarif"
+      },
+      {
+        "id": "mypy",
+        "command": "mypy .",
+        "format": "exit"
+      }
+    ],
+    "L1": [
+      {
+        "id": "pytest",
+        "command": "pytest -o junit_family=xunit1 --junitxml={report} --ignore=tests/acceptance --ignore=tests/integration",
+        "format": "junit"
+      }
+    ],
+    "L2": [
+      {
+        "id": "pytest-acceptance",
+        "command": "pytest -o junit_family=xunit1 tests/acceptance --junitxml={report}",
+        "format": "junit",
+        "runOne": "pytest -o junit_family=xunit1 \"{file}::{within}{name}\" --junitxml={report}"
+      }
+    ],
+    "L3": [
+      {
+        "id": "pytest-integration",
+        "command": "pytest -o junit_family=xunit1 tests/integration --junitxml={report}",
+        "format": "junit",
+        "runOne": "pytest -o junit_family=xunit1 \"{file}::{within}{name}\" --junitxml={report}"
+      }
+    ],
+    "L5": [
+      {
+        "id": "bandit",
+        "command": "bandit -r . -f sarif -o {report}",
+        "format": "sarif"
+      }
+    ]
+  },
+  "loadErrorPatterns": [
+    "^collection failure",
+    "ImportError while importing test module",
+    "ModuleNotFoundError",
+    "SyntaxError"
+  ],
+  "assertPatterns": [
+    "^\\s*assert\\b",
+    "\\bself\\.assert\\w+\\s*\\(",
+    "\\bpytest\\.raises\\s*\\(",
+    "\\bpytest\\.warns\\s*\\("
+  ],
+  "notImplementedPatterns": ["NotImplementedError", "not implemented"],
+  "forbid": [
+    "@pytest\\.mark\\.(?:skip|skipif|xfail)",
+    "\\bpytest\\.(?:skip|xfail)\\s*\\(",
+    "@unittest\\.(?:skip|expectedFailure)",
+    "#\\s*type:\\s*ignore",
+    "#\\s*nosec"
+  ],
+  "needsHuman": [
+    "pyproject.toml",
+    "requirements*.txt",
+    "setup.py",
+    "setup.cfg",
+    "tox.ini",
+    "pytest.ini",
+    "poetry.lock",
+    "uv.lock",
+    ".github/**"
+  ]
+}

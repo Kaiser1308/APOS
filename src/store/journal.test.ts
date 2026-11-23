@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProjectJournal } from './journal.js';
 import { spec, proposal, sourceText, approval } from '../domain/fixtures.test-support.js';
+import { parseProjectSetup } from '../domain/project-setup.js';
+import { jsonCodec } from '../domain/setup-codec.js';
 import { initProject } from '../app/init-project.js';
 import { newEvent } from '../app/events.js';
 import type { GoalEventType } from '../domain/transitions.js';
@@ -163,4 +165,37 @@ it('refuses to append an orchestration event, or anything at all to a legacy Goa
   ).toThrow(/legacy Goal.*read-only/);
   expect(readFileSync(join(events, 'GOAL-001.jsonl'), 'utf8')).toBe(before);
   opened.close();
+});
+
+it('keeps setup probes and approvals in the _project stream, which survives reopening and is not a Goal', async () => {
+  const { dir, home, journal, close } = await project();
+  const sha256 = 'd'.repeat(64);
+  const commit = 'e'.repeat(40);
+  journal.appendProjectEvent({
+    id: 'PE-1',
+    type: 'setup-probed',
+    at,
+    data: { sha256, commit, ok: true, results: [] },
+  });
+  journal.appendProjectEvent({
+    id: 'PE-2',
+    type: 'setup-approved',
+    at,
+    data: { version: 1, sha256, commit, confirmation: { by: 'human' } },
+  });
+  expect(journal.setupHistory().latest?.version).toBe(1);
+  expect(journal.listGoals()).toEqual([]);
+  close();
+  const reopened = ProjectJournal.open(dir, home);
+  expect(reopened.journal.projectEvents().map(item => item.id)).toEqual(['PE-1', 'PE-2']);
+  reopened.close();
+});
+
+it('writes a v2 setup with no parts when initializing a project', async () => {
+  const { dir, close } = await project();
+  expect(parseProjectSetup(readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8'), jsonCodec)).toMatchObject({
+    version: 2,
+    setup: { parts: {} },
+  });
+  close();
 });

@@ -10,7 +10,7 @@ import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
 
 export function registerGoal(ctx: CliContext): void {
-  const { program, write, withJournal, withJournalAsync, assertHuman, goalWithSource } = ctx;
+  const { program, write, writeError, withJournal, withJournalAsync, assertHuman, goalWithSource } = ctx;
   const goal = program.command('goal');
   goal
     .command('create')
@@ -28,7 +28,10 @@ export function registerGoal(ctx: CliContext): void {
     withJournal(journal => {
       const goals = journal.listGoals();
       if (!goals.length) write('No Goals yet. Draft one with `apos goal create --file goal.json --source brief.md`.');
-      for (const state of goals) write(`${state.spec.id}\t${state.status}\t${state.spec.outcome}`);
+      for (const state of goals)
+        write(
+          `${state.spec.id}\t${state.status}\t${state.spec.outcome}\t${state.setupVersion === undefined ? 'không có setup' : `setup v${state.setupVersion}`}`,
+        );
     }),
   );
   // Gate A: the Human approves WHAT, together with the appetite only the controller will see.
@@ -60,14 +63,30 @@ export function registerGoal(ctx: CliContext): void {
       overrun: flags.overrun,
     };
   };
-  appetiteOptions(goal.command('approve').argument('<id>')).action((id: string, flags: AppetiteFlags) =>
-    withJournalAsync(async journal => {
-      const appetite = parseAppetite(appetiteOf(flags));
-      const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
-      new GoalRegistryService(journal).approve(id, appetite, undefined, confirmation);
-      write(`Approved ${id}`);
-    }),
-  );
+  appetiteOptions(goal.command('approve').argument('<id>'))
+    .option('--setup-version <n|latest>', 'approved setup version to pin the Goal to', 'latest')
+    .action((id: string, flags: AppetiteFlags & { setupVersion: string }) =>
+      withJournalAsync(async journal => {
+        const appetite = parseAppetite(appetiteOf(flags));
+        const approvals = journal.setupHistory().approvals;
+        let setupVersion: number | undefined;
+        if (flags.setupVersion === 'latest') setupVersion = approvals.at(-1)?.version;
+        else {
+          setupVersion = Number(flags.setupVersion);
+          if (!approvals.some(item => item.version === setupVersion))
+            throw new UserError(
+              `Setup version ${flags.setupVersion} was never approved (approved: ${approvals.map(item => item.version).join(', ') || 'none'})`,
+            );
+        }
+        const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
+        new GoalRegistryService(journal).approve(id, appetite, undefined, confirmation, setupVersion);
+        write(`Approved ${id}${setupVersion === undefined ? '' : ` on setup v${setupVersion}`}`);
+        if (setupVersion === undefined)
+          writeError(
+            'Goal không có setup: bảo đảm theo setup tắt (approve một setup bằng apos setup approve rồi duyệt lại)',
+          );
+      }),
+    );
   appetiteOptions(goal.command('appetite').argument('<id>'))
     .requiredOption('--reason <text>')
     .action((id: string, flags: AppetiteFlags & { reason: string }) =>

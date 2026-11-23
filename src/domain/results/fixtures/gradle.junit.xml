@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.CartAcceptanceTest" tests="3" skipped="1" failures="0" errors="1" timestamp="2026-11-22T03:00:00" hostname="ci" time="0.123">
+  <properties/>
+  <testcase name="totalsItems()" classname="com.example.CartAcceptanceTest" time="0.05"/>
+  <testcase name="brokenSetup()" classname="com.example.CartAcceptanceTest" time="0.01">
+    <error message="java.lang.IllegalStateException: no db" type="java.lang.IllegalStateException">java.lang.IllegalStateException: no db
+	at com.example.Db.open(Db.java:10)
+</error>
+  </testcase>
+  <testcase name="later()" classname="com.example.CartAcceptanceTest" time="0.0">
+    <skipped/>
+  </testcase>
+  <system-out><![CDATA[log line with <angle> & ampersand]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

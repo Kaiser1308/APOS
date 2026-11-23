@@ -48,7 +48,7 @@ const spec: GoalSpec = {
   acceptance: [{ ...baseSpec.acceptance[0], checkIds: ['CHK-1', 'CHK-REG'] }],
 };
 
-async function project() {
+async function project(goalSpec: GoalSpec = spec) {
   const dir = mkdtempSync(join(tmpdir(), 'apos-gate-repo-'));
   dirs.push(dir);
   const artifacts = mkdtempSync(join(tmpdir(), 'apos-gate-art-'));
@@ -70,7 +70,7 @@ async function project() {
   const add = (type: GoalEventType, data?: unknown) =>
     journal.append({ id: `EV-${++n}`, goalId: spec.id, type, data, at: '2026-11-07T00:00:00.000Z' });
   journal.appendWithSource(
-    { id: `EV-${++n}`, goalId: spec.id, type: 'goal-drafted', data: spec, at: '2026-11-07T00:00:00.000Z' },
+    { id: `EV-${++n}`, goalId: spec.id, type: 'goal-drafted', data: goalSpec, at: '2026-11-07T00:00:00.000Z' },
     sourceText,
   );
   const base = git('rev-parse', 'HEAD');
@@ -87,6 +87,88 @@ async function project() {
   const gate = new GateService(journal, { artifactRoot: artifacts });
   return { dir, git, base, commit, gate, journal, add, artifacts, home };
 }
+
+/** Writes a JUnit report to the path in argv[2] (or to reports/ when it has none): fails the tests named in fail.txt. */
+const junitRunner =
+  "const fs=require('fs');const f=fs.existsSync('fail.txt')?fs.readFileSync('fail.txt','utf8').split(/\\r?\\n/).filter(Boolean):[];if(fs.existsSync('norep.txt'))process.exit(f.length?1:0);const all=['a','b','c'].concat(f.filter(x=>!['a','b','c'].includes(x)));const cases=all.map(n=>'<testcase classname=\"suite\" name=\"'+n+'\">'+(f.includes(n)?'<failure message=\"boom\"/>':'')+'</testcase>').join('');const xml=fs.existsSync('broken.txt')?'<testsuite><testcase':'<testsuite name=\"suite\">'+cases+'</testsuite>';const out=process.argv[2]||'reports/junit.xml';fs.mkdirSync(require('path').dirname(out),{recursive:true});fs.writeFileSync(out,xml);process.exit(f.length?1:0);";
+/** Like junitRunner, but the third call (base, delivery, then the recheck) writes a broken report; argv[3] counts calls. */
+const countingRunner =
+  "const fs=require('fs');const [out,counter]=process.argv.slice(2);const n=fs.existsSync(counter)?Number(fs.readFileSync(counter,'utf8')):0;fs.writeFileSync(counter,String(n+1));const f=fs.existsSync('fail.txt')?fs.readFileSync('fail.txt','utf8').split(/\\r?\\n/).filter(Boolean):[];const cases=['a'].concat(f).map(x=>'<testcase classname=\"suite\" name=\"'+x+'\">'+(f.includes(x)?'<failure message=\"boom\"/>':'')+'</testcase>').join('');fs.writeFileSync(out,n>=2?'<testsuite><testcase':'<testsuite name=\"suite\">'+cases+'</testsuite>');process.exit(f.length?1:0);";
+const junitSpec = (command: string, report?: string): GoalSpec => ({
+  ...baseSpec,
+  checks: [
+    { id: 'CHK-1', kind: 'command', command: 'node harness.js', expect: 'pass', runs: 1, timeoutMs: 60_000, env: {} },
+    {
+      id: 'CHK-REG',
+      kind: 'command',
+      command,
+      expect: 'no-new-failures',
+      format: 'junit',
+      ...(report ? { report } : {}),
+      runs: 1,
+      timeoutMs: 60_000,
+      env: {},
+    },
+  ],
+  acceptance: [{ ...baseSpec.acceptance[0], checkIds: ['CHK-1', 'CHK-REG'] }],
+});
+
+describe('checks that read a standard report', () => {
+  const regression = (report: ReturnType<GateService['run']>) =>
+    report.checks.find(item => item.checkId === 'CHK-REG')!;
+  const setup = async (command: string, reportPath?: string) => {
+    const made = await project(junitSpec(command, reportPath));
+    const runnerCommit = made.commit({ 'junit-runner.js': junitRunner, 'fail.txt': '' }, 'junit runner');
+    return { ...made, runnerCommit };
+  };
+  it('counts only tests that are new failures, from the {report} file APOS provides', async () => {
+    const { dir, commit, gate, runnerCommit } = await setup('node junit-runner.js {report}');
+    const delivery = commit({ 'feature.js': 'process.exit(0);', 'fail.txt': 'new-one\n' }, 'feature');
+    const base = gate.run(baseSpec.id, dir, { deliveryCommit: delivery, baseCommit: runnerCommit });
+    expect(base.result).toBe('red');
+    expect(regression(base).newFailures).toEqual(['suite::new-one']);
+  }, 60_000);
+  it('passes when a failure was already there on base (no failurePattern needed)', async () => {
+    const { dir, commit, gate } = await setup('node junit-runner.js {report}');
+    const withOld = commit({ 'fail.txt': 'old\n' }, 'base failure');
+    const delivery = commit({ 'feature.js': 'process.exit(0);' }, 'feature');
+    const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery, baseCommit: withOld });
+    expect(regression(report).status).toBe('pass');
+    expect(regression(report).reason).toMatch(/already present on base/);
+  }, 60_000);
+  it('is unverifiable, not green, when the recheck of a new failure has an unusable report', async () => {
+    const counter = join(mkdtempSync(join(tmpdir(), 'apos-recheck-')), 'n').replaceAll('\\', '/');
+    dirs.push(join(counter, '..'));
+    const made = await project(junitSpec(`node counting-runner.js {report} ${counter}`));
+    const runnerCommit = made.commit({ 'counting-runner.js': countingRunner, 'fail.txt': '' }, 'runner');
+    const delivery = made.commit({ 'feature.js': 'process.exit(0);', 'fail.txt': 'new-one\n' }, 'feature');
+    const report = made.gate.run(baseSpec.id, made.dir, { deliveryCommit: delivery, baseCommit: runnerCommit });
+    expect(regression(report).status).toBe('unverifiable');
+    expect(regression(report).reason).toMatch(/recheck .* unusable report/);
+    expect(report.result).toBe('unverifiable');
+  }, 60_000);
+  it('reads a report the command writes at a relative path', async () => {
+    const { dir, commit, gate, runnerCommit } = await setup('node junit-runner.js', 'reports/junit.xml');
+    const delivery = commit({ 'feature.js': 'process.exit(0);', 'fail.txt': 'x\n' }, 'feature');
+    expect(
+      regression(gate.run(baseSpec.id, dir, { deliveryCommit: delivery, baseCommit: runnerCommit })).newFailures,
+    ).toEqual(['suite::x']);
+  }, 60_000);
+  it('is unverifiable when the report is missing', async () => {
+    const { dir, commit, gate, runnerCommit } = await setup('node junit-runner.js {report}');
+    const delivery = commit({ 'feature.js': 'process.exit(0);', 'norep.txt': '' }, 'feature');
+    const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery, baseCommit: runnerCommit });
+    expect(regression(report).status).toBe('unverifiable');
+    expect(report.result).toBe('unverifiable');
+  }, 60_000);
+  it('is unverifiable when the report is broken XML', async () => {
+    const { dir, commit, gate, runnerCommit } = await setup('node junit-runner.js {report}');
+    const delivery = commit({ 'feature.js': 'process.exit(0);', 'broken.txt': '' }, 'feature');
+    expect(
+      regression(gate.run(baseSpec.id, dir, { deliveryCommit: delivery, baseCommit: runnerCommit })).reason,
+    ).toMatch(/not valid XML/);
+  }, 60_000);
+});
 
 describe('controller gate on real commits', () => {
   it('goes green when the feature passes and only pre-existing failures remain, with logs hashed outside the repo', async () => {
@@ -187,6 +269,17 @@ describe('controller gate on real commits', () => {
     const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery });
     expect(report.result).toBe('red');
     expect(report.checks.find(item => item.checkId === 'APOS-PROTECTED')?.reason).toMatch(/.apos\/skills\/reviewer.md/);
+  }, 60_000);
+
+  it('fails the gate when the delivery edits the approved setup (.apos/project.yaml), so a delivery cannot loosen its own checks', async () => {
+    const { dir, git, gate } = await project();
+    writeFileSync(join(dir, 'feature.js'), 'process.exit(0);');
+    writeFileSync(join(dir, '.apos', 'project.yaml'), '{"schemaVersion":2,"parts":{},"floor":{"submit":[]}}');
+    git('add', 'feature.js', '.apos/project.yaml');
+    git('-c', 'user.name=Owner', '-c', 'user.email=o@local.invalid', 'commit', '-qm', 'feature and a looser setup');
+    const report = gate.run(baseSpec.id, dir, { deliveryCommit: git('rev-parse', 'HEAD') });
+    expect(report.result).toBe('red');
+    expect(report.checks.find(item => item.checkId === 'APOS-PROTECTED')?.reason).toMatch(/.apos\/project.yaml/);
   }, 60_000);
 
   it('gives the checks the main checkout node_modules when the lock is unchanged and records it in the log (seen live: GOAL-G3 CHK-2 "prettier is not recognized")', async () => {

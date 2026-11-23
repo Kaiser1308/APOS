@@ -37,9 +37,18 @@ export function characterizedCheck(input: {
   const failures: string[] = [];
   const unverifiable: string[] = [];
   let tests = 0;
+  // Two characterize Goals can lock the same file (the later one adds tests to it): a delivery holds one version. It may hold
+  // any version a lock recorded; what it must not lose is a captured test, which the test statuses below still require.
+  const recorded = (path: string) => input.sources.map(item => item.lock.files[path]);
   for (const { goalId, lock } of input.sources) {
+    const files = Object.fromEntries(
+      Object.entries(lock.files).map(([path, hash]) => {
+        const now = input.deliveryFiles[path];
+        return [path, now !== undefined && recorded(path).includes(now) ? now : hash];
+      }),
+    );
     const delivered = lockedTestsCheck({
-      lock,
+      lock: { ...lock, files },
       deliveryFiles: input.deliveryFiles,
       delivery: input.delivery,
       criteria: lock.map.map(entry => entry.acceptanceId),

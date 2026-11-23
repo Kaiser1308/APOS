@@ -90,3 +90,35 @@ describe('refactorScopeCheck', () => {
     expect(check.reason).toContain('integration itself');
   });
 });
+
+describe('two characterize Goals that locked the same file (Codex review of #45)', () => {
+  const later = {
+    goalId: 'GOAL-B',
+    covers: ['legacy/**'],
+    lock: {
+      ...lock,
+      commit: 'c'.repeat(40),
+      files: { 'tests/test_a.py': 'h2' },
+      map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L2', testIds: ['t3'] }],
+    } as TestLock,
+  };
+  const both = { ...input, sources: [source, later] };
+  const all = { ...green, 'app.L2::t3': 'pass' } as Record<string, 'pass' | 'fail' | 'error' | 'skip'>;
+  it('accepts the file as the later Goal left it, when every captured test still passes', () => {
+    const check = characterizedCheck({ ...both, deliveryFiles: { 'tests/test_a.py': 'h2' }, delivery: all, base: all });
+    expect(check).toMatchObject({ status: 'pass', preserved: { tests: 3, from: ['GOAL-A', 'GOAL-B'] } });
+  });
+  it('is still red for a version no lock recorded, and for one that loses a captured test', () => {
+    expect(
+      characterizedCheck({ ...both, deliveryFiles: { 'tests/test_a.py': 'h3' }, delivery: all, base: all }).status,
+    ).toBe('fail');
+    const lost = characterizedCheck({
+      ...both,
+      deliveryFiles: { 'tests/test_a.py': 'h1' },
+      delivery: green,
+      base: all,
+    });
+    expect(lost.status).toBe('fail');
+    expect(lost.reason).toContain('t3');
+  });
+});

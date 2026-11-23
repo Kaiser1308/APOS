@@ -48,11 +48,19 @@ describe('layerChecks of a legacy Goal at the integrate and close stages', () =>
         .checks.find(check => check.checkId === 'APOS-REFACTOR-SCOPE');
     expect(scope()).toMatchObject({ status: 'fail' });
     expect(scope()?.reason).toContain('pyproject.toml');
-    const judged = {
-      ...p.state(),
-      packages: { 'WP-A': { spec: {}, gate: { changedFiles: ['pyproject.toml'] } } },
-    } as unknown as ReturnType<typeof p.state>;
-    expect(scope(judged)).toMatchObject({ status: 'pass' });
+    // A package gate saw this very content: not asked twice. Content the integration changed again after that is not judged.
+    const judged = (at: string) =>
+      ({
+        ...p.state(),
+        packages: { 'WP-A': { spec: {}, gate: { changedFiles: ['pyproject.toml'], deliveryCommit: at } } },
+      }) as unknown as ReturnType<typeof p.state>;
+    expect(scope(judged(head))).toMatchObject({ status: 'pass' });
+    const again = p.commit({ 'pyproject.toml': 'changed again by the integration\n' }, 'integration changes it again');
+    const later = service(p)
+      .layerChecks(judged(head), { ...input, head: again })
+      .checks.find(check => check.checkId === 'APOS-REFACTOR-SCOPE');
+    expect(later).toMatchObject({ status: 'fail' });
+    expect(later?.reason).toContain('pyproject.toml');
   }, 120_000);
 
   it('passes for a refactor that stays inside, so nothing else changes', async () => {

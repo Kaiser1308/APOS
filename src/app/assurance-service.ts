@@ -102,13 +102,30 @@ export class AssuranceService {
           paths: state.spec.paths ?? [],
           needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
           lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
-          judged: Object.values(state.packages ?? {}).flatMap(item => item.gate?.changedFiles ?? []),
+          judged: this.judgedByAPackage(state, input),
         }),
       );
     }
     if (state.spec.kind === 'characterize' && input.base)
       checks.push(characterizeScopeCheck({ repo: this.deps.repo, setup, base: input.base, head: input.head }));
     return checks;
+  }
+
+  /**
+   * The changed files whose content at `head` is exactly what a package gate judged (its delivery commit changed them and
+   * holds the same bytes): a sensitive file the integration changed again after that is not judged.
+   */
+  private judgedByAPackage(state: GoalState, input: LayerGateInput): string[] {
+    const { repo } = this.deps;
+    const gates = Object.values(state.packages ?? {}).flatMap(item => (item.gate ? [item.gate] : []));
+    return input.changed.filter(file => {
+      const now = fileAt(repo, input.head, file);
+      return gates.some(gate => {
+        if (!gate.changedFiles?.includes(file)) return false;
+        const then = fileAt(repo, gate.deliveryCommit, file);
+        return now === undefined ? then === undefined : then?.equals(now) === true;
+      });
+    });
   }
 
   /** The layers the captured tests of a refactor live in, added to `wanted`: the base and the delivery both run them. */

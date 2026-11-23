@@ -3,6 +3,7 @@ import { AssuranceService } from './assurance-service.js';
 import { GitCommitInspector } from './integration.js';
 import { cleanProjects, lockedProject, testingProject } from './test-lock.test-support.js';
 import { fileAt, sha256Of } from './git-files.js';
+import { reviewRef } from '../domain/review-tests.js';
 import { gateReport, proposal, spec } from '../domain/fixtures.test-support.js';
 import type { ExecutionProposal } from '../domain/contracts.js';
 import type { TestLock } from '../domain/test-lock.js';
@@ -217,6 +218,60 @@ describe('the integration gate runs the package checks on the integration commit
     const edited = at(p.commit({ 'docs/review.t': 'case r pass\ncase more pass\n' }, 'edit'));
     expect(edited.status).toBe('fail');
     expect(edited.reason).toContain('docs/review.t');
+  }, 120_000);
+
+  it('lets the edit of an overridden package review test stand where the green package delivered it', async () => {
+    const p = await project({ paths: ['src/**'] });
+    const review = p.commit({ 'docs/review.t': 'case r pass\n' }, 'package review test');
+    const delivered = p.commit({ 'docs/review.t': 'case r pass\ncase more pass\n' }, 'package edits the test');
+    const lock = {
+      packageId: 'WP-MAIN',
+      deliveryCommit: p.lockCommit,
+      reviewCommit: review,
+      files: { 'docs/review.t': sha256Of(fileAt(p.dir, review, 'docs/review.t')!) },
+      tests: [{ part: 'app', layer: 'L2', id: 'x::r' }],
+      blocking: [{ part: 'app', layer: 'L2', id: 'x::r' }],
+      alsoRedBefore: [],
+      by: 'reviewer',
+    } satisfies NonNullable<GoalState['reviewTests']>[number];
+    const base = p.state();
+    const main = base.packages!['WP-MAIN']!;
+    const state: GoalState = {
+      ...base,
+      packages: { 'WP-MAIN': { ...main, gate: { ...gateReport(delivered), changedFiles: ['docs/review.t'] } } },
+      reviewTests: [lock],
+      exceptions: [
+        {
+          kind: 'review-overridden',
+          ref: reviewRef(lock, base.spec.id),
+          commit: delivered,
+          reason: 'the package rewrote it',
+          by: 'agent:lead',
+          at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    };
+    const assurance = new AssuranceService({
+      repo: p.dir,
+      runner: p.runner,
+      inspector: new GitCommitInspector(),
+      loadSetup: p.loadSetup,
+    });
+    const at = (head: string) =>
+      check(
+        assurance.layerChecks(state, {
+          stage: 'integrate',
+          scope: p.goalId,
+          head,
+          base: p.lockCommit,
+          changed: ['docs/review.t'],
+        }).checks,
+        'APOS-SCOPE',
+      );
+    expect(at(delivered)).toMatchObject({ status: 'pass' });
+    const again = at(p.commit({ 'docs/review.t': 'case r pass\ncase other pass\n' }, 'integration-only edit'));
+    expect(again.status).toBe('fail');
+    expect(again.reason).toContain('docs/review.t');
   }, 120_000);
 
   it('leaves a locked test file to APOS-LOCKED even when needsHuman globs match it', async () => {

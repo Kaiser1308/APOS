@@ -8,6 +8,7 @@ import {
   INVENTORY_CHECK,
   type TestSet,
 } from '../domain/assurance.js';
+import { reviewOverrideBy } from '../domain/review-tests.js';
 import { matchesAny, rootedGlobs } from '../domain/glob.js';
 import type { CheckResult } from '../domain/gate.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
@@ -49,16 +50,23 @@ export type IntegrationContext = {
   ) => { set: TestSet; problems: string[] };
 };
 
-/** Review tests a package locked (they may sit outside its paths) that the integration holds byte for byte. */
+/**
+ * Review tests a package locked (they may sit outside its paths) that the integration holds byte for byte: as the
+ * reviewer wrote them, or, once the review was waived, as the green package delivered them.
+ */
 export function unchangedPackageReviewFiles(repo: string, state: GoalState, head: string): string[] {
   return (state.reviewTests ?? [])
     .filter(review => review.packageId)
-    .flatMap(review =>
-      Object.entries(review.files).flatMap(([path, hash]) => {
+    .flatMap(review => {
+      const delivery = state.packages?.[review.packageId ?? '']?.gate?.deliveryCommit;
+      const waived = delivery && reviewOverrideBy(state, review) !== undefined;
+      return Object.entries(review.files).flatMap(([path, hash]) => {
         const now = fileAt(repo, head, path);
-        return now && sha256Of(now) === hash ? [path] : [];
-      }),
-    );
+        if (!now) return [];
+        const delivered = waived ? fileAt(repo, delivery, path) : undefined;
+        return sha256Of(now) === hash || delivered?.equals(now) ? [path] : [];
+      });
+    });
 }
 
 /**

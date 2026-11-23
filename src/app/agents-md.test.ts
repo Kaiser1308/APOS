@@ -116,3 +116,56 @@ it("does not sweep the user's uncommitted AGENTS.md edits into the init commit",
 it('refuses unbalanced markers instead of guessing', () => {
   expect(() => upsertBlock(`${BEGIN}\nx\n`, 'y')).toThrow(/apos:begin/);
 });
+
+it('names every command guarded by assertHuman in the block', async () => {
+  const { readdirSync } = await import('node:fs');
+  const dirs = [join('src', 'cli')];
+  const names = new Set(['outcome close', 'outcome revise', 'outcome stop']); // `outcome ${decision}` is built at run time
+  for (const base of dirs)
+    for (const entry of readdirSync(base, { recursive: true, encoding: 'utf8' })) {
+      if (!entry.endsWith('.ts') || entry.endsWith('.test.ts') || entry.endsWith('context.ts')) continue;
+      const text = readFileSync(join(base, entry), 'utf8');
+      for (const match of text.matchAll(/assertHuman\(\s*(['"])([^'"]+)\1/g)) names.add(match[2]!);
+    }
+  expect(names.size).toBeGreaterThan(8);
+  const dir = repo();
+  await initProject(dir);
+  const block = read(dir, 'AGENTS.md');
+  // `goal approve|appetite|select` stands for three commands
+  const listed = new Set<string>();
+  for (const [, prefix, alts] of block.matchAll(/`((?:[a-z]+ )*[a-z]+) ([a-z-]+(?:\|[a-z-]+)+)`/g))
+    for (const alt of alts!.split('|')) listed.add(`${prefix} ${alt}`);
+  for (const [whole, single] of block.matchAll(/`([a-z]+(?: [a-z]+)+)(?: --[a-z-]+)?`/g)) {
+    listed.add(single!);
+    listed.add(whole.slice(1, -1));
+  }
+  const missing = [...names].filter(name => !listed.has(name));
+  expect(missing).toEqual([]);
+});
+
+it('does not recreate and commit over a tracked AGENTS.md the user deleted', async () => {
+  const { rmSync: rm } = await import('node:fs');
+  const dir = repo();
+  writeFileSync(join(dir, 'AGENTS.md'), 'my rules\n');
+  execFileSync('git', ['-C', dir, 'add', '.']);
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'base']);
+  rm(join(dir, 'AGENTS.md'));
+  await initProject(dir);
+  expect(execFileSync('git', ['-C', dir, 'show', 'HEAD:AGENTS.md'], { encoding: 'utf8' })).toBe('my rules\n');
+});
+
+it('commits the real file when AGENTS.md is a symlink to CLAUDE.md', async () => {
+  const { symlinkSync } = await import('node:fs');
+  const dir = repo();
+  writeFileSync(join(dir, 'CLAUDE.md'), '# Mine\n');
+  try {
+    symlinkSync('CLAUDE.md', join(dir, 'AGENTS.md'));
+  } catch {
+    return; // no permission to create symlinks (Windows without developer mode)
+  }
+  execFileSync('git', ['-C', dir, 'add', '.']);
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'base']);
+  await initProject(dir);
+  expect(execFileSync('git', ['-C', dir, 'show', 'HEAD:CLAUDE.md'], { encoding: 'utf8' })).toContain('apos:begin');
+  expect(execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8' }).trim()).toBe('');
+});

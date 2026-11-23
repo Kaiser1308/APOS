@@ -14,7 +14,7 @@ const AGENTS_BODY = [
   '- Investigating a bug (reading logs, reproducing, experiments on a scratch branch) needs no Goal. Fixing it does: open a small Goal whose acceptance test reproduces the bug — red on the current code, locked, then green with the fix.',
   '- Work is done only when `apos package submit` (or the integration gate) is green. "Done" in an agent message does not count.',
   '- Do not edit `.apos/`, locked tests or the test infrastructure.',
-  '- Do not run Human commands: `goal approve|appetite|select`, `outcome close|revise|stop`, `gate confirm`, `setup approve`, `exception approve --human`. Do not pass `--on-behalf` unless the Human has clearly said yes somewhere else.',
+  '- Do not run Human commands: `goal approve|appetite|select`, `outcome close|revise|stop`, `gate confirm`, `gate run --base`, `blocker resolve`, `setup approve`, `exception approve --human`. Do not pass `--on-behalf` unless the Human has clearly said yes somewhere else.',
   '- `apos inbox` shows what is waiting for the Human. The setup is `.apos/project.yaml`; see APOS `docs/setup.md`.',
 ].join('\n');
 
@@ -54,7 +54,7 @@ function sameFile(a: string, b: string): boolean {
 
 /**
  * Teach the project's agents that it uses APOS: a managed block in `AGENTS.md`, and a `CLAUDE.md`
- * that imports it. Returns the files it changed (absolute paths).
+ * that imports it. Returns the real paths of the files it changed.
  */
 export function writeAgentFiles(repo: string): string[] {
   const changed: string[] = [];
@@ -63,7 +63,7 @@ export function writeAgentFiles(repo: string): string[] {
     const updated = next(text);
     if (updated !== text) {
       writeFileSync(path, updated, 'utf8');
-      changed.push(path);
+      changed.push(realpathSync(path)); // a symlink writes its target, which is what changed
     }
   };
   const agents = join(repo, 'AGENTS.md');

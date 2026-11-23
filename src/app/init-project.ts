@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -82,15 +82,20 @@ export async function initProject(
     }
   }
   if (options.agentsMd !== false) {
-    // The user's own uncommitted edits to these files are theirs to commit, not ours to sweep in.
+    // The user's own uncommitted edits (or deletion) of these files are theirs to commit, not ours to sweep in.
+    const realRepo = realpathSync(repo);
+    const inRepo = (path: string) => join(repo, relative(realRepo, path));
+    const target = (path: string) => (existsSync(path) ? inRepo(realpathSync(path)) : path);
     const dirty = (path: string) =>
       execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', relative(repo, path)], {
         encoding: 'utf8',
       }).trim() !== '';
-    const before = ['AGENTS.md', 'CLAUDE.md']
-      .map(name => join(repo, name))
-      .filter(path => existsSync(path) && dirty(path));
-    for (const path of writeAgentFiles(repo)) if (!before.includes(path)) files.push(path);
+    const names = ['AGENTS.md', 'CLAUDE.md'].map(name => join(repo, name));
+    const before = names.filter(path => dirty(path) || dirty(target(path))).flatMap(path => [path, target(path)]);
+    for (const real of writeAgentFiles(repo)) {
+      const path = inRepo(real);
+      if (!relative(repo, path).startsWith('..') && !before.includes(path)) files.push(path);
+    }
   }
   const paths = files.map(path => relative(repo, path));
   const status = execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', ...paths], { encoding: 'utf8' });

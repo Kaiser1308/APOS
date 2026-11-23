@@ -271,7 +271,7 @@ For a Goal pinned to a setup whose parts say where their tests are (`tests.paths
 
 7. **Tests go through the declared entries.** For a stack whose catalogue has an `entryRule` (Python and TypeScript), `tests submit` and `tests revise` refuse an acceptance (L2) test that imports an internal module of the repo that is not a declared stub or part of the tests, naming the file and line. A stack with no rule is not checked and the assurance table says "chưa kiểm". Libraries and the standard library are never judged.
 
-**Counting assertions is rough.** It counts lines that match a regular expression of the stack (`assertPatterns`), so a test can be weakened without the count falling, or the count can fall for a harmless reason. It is a tripwire, not a proof; mutation testing (phase 5) is the second net.
+**Counting assertions is rough.** It counts lines that match a regular expression of the stack (`assertPatterns`), so a test can be weakened without the count falling, or the count can fall for a harmless reason. It is a tripwire, not a proof; mutation testing is the second net (see [Mutation](#mutation)).
 
 ## Project setup
 
@@ -466,7 +466,7 @@ Conventions and the dependency rules: [`AGENTS.md`](AGENTS.md), [`docs/architect
 - **Test locking needs a setup that names the tests.** Only a Goal pinned to a setup with `tests.paths` on its parts, and with a criterion proved by a test, has locked tests. Any other Goal still runs without them, and a delivery can change or delete the tests that gate it (the gate only warns). `goal show` says which kind of Goal it is.
 - **The assertion count is rough** (a regex per line, see [Locked tests](#locked-tests)). **Whether the tests call the code only through the declared entries is checked only for the stacks whose catalogue has an `entryRule`** (Python, TypeScript; not Java yet); the assurance table says "chưa kiểm" for the others. The check reads import lines, so a dynamic import or a call through a re-export is not seen.
 - **Test ids are the layer report's ids.** A runner that changes how it names tests (for example renaming a `describe`) looks like a deleted test.
-- **The gate runs the Goal's own checks.** What it proves is only as good as the checks the Goal names. Phase 2 to 5 add the check catalogue, locked acceptance tests and quality layers (see the roadmap).
+- **The gate runs the Goal's own checks.** What it proves is only as good as the checks the Goal names, the tests locked from them and the layers the setup defines; the assurance table says which of these ran.
 - **Single host, trusted user** (see the trust model). Windows and Linux; Node 24+.
 - **Event log compatibility.** Controller-published document milestones are `documents-published` events with commit and file hashes. Do not roll back to a build older than v3 once a log holds v3 events: such a build does not know them.
 - **A Goal is one repo.** A Goal spanning several repos is out of scope for now.
@@ -474,8 +474,9 @@ Conventions and the dependency rules: [`AGENTS.md`](AGENTS.md), [`docs/architect
 
 ## Roadmap
 
-Phase 1 (this version) removed the orchestration layer and put `package submit`, the confirmation on Human commands and the close-on-green-gate rule in place. The next phases, from the v3 design, are **not** in this version:
+The v3 design was built in five steps, all in this version:
 
+1. ~~Removing the orchestration layer~~ (`package submit`, the confirmation on Human commands, close on a green gate).
 2. ~~Result formats, a tool catalogue and a project setup with draft, probe and approve~~ (done: see [Project setup](#project-setup)). 
 3. ~~Locking the acceptance tests before the code is written, red-for-the-right-reason checks, test inventory and scope guards~~ (done: see [Locked tests](#locked-tests)).
 4. ~~Test layers L0 to L6 per stage, non-functional proofs and a per-Goal table of what the machine proves and what you confirmed by hand~~ (done: see [Layers by stage](#layers-by-stage) and [The assurance table](#the-assurance-table)).

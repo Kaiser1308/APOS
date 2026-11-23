@@ -116,6 +116,21 @@ describe('buildAssuranceReport', () => {
     expect(rows.every(row => row.stage === 'close' && row.scope === 'goal')).toBe(true);
   });
 
+  it('a metric read from a deep path is labelled by its last segment, the path stays in the check', () => {
+    const path = 'files.0.groups.0.benchmarks.0.p99';
+    const state: GoalState = {
+      ...base,
+      status: 'verified',
+      closeGate: gate(
+        { stage: 'close', runs: [run('L5', 'bench', 'metric')], skipped: [] },
+        [check('app.L5.bench', 'pass', { metric: { name: path, value: 0.39 } })],
+        'close',
+      ),
+    };
+    expect(buildAssuranceReport(state).layers.map(row => row.note)).toEqual(['p99 0.39']);
+    expect(state.closeGate?.checks[0]?.metric?.name).toBe(path);
+  });
+
   it('a tool with several metrics shows the worst of its checks, with every note', () => {
     const state: GoalState = {
       ...base,

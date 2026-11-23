@@ -54,7 +54,10 @@ function noteOf(check: CheckResult): string | undefined {
       : check.findings.lower
         ? `${check.findings.lower} finding dưới mức chặn`
         : undefined;
-  return check.metric ? `${check.metric.name} ${check.metric.value}` : undefined;
+  // A metric read from a deep path (`files.0.groups.0.benchmarks.0.p99`) is labelled by its last segment; the check keeps the path.
+  return check.metric
+    ? `${check.metric.name.split('.').at(-1)} ${Number(check.metric.value.toPrecision(4))}`
+    : undefined;
 }
 
 function rowsOf(stage: Stage, scope: string, gate: GateReport): LayerRow[] {

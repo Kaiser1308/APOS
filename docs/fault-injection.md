@@ -154,8 +154,8 @@ APOS v2 started, resumed, woke and watched agents through Orca (`controller watc
 
 - **A malicious local process.** The controller home (`~/.apos`) is outside the owner's worktree and the event log is hash-chained, so edits are detected. The caller runs as the same OS user, so this is tamper-evidence, not a security boundary; `--on-behalf` can be passed by anything that can run the CLI.
 - **A delivery that changes or deletes the tests that gate it**, for a Goal with no locked tests (no setup, or a setup without `tests.paths`): only a warning. With locked tests it is red.
-- **A weakened test whose assertion count does not fall**, or a stub-test pair that agrees to prove nothing. The count is a line regex; the second net is mutation testing (phase 5).
-- **Tests that reach inside the code instead of the declared entries.** Not checked until the catalogue has a rule per stack (phase 4).
+- **A weakened test whose assertion count does not fall**, or a stub-test pair that agrees to prove nothing. The count is a line regex; the second net is mutation testing (see [Mutation](../README.md#mutation)).
+- **Tests that reach inside the code instead of the declared entries.** Checked only for the stacks whose catalogue has an `entryRule` (Python, TypeScript); not for Java yet.
 - **A live run of a Lead and an orchestrator on a real project.** The end-to-end tests drive the CLI on scratch repos.
 
 ## Layers by stage, non-functional proof and the assurance table (phase 4)

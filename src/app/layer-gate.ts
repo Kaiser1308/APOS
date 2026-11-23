@@ -282,11 +282,12 @@ export class LayerGate {
       );
     if (maintenance && atBase) {
       const again = runner.layerTests(input.base!, run.part, root, run.layer, [tool]);
-      const split = again.problems.length ? [] : baseDisagreement(atBase.tests, again.tests);
-      if (again.problems.length || split.length)
+      const unreadable = [...again.problems, ...again.processFailures];
+      const split = unreadable.length ? [] : baseDisagreement(atBase.tests, again.tests);
+      if (unreadable.length || split.length)
         return unverifiable(
           checkId,
-          `${label}: two runs on the base disagree${split.length ? ` (${split.slice(0, 5).join(', ')})` : ` (${again.problems.join('; ')})`}, so nothing is proved`,
+          `${label}: two runs on the base disagree${split.length ? ` (${split.slice(0, 5).join(', ')})` : ` (${unreadable.join('; ')})`}, so nothing is proved`,
         );
     }
     // With two tools in one layer a locked test belongs to the tool that reported it when the tests were locked (the base),

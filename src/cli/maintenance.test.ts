@@ -16,6 +16,7 @@ afterEach(() => {
   delete process.env.APOS_SCAN_LOG;
   delete process.env.APOS_SCAN_FLAKY;
   delete process.env.APOS_SCAN_SEVERITY;
+  delete process.env.APOS_EXIT_ON;
   if (saved === undefined) delete process.env.APOS_HOME;
   else process.env.APOS_HOME = saved;
   removeTemp();
@@ -276,6 +277,16 @@ describe('the gate of a maintenance Goal', () => {
     expect(got.code).toBe(3);
     expect(got.text).toMatch(/the base did not give a readable result/);
     expect(p.state('GOAL-MAINT-001')!.packages?.['WP-MAIN']?.attempts).toBe(0);
+  });
+
+  it('is unverifiable when the second run on the base exits badly with the same tests passing', async () => {
+    const p = await prepare();
+    const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });
+    // The runs of L1, in order: inventory (head, base), the layer on the head twice, then the base twice: the sixth is the second base run.
+    process.env.APOS_EXIT_ON = `${temp('apos-exit-')}/counter:5`;
+    const got = await submit(p, sha);
+    expect(got.code).toBe(3);
+    expect(got.text).toMatch(/two runs on the base disagree.*exited 1/);
   });
 
   it('is unverifiable when two runs of a test layer disagree', async () => {

@@ -23,6 +23,12 @@ const cases = [
 ];
 const xml = cases.map(([name, bad]) => '<testcase classname="s" name="' + name + '">' + (bad ? '<failure message="' + bad + '"/>' : '') + '</testcase>').join('');
 fs.writeFileSync(process.argv[2], '<testsuite name="s">' + xml + '</testsuite>');
+if (process.env.APOS_EXIT_ON) {
+  const file = process.env.APOS_EXIT_ON.split(':')[0];
+  const n = fs.existsSync(file) ? Number(fs.readFileSync(file, 'utf8')) : 0;
+  fs.writeFileSync(file, String(n + 1));
+  if (n === Number(process.env.APOS_EXIT_ON.split(':')[1])) process.exit(1);
+}
 `;
 
 /** A scan that finds CVE-FMT-1 while fmt is 1.0.0, and a defect (OLD-1) that is always there. */

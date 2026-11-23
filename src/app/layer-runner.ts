@@ -87,7 +87,12 @@ export class ToolRunner {
       else if (!report || report.kind === 'unreadable')
         problems.push(`${label}: report unreadable: ${report?.kind === 'unreadable' ? report.reason : 'no report'}`);
       else if (report.kind !== 'tests') problems.push(`${label}: the tool does not report tests`);
-      else tests.push(...report.tests);
+      else {
+        const reportedFailure = report.tests.some(test => test.status === 'fail' || test.status === 'error');
+        if (exec.exitCode !== 0 && !reportedFailure)
+          problems.push(`${label}: command exited ${exec.exitCode} without test failures in its report`);
+        tests.push(...report.tests);
+      }
     }
     return { tests, problems };
   }

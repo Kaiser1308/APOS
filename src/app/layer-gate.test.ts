@@ -92,6 +92,22 @@ describe('layers at the submit stage', () => {
     expect(result.reasons.join('\n')).toContain('app.L1 unit: no test ran');
   }, 120_000);
 
+  it('a test command that exits nonzero without a reported test failure is not green', async () => {
+    const p = await project({
+      layers: { L1: [{ id: 'unit', command: 'node exit-after-report.js {report}', format: 'junit' }] },
+      files: {
+        'exit-after-report.js':
+          'require(\'fs\').writeFileSync(process.argv[2], \'<testsuite><testcase classname="tests.unit.u" name="one"/></testsuite>\'); process.exitCode = 1;',
+      },
+    });
+    const result = await p.submit(p.commit(work));
+    expect(result.result).toBe('unverifiable');
+    expect(checkOf(p, 'app.L1.unit')).toMatchObject({
+      status: 'unverifiable',
+      reason: expect.stringContaining('command exited 1 without test failures in its report'),
+    });
+  }, 120_000);
+
   it('a SARIF finding below failOn is not red, but its count is kept (review focus 4)', async () => {
     const p = await project({ layers: { L0: [{ id: 'scan', command: 'node sarif.js {report}', format: 'sarif' }] } });
     const result = await p.submit(p.commit({ ...work, 'src/findings.txt': 'warning note' }));

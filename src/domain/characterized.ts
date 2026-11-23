@@ -73,27 +73,39 @@ export const REFACTOR_SCOPE_CHECK = 'APOS-REFACTOR-SCOPE';
 
 /**
  * A refactor touches only what the Human approved with it: every file the delivery changed matches the Goal's `paths`,
- * whatever scope the plan or a package declared (a plan the Lead can still change must not widen it). Files under `.apos/`,
- * locked tests and sensitive files (judged by their own checks) are left to those checks.
+ * whatever scope the plan or a package declared (a plan the Lead can still change must not widen it). Locked tests are left
+ * to their own check. A sensitive file (`needsHuman`) is decided by the package gate (`needs-human`, with an approval): one
+ * that no package gate judged (`judged` lists the files they saw) was introduced by the integration commit itself, and is red.
  */
 export function refactorScopeCheck(input: {
   changed: string[];
   paths: string[];
   needsHuman: string[];
   lockedFiles: string[];
+  /** The files some package gate already judged, sensitive ones included. */
+  judged: string[];
 }): CheckResult {
-  const outside = input.changed.filter(
-    file =>
-      !file.startsWith('.apos/') &&
-      !input.lockedFiles.includes(file) &&
-      !matchesAny(file, input.needsHuman) &&
-      !matchesAny(file, input.paths),
-  );
+  const outside: string[] = [];
+  const unjudged: string[] = [];
+  for (const file of input.changed) {
+    if (file.startsWith('.apos/') || input.lockedFiles.includes(file)) continue;
+    if (matchesAny(file, input.needsHuman)) {
+      if (!input.judged.includes(file)) unjudged.push(file);
+    } else if (!matchesAny(file, input.paths)) outside.push(file);
+  }
+  const problems = [
+    ...(outside.length
+      ? [`outside the paths the Human approved for this refactor (${input.paths.join(', ')}): ${outside.join(', ')}`]
+      : []),
+    ...(unjudged.length
+      ? [`sensitive file(s) changed by the integration itself, which no package gate judged: ${unjudged.join(', ')}`]
+      : []),
+  ];
   return {
     checkId: REFACTOR_SCOPE_CHECK,
-    status: outside.length ? 'fail' : 'pass',
-    reason: outside.length
-      ? `outside the paths the Human approved for this refactor (${input.paths.join(', ')}): ${outside.join(', ')}`
+    status: problems.length ? 'fail' : 'pass',
+    reason: problems.length
+      ? problems.join('; ')
       : 'every changed file is inside the refactor paths the Human approved',
     base: [],
     delivery: [],

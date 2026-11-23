@@ -102,6 +102,7 @@ export class AssuranceService {
           paths: state.spec.paths ?? [],
           needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
           lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
+          judged: Object.values(state.packages ?? {}).flatMap(item => item.gate?.changedFiles ?? []),
         }),
       );
     }
@@ -276,6 +277,8 @@ export class AssuranceService {
           paths: state.spec.paths ?? [],
           needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
           lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
+          // This is the package gate: APOS-SCOPE below judges the sensitive files, with an approval route.
+          judged: changed,
         }),
       );
     const paths = item.spec.paths;

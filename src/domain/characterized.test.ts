@@ -65,7 +65,12 @@ describe('characterizedCheck', () => {
 });
 
 describe('refactorScopeCheck', () => {
-  const base = { paths: ['legacy/pricing.py'], needsHuman: ['pyproject.toml'], lockedFiles: ['tests/test_a.py'] };
+  const base = {
+    paths: ['legacy/pricing.py'],
+    needsHuman: ['pyproject.toml'],
+    lockedFiles: ['tests/test_a.py'],
+    judged: ['pyproject.toml'],
+  };
   it('passes when every changed file is inside the paths the Human approved', () => {
     expect(refactorScopeCheck({ ...base, changed: ['legacy/pricing.py', '.apos/goals/G/x.md'] }).status).toBe('pass');
   });
@@ -75,7 +80,13 @@ describe('refactorScopeCheck', () => {
     expect(check.reason).toContain('legacy/shipping.py');
     expect(check.reason).not.toContain('legacy/pricing.py,');
   });
-  it('leaves sensitive files and locked tests to their own checks', () => {
+  it('leaves locked tests, and a sensitive file a package gate already judged, to their own checks', () => {
     expect(refactorScopeCheck({ ...base, changed: ['pyproject.toml', 'tests/test_a.py'] }).status).toBe('pass');
+  });
+  it('is red for a sensitive file that only the integration commit changed: no package gate asked for a decision', () => {
+    const check = refactorScopeCheck({ ...base, judged: [], changed: ['legacy/pricing.py', 'pyproject.toml'] });
+    expect(check.status).toBe('fail');
+    expect(check.reason).toContain('pyproject.toml');
+    expect(check.reason).toContain('integration itself');
   });
 });

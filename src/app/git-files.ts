@@ -27,7 +27,7 @@ export function filesAt(repo: string, commit: string): string[] {
     .filter(Boolean);
 }
 
-/** Every file each commit of `from..to` changed (merges aside), so a change a later commit puts back is still seen. */
+/** Every file each commit of `from..to` changed (a merge: what it changed beyond its parents), so a change a later commit puts back is still seen. */
 export function filesByCommit(repo: string, from: string, to: string): { commit: string; files: string[] }[] {
   const out = execFileSync(
     'git',
@@ -37,7 +37,8 @@ export function filesByCommit(repo: string, from: string, to: string): { commit:
       '-c',
       'core.quotepath=off',
       'log',
-      '--no-merges',
+      // -c: a merge shows the files it changed against every parent (an edit made in the merge itself), none for a clean one.
+      '-c',
       '--no-renames',
       '--name-only',
       '--format=@@%H',

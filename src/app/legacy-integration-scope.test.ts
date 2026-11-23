@@ -38,6 +38,23 @@ describe('layerChecks of a legacy Goal at the integrate and close stages', () =>
     }
   }, 120_000);
 
+  it('is red for a sensitive file only the integration changed, and not for one a package gate saw', async () => {
+    const p = await testingProject({ goal: refactor, files: { ...files, 'pyproject.toml': 'x\n' } });
+    const head = p.commit({ 'pyproject.toml': 'changed\n' }, 'integration');
+    const input = { stage: 'integrate' as const, scope: p.goalId, head, base: p.base, changed: ['pyproject.toml'] };
+    const scope = (state = p.state()) =>
+      service(p)
+        .layerChecks(state, input)
+        .checks.find(check => check.checkId === 'APOS-REFACTOR-SCOPE');
+    expect(scope()).toMatchObject({ status: 'fail' });
+    expect(scope()?.reason).toContain('pyproject.toml');
+    const judged = {
+      ...p.state(),
+      packages: { 'WP-A': { spec: {}, gate: { changedFiles: ['pyproject.toml'] } } },
+    } as unknown as ReturnType<typeof p.state>;
+    expect(scope(judged)).toMatchObject({ status: 'pass' });
+  }, 120_000);
+
   it('passes for a refactor that stays inside, so nothing else changes', async () => {
     const p = await testingProject({ goal: refactor, files });
     const head = p.commit({ 'src/legacy.txt': 'tidied\n' }, 'integration');

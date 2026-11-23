@@ -137,3 +137,24 @@ describe('what a rename hides (Codex review of #45)', () => {
     expect(refused.problems.join('\n')).toContain('src/legacy.txt: characterize: the Tester adds tests only');
   }, 90_000);
 });
+
+describe('a merge that edits code (Codex review of #45)', () => {
+  it('is seen by the per-commit scope check: two tests-only parents, and a merge that changes the code', async () => {
+    const { characterizeScopeCheck } = await import('./characterized-gate.js');
+    const p = await project();
+    const lock = p.commit(capture(p.goalId), 'capture');
+    p.git('checkout', '-q', '-b', 'side');
+    p.commit({ 'tests/acceptance/side.t': 'case side pass\n' }, 'tests on a side branch');
+    p.git('checkout', '-q', 'main');
+    p.commit({ 'tests/acceptance/main.t': 'case main pass\n' }, 'tests on main');
+    p.git('merge', '--no-commit', '--no-ff', 'side');
+    const head = p.commit({ 'src/legacy.txt': 'changed inside the merge\n' }, 'merge, and edit the code');
+    const seen = characterizeScopeCheck({ repo: p.dir, setup: p.loadSetup(p.state()), base: lock, head });
+    expect(seen.status).toBe('fail');
+    expect(seen.reason).toContain('src/legacy.txt');
+    const clean = p.git('rev-parse', `${head}^`);
+    expect(characterizeScopeCheck({ repo: p.dir, setup: p.loadSetup(p.state()), base: lock, head: clean }).status).toBe(
+      'pass',
+    );
+  }, 90_000);
+});

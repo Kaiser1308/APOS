@@ -37,7 +37,7 @@
 7. [Project setup](#project-setup), [Layers by stage](#layers-by-stage), [The assurance table](#the-assurance-table) and [Web UI](#web-ui)
 8. [Configuration and state](#configuration-and-state)
 9. [Trust model](#trust-model)
-10. [CLI reference](#cli-reference)
+10. [CLI reference](#cli-reference), [Reviews](#reviews), [Mutation](#mutation) and [Demo](#demo)
 11. [Old logs (legacy Goals)](#old-logs-legacy-goals)
 12. [Development](#development)
 13. [Limits](#limits)
@@ -426,6 +426,10 @@ Mutation testing is the second net under the assertion count: it changes the cod
 - The floor is `mutation.minScore` in the setup (70 when the setup says nothing). A `benchmark` criterion of the Goal on the same tool can only raise it: every threshold must hold.
 - The tool runs twice. Two scores that differ by more than one point, or a run that fails or leaves no report, make the layer `unverifiable`: neither red nor green.
 - The assurance table shows the score (`mutationScore 82`), or `mutation tắt (Goal không gắn cờ)` when the setup has the tool and the Goal has no flag.
+
+## Demo
+
+`npm run demo:ts` and `npm run demo:py` run an example Goal (`examples/ts-orders`, `examples/py-parking`) through the whole flow with the real binary and a real test runner, and print the assurance table. The output of both is in [docs/demo.md](docs/demo.md).
 
 ## Old logs (legacy Goals)
 

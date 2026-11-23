@@ -184,3 +184,25 @@ APOS v2 started, resumed, woke and watched agents through Orca (`controller watc
 | A stack with no entry rule | not checked; the table says "chưa kiểm" | `test-entry-rule.test.ts`; `assurance-report.test.ts` |
 | An agent cuts a layer or weakens tests | logged as `agent:<name>`, listed on the table with "agent duyệt thay: n chỗ" | `assurance-report.test.ts` › names who approved each exception; `layers-flow.test.ts` |
 
+## Maintenance Goals: upgrading a dependency, patching a finding (v3.1)
+
+A `maintenance` Goal has no criterion of its own: the gate measures the delivery against the base. These are the cases that try to make it say green when it should not (or red for a defect the base already had).
+
+| Case | What happens | Where it is tested |
+| --- | --- | --- |
+| A test already red on the base is still red after the upgrade (focus 1) | not a new failure: green, and the table counts it (`lỗi có sẵn trên base: n`) | `maintenance.test.ts` › does not count a failure the base already had, and says how many; `maintenance-flow.test.ts` (real pytest) |
+| A test green on the base is red after the upgrade (focus 1) | red, names the test (`new failure(s) vs the base: s::fmt-api`) | `maintenance.test.ts` › is red on a new failure, and names the test; `maintenance-flow.test.ts` |
+| The delivery adds a finding the base did not have (focus 2) | red at the blocking level, naming rule and fingerprint; below it, counted only | `maintenance.test.ts` › is red on a new blocking finding, and counts one below the blocking level; `maintenance-flow.test.ts` |
+| A finding the base had only moved to another line (focus 2) | not new: the fingerprint ignores the line | `findings.test.ts` › diffFindings; `results.test.ts` › … fingerprint |
+| `--security` names a finding the base does not show, or a `ruleId` several findings share (focus 3) | `maintenance open` refuses (`không tái hiện được finding trên base`, or the list to choose from); nothing is written | `maintenance.test.ts` › refuses a finding the base does not show; `findings.test.ts` › matchSecurity |
+| `--security` with a setup that has no scan tool, at `open` or at `approve` (focus 3) | refused; a Goal with no `--security` still opens | `maintenance.test.ts` › refuses a security Goal when the setup has no scan tool (both) |
+| The delivery of a security Goal still shows the named finding, or no scan judged it (focus 3) | red `APOS-SECURITY` | `maintenance.test.ts` › a security patch is green only when the named finding is gone; `maintenance.test.ts` (domain) › securityCheck |
+| The upgrade also edits a source file outside the manifests and `--paths` (focus 4) | red `APOS-SCOPE`, names the file; the scope is the Goal's, whatever the plan's `paths` say | `maintenance.test.ts` › is red when a file outside the manifests and the declared paths changes, and names it |
+| A manifest the setup calls sensitive | `needs-human` (exit 3); an agent may approve it and the table lists `agent:<name>` | `maintenance.test.ts` › a sensitive manifest still waits for a decision an agent may give |
+| Two runs of a test layer, or two scans, of the same commit differ (focus 5) | `unverifiable` (exit 3), never green or red | `maintenance.test.ts` › is unverifiable when two runs of a test layer disagree; … when two scans of the delivery show different findings |
+| The base scan is run again at every submit | it is not: it is recorded in the Goal when it is opened, and reused while the plan's base holds the same project (nothing but `.apos/` differs) | `maintenance.test.ts` › scans the base once |
+| A pull request (`--from-pr`) that does not contain the Goal's base (focus 6) | refused: `rebase the change onto it` | `maintenance-pr.test.ts` › refuses a pull request that does not contain the base of the Goal |
+| The remote moves the pull request after the Goal recorded its sha | `--from-pr` refuses and asks for `--commit`; the package stays pending | `maintenance-pr.test.ts` › refuses when the remote moved the pull request |
+| `--from-pr` and `--commit` together, neither, or `--from-pr` on a Goal not opened from a pull request | refused | `maintenance-pr.test.ts` › needs exactly one of --commit and --from-pr |
+| A maintenance Goal with a criterion or a check written by hand | refused at creation | `maintenance.test.ts` (domain) › refuses a criterion or a check written by hand |
+| `maintenance approve` on another kind of Goal, or without a Human | refused, nothing written | `maintenance.test.ts` › refuses a Goal that is not a maintenance Goal; … approves, sets the default appetite and selects with one confirmation |

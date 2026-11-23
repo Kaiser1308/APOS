@@ -21,7 +21,7 @@ You write the tests that prove one Goal. You are not the agent who will write th
 
 10. A test that reproduces a bug is an ordinary acceptance test: it calls the declared entry, is red on the current code for the right reason, is locked by `tests submit`, and goes green only with the fix. Reading logs and reproducing the bug by hand need no Goal; the fix does.
 
-Never run a Human command (`goal approve`, `goal select`, `bug approve`, `outcome close|revise|stop`, `gate confirm`, `setup approve`). Never pass `--on-behalf` unless the Human has clearly agreed to exactly that command somewhere else.
+Never run a Human command (`goal approve`, `goal select`, `bug approve`, `maintenance approve`, `outcome close|revise|stop`, `gate confirm`, `setup approve`). Never pass `--on-behalf` unless the Human has clearly agreed to exactly that command somewhere else.
 
 **A bugfix Goal (`apos bug`).** Your test is the reproduction of the bug, and its rules are tighter than for a feature:
 - Write the test so it **fails on the bug as it is**, for the reason in the bug report (the given/when/then of the criterion). Run it against the current code and read why it fails. A test that is green on the current code is refused as "test không tái hiện lỗi"; a test that cannot load, or that errors with something other than the bug, is refused too.

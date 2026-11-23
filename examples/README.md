@@ -1,12 +1,13 @@
 # Example Goals
 
-Four small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
+Five small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
 
 | Example | Stack | Goal |
 | --- | --- | --- |
 | `ts-orders` | TypeScript, vitest | An order placed more than 30 days ago cannot be cancelled |
 | `py-parking` | Python, pytest | A slot becomes occupied when its sensor reports a car |
 | `ts-bug` | TypeScript, vitest | A bug: the code `FREE0` (0% off) makes an order's total 0. Run by `npm run demo:bug` through `apos bug` |
+| `ts-maint` | TypeScript, vitest | A dependency upgrade that removes a finding: `fmt` 1.0.0 carries CVE-FMT-1; the Goal must reach a version without it and change nothing else. No network (the dependency is a folder in `vendor/`). Run by `npm run demo:maint` through `apos maintenance` |
 | `py-legacy` | Python, pytest | A repo with **no tests**: approved as low assurance, `pricing.py` captured by a `characterize` Goal, then tidied by a `refactor` Goal. Run by `npm run demo:legacy` |
 
 Each example has:
@@ -60,3 +61,11 @@ git apply ../path/to/examples/ts-orders/steps/01-tests-and-stub.patch && npx vit
 ```
 
 Two notes. `ts-orders/repo/package-lock.json` is a stub with no packages: the demo links the APOS checkout's `node_modules` into the copy, and APOS only does that when the lock file is the same on both sides; run `npm install` in a copy of your own to get a real one. And run the example from a copy outside the APOS checkout (the demo does): vitest would otherwise pick up the `vitest.config.ts` of the repository above it.
+
+`ts-maint` is the maintenance story: `repo/` pins `fmt` with `"fmt": "file:vendor/fmt-1.0.0"` and loads it from that folder (`src/fmt.ts`; a real project would just import `fmt`), `vendor/fmt-1.0.0|1.1.0|2.0.0` are the three versions (2.0.0 renames `format()` to `render()`), `tools/scan.mjs` is a scanner that prints SARIF and reports `CVE-FMT-1` while `package.json` pins 1.0.0, and `maintenance.json` is what `apos maintenance open` is given. There is no brief, no Goal file and no plan file, and no patch: the demo itself commits the three upgrades:
+
+| Upgrade | What it is | What APOS says |
+| --- | --- | --- |
+| `fmt` 2.0.0 | The breaking release | `package submit`: red, four tests that were green on the base are red now |
+| `fmt` 1.1.0 and an edit of `src/price.ts` | Upgrade plus a source change outside the manifests | `package submit`: red, `APOS-SCOPE` names `src/price.ts` |
+| `fmt` 1.1.0 | The upgrade and nothing else | `package submit`: needs a decision (`package.json` is sensitive); an agent approves it; the same commit is green and the finding is gone |

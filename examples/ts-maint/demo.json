@@ -1,0 +1,9 @@
+{
+  "story": "maintenance",
+  "tools": ["npx", "node"],
+  "scan": {
+    "id": "node-scan",
+    "command": "node tools/scan.mjs {report}",
+    "format": "sarif"
+  }
+}

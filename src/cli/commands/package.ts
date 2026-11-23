@@ -1,4 +1,5 @@
 import { UserError } from '../../domain/errors.js';
+import { commitToSubmit } from '../submit-commit.js';
 import { withGateLease } from '../../store/lease.js';
 import { GateService } from '../../app/gate-service.js';
 import { PackageService } from '../../app/package-service.js';
@@ -51,37 +52,43 @@ export function registerPackage(ctx: CliContext): void {
     .command('submit')
     .argument('<goalId>')
     .argument('<packageId>', 'WP-MAIN for a Solo plan')
-    .requiredOption('--commit <sha>', 'the full sha of the commit to gate')
+    .option('--commit <sha>', 'the full sha of the commit to gate')
+    .option(
+      '--from-pr',
+      'maintenance Goal opened with --from-pr: gate the sha recorded when it was opened, fetched again from the remote',
+    )
     .option('--by <name>', 'who submits, for the log', 'lead')
     .option('--json', 'print the result as JSON')
     .description('Lead: gate this commit now; exits 0 green, 1 red, 3 needs a Human or could not be verified')
-    .action((goalId: string, packageId: string, flags: { commit: string; by: string; json?: boolean }) =>
-      withJournalAsync(async journal => {
-        const gate = new GateService(journal, {
-          inspector: options.inspector,
-          ...options.gate,
-          assurance: assuranceService(ctx, journal, goalId),
-        });
-        const service = new PackageService(journal, { gate, repoPath: repo(), inspector: options.inspector });
-        const held = await withGateLease(ctx.home(), () => service.submit(goalId, packageId, flags.commit, flags.by));
-        if (!held.ran)
-          throw new UserError(
-            `Another gate is running for this project (pid ${held.holder}): wait for it, then submit again`,
+    .action(
+      (goalId: string, packageId: string, flags: { commit?: string; fromPr?: boolean; by: string; json?: boolean }) =>
+        withJournalAsync(async journal => {
+          const commit = commitToSubmit(repo(), journal.getGoal(goalId), flags);
+          const gate = new GateService(journal, {
+            inspector: options.inspector,
+            ...options.gate,
+            assurance: assuranceService(ctx, journal, goalId),
+          });
+          const service = new PackageService(journal, { gate, repoPath: repo(), inspector: options.inspector });
+          const held = await withGateLease(ctx.home(), () => service.submit(goalId, packageId, commit, flags.by));
+          if (!held.ran)
+            throw new UserError(
+              `Another gate is running for this project (pid ${held.holder}): wait for it, then submit again`,
+            );
+          const outcome = held.value;
+          const state = journal.getGoal(goalId);
+          process.exitCode = outcome.result === 'green' ? 0 : outcome.result === 'red' ? 1 : 3;
+          if (flags.json) {
+            write(JSON.stringify({ goalId, packageId, commit, ...outcome, goalStatus: state?.status }));
+            return;
+          }
+          write(
+            `${packageId} ${outcome.result} on ${commit}${outcome.result === 'green' && state?.status === 'verified' ? `; ${goalId} verified` : ''}`,
           );
-        const outcome = held.value;
-        const state = journal.getGoal(goalId);
-        process.exitCode = outcome.result === 'green' ? 0 : outcome.result === 'red' ? 1 : 3;
-        if (flags.json) {
-          write(JSON.stringify({ goalId, packageId, commit: flags.commit, ...outcome, goalStatus: state?.status }));
-          return;
-        }
-        write(
-          `${packageId} ${outcome.result} on ${flags.commit}${outcome.result === 'green' && state?.status === 'verified' ? `; ${goalId} verified` : ''}`,
-        );
-        for (const reason of outcome.reasons) write(`  ${reason}`);
-        for (const warning of outcome.warnings) write(`  ${warning}`);
-        if (state?.status === 'blocked') write(`${goalId} is blocked: ${state.blocker?.note}`);
-      }),
+          for (const reason of outcome.reasons) write(`  ${reason}`);
+          for (const warning of outcome.warnings) write(`  ${warning}`);
+          if (state?.status === 'blocked') write(`${goalId} is blocked: ${state.blocker?.note}`);
+        }),
     );
   const exception = program
     .command('exception')

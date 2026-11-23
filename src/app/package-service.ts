@@ -143,7 +143,9 @@ export class PackageService {
       throw new UserError(
         state.testLock
           ? `Commit ${commit} does not contain the commit that locked the tests (${base}): rebase ${packageId} onto it, then submit again`
-          : `Commit ${commit} does not contain the base ${base} of ${packageId}`,
+          : state.spec.kind === 'maintenance'
+            ? `Commit ${commit} does not contain the base ${base} of ${packageId}: rebase the change onto it (a pull request opened before the base moved), then submit again`
+            : `Commit ${commit} does not contain the base ${base} of ${packageId}`,
       );
 
     // What a review added is locked into the next delivery: build on the review commit (unless the Lead overrode the block).

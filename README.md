@@ -101,7 +101,7 @@ flowchart TD
 
 ### Human-only commands
 
-`goal approve`, `goal appetite`, `goal select`, `bug approve`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base` and `blocker resolve`) are Human decisions; `setup approve` is one too, and `--baseline-missing` (accepting a repo with no tests) is the Human's to say. Each one makes you **type the Goal id back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
+`goal approve`, `goal appetite`, `goal select`, `bug approve`, `maintenance approve`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base` and `blocker resolve`) are Human decisions; `setup approve` is one too, and `--baseline-missing` (accepting a repo with no tests) is the Human's to say. Each one makes you **type the Goal id back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
 
 `goal appetite` is the Human's decision to change the budget, never the scope.
 
@@ -264,6 +264,34 @@ apos outcome close GOAL-BUG-001
 
 Nothing about the gate is shortcut. Two rules are stricter for a bug, because its test must show the bug and not a stub: the Tester's commit may change tests and `tests.json` and nothing else (no code, stub or test infrastructure; so the test is red on the code as it is, the plan's base), and a reproduction that is already green is refused as "test không tái hiện lỗi". A bug that needs more than one criterion, a benchmark or a dependency is an ordinary Goal (a `bugfix` with two criteria is refused, also by `goal revise`). The assurance table ends the story with `lỗi được tái hiện bằng test <id>: đỏ trên <base>, xanh trên <delivery>`, or `lỗi chưa được tái hiện bằng test` while the evidence is not whole. `npm run demo:bug` runs it with vitest; see [docs/demo.md](docs/demo.md).
 
+### Upgrading a dependency or patching a finding (`apos maintenance`)
+
+A dependency upgrade or a security patch adds no behaviour, so there is no criterion to write. It is a Goal of its own kind, `maintenance`, and the evidence is the base itself: the gate runs the same layers on the base and on the delivery and accepts what does not get worse. Two commands, then the ordinary flow without a Tester:
+
+```sh
+apos maintenance open "Upgrade fmt to a version without CVE-FMT-1" --security CVE-FMT-1 --paths CHANGELOG.md
+apos maintenance approve GOAL-MAINT-001   # the Human: gate A, the appetite (S, 60 min, 3 attempts) and gate B in one go
+apos lead propose --maintenance --goal GOAL-MAINT-001   # Solo, one package; paths = manifests + --paths
+apos lead commit GOAL-MAINT-001
+apos package submit GOAL-MAINT-001 WP-MAIN --commit <sha>   # the upgrade: green only if nothing got worse
+apos outcome close GOAL-MAINT-001
+```
+
+`maintenance open` drafts `GOAL-MAINT-<n>` (its own counter). The description and the flags are its hashed source. The base is scanned once, when the Goal is opened (each scan twice: two runs that disagree prove nothing), and the findings are kept in the Goal, so a later submit does not scan the base again. `maintenance approve` is the same one-go Human decision as `bug approve` (same code), marked `via: maintenance approve`.
+
+What the gate holds a maintenance Goal to, at `package submit` (and again at the close stage):
+
+1. **No new failure.** L1, L2 and L3 of every part the change touches, and the scan of L5 if the setup has one, run on the plan's base and on the delivery (a test layer at least twice on each). A test that is red on the base and red after is *not* new, and the table counts it (`lỗi có sẵn trên base: n`); a test green on the base and red after is red, and named. Runs that differ are `unverifiable`.
+2. **No new finding.** Findings are compared by a stable fingerprint, not by line: the SARIF `partialFingerprints` when the tool writes them, else the rule, the path and a hash of the message. A new finding at the blocking level (`failOn`, default `error`) is red; below it, only counted (`finding mới 0 (dưới mức chặn: n)`).
+3. **A named finding is gone.** `--security <finding>` takes a fingerprint or a `ruleId` that exactly one finding of the base has. A finding the base does not show is refused at `open` and at `approve` (`không tái hiện được finding trên base`), and so is a setup with no scan tool. On the delivery the finding must be absent: `APOS-SECURITY`.
+4. **Only manifests, lockfiles and `--paths` change.** The globs of the manifests come from the catalog (`manifests`, copied to the setup part at `draft`); any other changed file is red and named. A manifest that the setup lists as sensitive (`needsHuman`) still waits for a decision, which an agent may give (`exception approve --by agent:<name>`); the table lists it.
+
+The table says it: `Bảo trì: chỉ chạm manifest/lockfile (+ paths); lỗi có sẵn trên base: n; lỗi mới: 0`, `Quét: finding mới 0 (dưới mức chặn: n)` (or `Quét: setup không có công cụ`), and for a security Goal `Vá bảo mật: finding <id> có trên <base>, không còn trên <commit>`.
+
+**Dependabot and other pull requests.** `apos maintenance open --from-pr 12 [--remote origin]` fetches `pull/12/head` with plain git (no `gh`, no network beyond that fetch), keeps it under `refs/apos/pr/12`, records the number and the sha in the Goal, and takes the description from the title of the first commit when none is given. `apos package submit <goal> WP-MAIN --from-pr` gates exactly that sha: if the remote moved the pull request since, it says so and asks for `--commit <sha>`. A pull request that does not contain the plan's base commit is refused, as any commit is (`rebase the change onto it`); plan on the pull request's own base with `apos lead propose --maintenance --goal <id> --base <sha>` if that is what you mean. The table's `Nguồn` line says `từ PR #12 <sha>`.
+
+`npm run demo:maint` runs the story on `examples/ts-maint` (no network: the dependency is a folder in `vendor/`); see [docs/demo.md](docs/demo.md).
+
 ### An old repo with few tests
 
 A repo with no tests (or few) does not need tests first; it needs an honest label and a way to get a safety net before anything is restructured. Three steps, each a Goal or a decision with its own rule:
@@ -410,8 +438,10 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `goal select <id>` | **Gate B (H).** Records the choice; starts nothing. |
 | `bug open "<description>" --given <text> --when <text> --then <text> [--repro-hint <path>] [--part <part>] [--check <command>]` | Draft a Solo `bugfix` Goal (`GOAL-BUG-<n>`): one criterion proved by a red-green test, the description and flags as its hashed source. The check comes from the approved setup; `--check` is only for a project with none. |
 | `bug approve <id> [--appetite <S\|M\|L>] [--minutes <n>] [--attempts <n>] [--flag <name>]...` | **Gates A and B (H).** Approve, appetite (default S, 60 min, 3 attempts) and select in one go, with one confirmation. Refuses a Goal that is not a `bugfix`. |
+| `maintenance open ["<description>"] [--security <finding>]... [--paths <glob>]... [--part <part>] [--from-pr <n> [--remote <name>]]` | Draft a Solo `maintenance` Goal (`GOAL-MAINT-<n>`): no criterion, the gate holds it to the base. `--security` names a finding of the base scan (a fingerprint, or a `ruleId` one finding has) that the delivery must remove; the base scan is recorded in the Goal. `--paths` adds paths the change may touch besides the manifests and lockfiles. `--from-pr` fetches `pull/<n>/head` with git (no `gh`) and records the number and the sha; the description defaults to the title of the first commit. |
+| `maintenance approve <id> [--appetite <S\|M\|L>] [--minutes <n>] [--attempts <n>] [--flag <name>]...` | **Gates A and B (H).** The same one-go approval as `bug approve` (default S, 60 min, 3 attempts); refuses a Goal that is not `maintenance`, and a security Goal whose setup has no scan tool or whose finding the recorded base scan does not show. |
 | `goal revise --file <json> --source <path> [--origin <text>]` | New Goal version; needs re-approval. |
-| `lead propose (--file <json> \| --bugfix --goal <id> [--base <sha>] [--stub <path>]... \| --characterize --goal <id> [--base <sha>]) [--by <name>]` | Submit an execution proposal (`baseCommit` required). `--bugfix` writes the Solo plan of a bug Goal from the Goal and its setup: the Tester reproduces, the Worker fixes. `--characterize` writes the Solo plan of a characterize Goal: the Tester captures the behaviour in tests, no code changes. |
+| `lead propose (--file <json> \| --bugfix --goal <id> [--base <sha>] [--stub <path>]... \| --characterize --goal <id> [--base <sha>] \| --maintenance --goal <id> [--base <sha>]) [--by <name>]` | Submit an execution proposal (`baseCommit` required). `--maintenance` writes the Solo plan of a maintenance Goal: `paths` are the manifests and lockfiles of its part plus the Goal's `paths`; no Tester. `--bugfix` writes the Solo plan of a bug Goal from the Goal and its setup: the Tester reproduces, the Worker fixes. `--characterize` writes the Solo plan of a characterize Goal: the Tester captures the behaviour in tests, no code changes. |
 | `lead commit <id> [--by <name>]` | Accept the plan. Solo gets `WP-MAIN`. A Goal pinned to a setup with test paths goes to `testing` first. |
 | `tests submit <goalId> --commit <sha> [--by <name>]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
 | `tests revise <goalId> --commit <sha> --reason <text> [--by <name>]` | Replace the lock. Exit 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception. |
@@ -419,7 +449,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `exception approve <goalId> --kind <kind> --ref <ref> --reason <text> (--by agent:<name> \| --human)` | An agent, or the Human (**H** with `--human`), approves a sensitive-file change, weakened locked tests, a change to test infrastructure, cutting a floor layer, or overriding a review block (`review-overridden`, `--ref <package>:<review commit>`). |
 | `goal show <id>` | Status, pinned setup, locked tests and the [assurance table](#the-assurance-table) of one Goal. |
 | `package add --file <json> --reason <text> [--by <name>]`, `package revise <goalId> --file <json> --reason <text> [--by <name>]`, `package remove <goalId> <packageId> --reason <text> [--by <name>]`, `package list <goalId>` | Plan the packages of a Multi-WP Goal. |
-| `package submit <goalId> <packageId> --commit <sha> [--by <name>] [--json]` | Gate a commit now. Exit 0 green, 1 red, 3 needs-human or unverifiable. |
+| `package submit <goalId> <packageId> (--commit <sha> \| --from-pr) [--by <name>] [--json]` | Gate a commit now. Exit 0 green, 1 red, 3 needs-human or unverifiable. `--from-pr` (a maintenance Goal opened with `--from-pr`) fetches the pull request again and gates the sha recorded when the Goal was opened; if the remote moved it, it refuses and asks for `--commit`. |
 | `integration gate <goalId> --commit <sha> --reason <text> [--by <name>]` | Gate the integration commit. |
 | `integration prepare <goalId>`, `integration complete <goalId> --commit <sha> [--conflict-resolution <text>]`, `integration merge <goalId> --source <commit> --target <branch>` | Multi-WP integration: check, record, merge. |
 | `gate run <goalId> --commit <sha> [--base <sha>]` | Run the Goal-level gate on a specific commit (`--base` is **H**). |

@@ -121,9 +121,12 @@ const goalSchema = z
   .superRefine((goal, ctx) => {
     const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
     const sketch = goal.acceptance.length === 0 && goal.checks.length === 0;
+    const allAcceptanceUsesToolProofs =
+      goal.acceptance.length > 0 && goal.acceptance.every(item => item.proof === 'benchmark' || item.proof === 'scan');
     if (!sketch && goal.acceptance.length === 0)
       issue(['acceptance'], 'Goal must declare at least one acceptance criterion');
-    if (!sketch && goal.checks.length === 0) issue(['checks'], 'Goal must declare at least one check');
+    if (!sketch && !allAcceptanceUsesToolProofs && goal.checks.length === 0)
+      issue(['checks'], 'Goal must declare at least one check');
     if (!sketch && goal.scope.length === 0) issue(['scope'], 'Goal must declare at least one scope entry');
     const unique = (items: { id: string }[], label: string, path: string) => {
       const seen = new Set<string>();

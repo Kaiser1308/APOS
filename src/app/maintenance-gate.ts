@@ -8,10 +8,12 @@ import { notRunnable, reportExitProblem, type ToolRunner } from './layer-runner.
 
 type Scanned = { findings: Finding[] } | { problem: string };
 
+/** Two scans agree when they show the same findings at the same severity: a finding that blocks in one run and not in the other is a disagreement. */
 const same = (a: Finding[], b: Finding[]): boolean => {
-  const left = new Set(a.map(item => item.fingerprint));
-  const right = new Set(b.map(item => item.fingerprint));
-  return left.size === right.size && [...left].every(print => right.has(print));
+  const keys = (items: Finding[]) => new Set(items.map(item => `${item.fingerprint}\n${item.level}`));
+  const left = keys(a);
+  const right = keys(b);
+  return left.size === right.size && [...left].every(key => right.has(key));
 };
 
 /** One scan on one commit, run twice: two runs that show different findings prove nothing. */

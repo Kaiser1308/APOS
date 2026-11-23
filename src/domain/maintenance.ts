@@ -146,6 +146,12 @@ export function securityCheck(security: string[], checks: CheckResult[]): CheckR
   const still = security.filter(print => remaining.has(print));
   const unjudged = security.filter(print => !fixed.has(print) && !remaining.has(print));
   if (still.length) return checkResult('fail', `finding vẫn còn trên commit giao: ${still.join(', ')}`);
+  // A scan that could not run, or ran twice with different answers, has proved nothing about the finding: not a failure of the patch.
+  if (unjudged.length && checks.some(check => check.status === 'unverifiable'))
+    return checkResult(
+      'unverifiable',
+      `chưa xét được finding ${unjudged.join(', ')}: một lớp của lần giao này không cho kết quả chắc chắn`,
+    );
   if (unjudged.length)
     return checkResult(
       'fail',

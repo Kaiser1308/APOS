@@ -37,7 +37,14 @@ if (process.env.APOS_SCAN_FLAKY) {
   fs.writeFileSync(file, String(n + 1));
   if (n % 2 === 1) results.push({ ruleId: 'FLAKE-1', level: 'error', message: { text: 'sometimes' } });
 }
-if (deps.extra) results.push({ ruleId: 'NEW-1', level: deps.extra, message: { text: 'new finding' }, locations: [{ physicalLocation: { artifactLocation: { uri: 'src/new.js' } } }] });
+let severity = deps.extra;
+if (process.env.APOS_SCAN_SEVERITY) {
+  const file = process.env.APOS_SCAN_SEVERITY;
+  const n = fs.existsSync(file) ? Number(fs.readFileSync(file, 'utf8')) : 0;
+  fs.writeFileSync(file, String(n + 1));
+  severity = n % 2 === 1 ? 'error' : 'note';
+}
+if (severity) results.push({ ruleId: 'NEW-1', level: severity, message: { text: 'new finding' }, locations: [{ physicalLocation: { artifactLocation: { uri: 'src/new.js' } } }] });
 fs.writeFileSync(process.argv[2], JSON.stringify({ version: '2.1.0', runs: [{ tool: { driver: { name: 's' } }, results }] }));
 `;
 

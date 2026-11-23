@@ -15,6 +15,7 @@ afterEach(() => {
   delete process.env.APOS_FLAKY;
   delete process.env.APOS_SCAN_LOG;
   delete process.env.APOS_SCAN_FLAKY;
+  delete process.env.APOS_SCAN_SEVERITY;
   if (saved === undefined) delete process.env.APOS_HOME;
   else process.env.APOS_HOME = saved;
   removeTemp();
@@ -252,6 +253,25 @@ describe('the gate of a maintenance Goal', () => {
     const p = await prepare();
     const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });
     process.env.APOS_SCAN_FLAKY = `${temp('apos-flaky-')}/counter`;
+    const got = await submit(p, sha);
+    expect(got.code).toBe(3);
+    expect(got.text).toMatch(/two scans of .* show different findings/);
+  });
+
+  it('is unverifiable, not red, when a scan of a security Goal does not agree with itself', async () => {
+    const p = await prepare({}, ['--security', 'CVE-FMT-1']);
+    const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });
+    process.env.APOS_SCAN_FLAKY = `${temp('apos-flaky-')}/counter`;
+    const got = await submit(p, sha);
+    expect(got.code).toBe(3);
+    expect(got.text).toMatch(/APOS-SECURITY unverifiable/);
+    expect(p.state('GOAL-MAINT-001')!.packages?.['WP-MAIN']?.attempts).toBe(0);
+  });
+
+  it('is unverifiable when two scans agree on a finding but not on its severity', async () => {
+    const p = await prepare();
+    const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });
+    process.env.APOS_SCAN_SEVERITY = `${temp('apos-severity-')}/counter`;
     const got = await submit(p, sha);
     expect(got.code).toBe(3);
     expect(got.text).toMatch(/two scans of .* show different findings/);

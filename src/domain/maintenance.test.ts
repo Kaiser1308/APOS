@@ -103,4 +103,10 @@ describe('securityCheck', () => {
     });
     expect(securityCheck(['f1'], []).status).toBe('fail');
   });
+  it('is unverifiable, not red, when a scan that could have judged it did not run to the end', () => {
+    const broken: CheckResult = { ...scanned([], []), scan: undefined, status: 'unverifiable' };
+    expect(securityCheck(['f1'], [broken]).status).toBe('unverifiable');
+    // A finding that is still there is red whatever else happened.
+    expect(securityCheck(['f2'], [broken, scanned(['f1'], ['f2'])]).status).toBe('fail');
+  });
 });

@@ -32,7 +32,16 @@ export function maintenancePlan(
 /** What `lead commit` refuses for a maintenance Goal: it has one package and no Tester. */
 export function maintenancePlanProblems(state: GoalState): string[] {
   if (goalKind(state.spec) !== 'maintenance') return [];
-  return state.proposal?.mode === 'multi-wp'
-    ? ['a maintenance Goal is one Solo package: it has no criterion to split between packages']
-    : [];
+  const problems: string[] = [];
+  if (state.proposal?.mode === 'multi-wp')
+    problems.push('a maintenance Goal is one Solo package: it has no criterion to split between packages');
+  const stubs = [
+    ...(state.proposal?.stubPaths ?? []),
+    ...Object.values(state.packages ?? {}).flatMap(item => item.spec.stubPaths ?? []),
+  ];
+  if (stubs.length)
+    problems.push(
+      `a maintenance Goal has no Tester and no stub: drop stubPaths (${stubs.join(', ')}); the gate lets it change its manifests and the Goal's paths only`,
+    );
+  return problems;
 }

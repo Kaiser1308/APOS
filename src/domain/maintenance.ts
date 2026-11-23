@@ -167,6 +167,11 @@ export function securityCheck(security: string[], checks: CheckResult[]): CheckR
 export function maintenanceApprovalProblems(goal: GoalSpec, setup: ProjectSetup | undefined): string[] {
   if (goal.kind !== 'maintenance') return [];
   if (!setup) return ['a maintenance Goal needs an approved setup: the manifests and the scan come from it'];
+  const parts = goal.part ? [goal.part] : Object.keys(setup.parts);
+  if (!parts.some(part => manifestGlobs(setup, part).length))
+    return [
+      `the setup lists no manifests for ${parts.length === 1 ? `part "${parts[0]}"` : 'any part'}: add \`manifests\` to it (docs/setup.md) and approve the setup again, so the gate knows what the change may touch`,
+    ];
   const named = goal.security ?? [];
   if (!named.length) return [];
   if (!scanTools(setup, goal.part).length)

@@ -135,6 +135,29 @@ describe('apos maintenance approve', () => {
   });
 });
 
+describe('what the Goal may change cannot be widened by the plan or the setup', () => {
+  it('refuses to approve a Goal when the setup lists no manifests: there would be nothing to hold the change to', async () => {
+    const p = await maintProject({ manifests: false });
+    await p.invoke('maintenance', 'open', 'Bump fmt');
+    await expect(p.invoke('maintenance', 'approve', 'GOAL-MAINT-001', '--on-behalf', 'x')).rejects.toThrow(
+      /lists no manifests/,
+    );
+    expect(p.state('GOAL-MAINT-001')!.status).toBe('draft');
+  });
+
+  it('refuses a plan that names stub paths: a maintenance Goal has no Tester, and they would widen what it may change', async () => {
+    const p = await maintProject();
+    await p.invoke('maintenance', 'open', 'Bump fmt');
+    await p.invoke('maintenance', 'approve', 'GOAL-MAINT-001', '--on-behalf', 'x');
+    await p.invoke('lead', 'propose', '--maintenance', '--goal', 'GOAL-MAINT-001');
+    const plan = { ...p.state('GOAL-MAINT-001')!.proposal!, stubPaths: ['src/**'], version: 2 };
+    writeFileSync(join(p.dir, 'plan.json'), JSON.stringify(plan));
+    await p.invoke('lead', 'propose', '--file', join(p.dir, 'plan.json'));
+    await expect(p.invoke('lead', 'commit', 'GOAL-MAINT-001')).rejects.toThrow(/no Tester and no stub/);
+    expect(p.state('GOAL-MAINT-001')!.status).toBe('planned');
+  });
+});
+
 describe('the gate of a maintenance Goal', () => {
   const prepare = async (options: Parameters<typeof maintProject>[0] = {}, openArgs: string[] = []) => {
     const p = await maintProject(options);

@@ -291,13 +291,15 @@ export class AssuranceService {
           judged: changed,
         }),
       );
-    // A maintenance Goal may change its manifests and the paths the Human approved, whatever the plan says.
-    const paths = state.spec.kind === 'maintenance' ? maintenanceScope(setup, state.spec) : item.spec.paths;
-    if (paths?.length)
+    // A maintenance Goal may change its manifests and the paths the Human approved, whatever the plan says: no stub paths
+    // (it has no Tester), and an empty scope is not "unrestricted" but "nothing may change".
+    const maintenance = state.spec.kind === 'maintenance';
+    const paths = maintenance ? maintenanceScope(setup, state.spec) : item.spec.paths;
+    if (maintenance || paths?.length)
       checks.push(
         scopeCheck({
           changed: changed.filter(file => !inherited.has(file)),
-          paths: [...paths, ...(item.spec.stubPaths ?? [])],
+          paths: [...(paths ?? []), ...(maintenance ? [] : (item.spec.stubPaths ?? []))],
           needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
           lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
         }),

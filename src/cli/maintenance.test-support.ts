@@ -52,7 +52,13 @@ export const manifest = (deps: Record<string, string>) => `${JSON.stringify(deps
 
 /** A repo with a setup whose manifest is `deps.json`, one test layer and (unless `scan: false`) one scan; approved and committed. */
 export async function maintProject(
-  options: { scan?: boolean; needsHuman?: string[]; legacy?: boolean; deps?: Record<string, string> } = {},
+  options: {
+    scan?: boolean;
+    needsHuman?: string[];
+    legacy?: boolean;
+    manifests?: boolean;
+    deps?: Record<string, string>;
+  } = {},
 ) {
   const p = await project();
   const put = (file: string, text: string) => {
@@ -72,7 +78,15 @@ export async function maintProject(
     '.apos/project.yaml',
     jsonCodec.stringify({
       schemaVersion: 2,
-      parts: { app: { root: '.', layers, needsHuman: options.needsHuman ?? [], forbid: [], manifests: ['deps.json'] } },
+      parts: {
+        app: {
+          root: '.',
+          layers,
+          needsHuman: options.needsHuman ?? [],
+          forbid: [],
+          ...(options.manifests === false ? {} : { manifests: ['deps.json'] }),
+        },
+      },
     }),
   );
   p.git('add', '-A');

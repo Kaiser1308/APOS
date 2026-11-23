@@ -124,4 +124,24 @@ describe('two characterize Goals that locked the same file (Codex review of #45)
       characterizedCheck({ ...both, deliveryFiles: { 'tests/test_a.py': 'h3' }, delivery: all, base: all }).status,
     ).toBe('fail');
   });
+
+  it('holds the newest file even when the Goal that left it covers other code (disjoint capture scopes)', () => {
+    // GOAL-A captures pricing, GOAL-B shipping; both put tests in the same file, B's version is newer. A pricing-only refactor leans on A.
+    const other = { ...later, goalId: 'GOAL-B', covers: ['legacy/shipping.py'] };
+    const check = characterizedCheck({
+      ...input,
+      sources: [source],
+      held: [source, other],
+      deliveryFiles: { 'tests/test_a.py': 'h2' },
+    });
+    expect(check.status).toBe('pass');
+    expect(
+      characterizedCheck({
+        ...input,
+        sources: [source],
+        held: [source, other],
+        deliveryFiles: { 'tests/test_a.py': 'h1' },
+      }).status,
+    ).toBe('fail');
+  });
 });

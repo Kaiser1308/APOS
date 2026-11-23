@@ -1,7 +1,7 @@
 import { characterizedCheck } from '../domain/characterized.js';
 import type { TestSet } from '../domain/assurance.js';
 import type { CheckResult } from '../domain/gate.js';
-import { characterizations, refactorCoverage, type Coverage } from '../domain/legacy.js';
+import { characterizations, refactorCoverage, type Characterization, type Coverage } from '../domain/legacy.js';
 import type { GoalState } from '../domain/transitions.js';
 import { rootedGlobs, matchesAny } from '../domain/glob.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
@@ -26,14 +26,16 @@ export function coverageOfRefactor(
   );
   const coverage = refactorCoverage({ paths, files: base ? filesAt(repo, base) : [], characterized: held });
   // The oldest lock first: where two Goals locked the same file the newest version is the one a delivery must hold.
-  if (inspector)
-    coverage.sources.sort((a, b) =>
+  if (inspector) {
+    const older = (a: Characterization, b: Characterization) =>
       inspector.contains(repo, a.lock.commit, b.lock.commit)
         ? -1
         : inspector.contains(repo, b.lock.commit, a.lock.commit)
           ? 1
-          : 0,
-    );
+          : 0;
+    coverage.sources.sort(older);
+    coverage.held.sort(older);
+  }
   return coverage;
 }
 
@@ -53,6 +55,7 @@ export function characterizedResult(input: {
     }
   return characterizedCheck({
     sources: input.coverage.sources,
+    held: input.coverage.held,
     deliveryFiles,
     delivery: input.delivery.set,
     base: input.base.set,

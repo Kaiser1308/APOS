@@ -14,6 +14,8 @@ export const CHARACTERIZED_CHECK = 'APOS-CHARACTERIZED';
  */
 export function characterizedCheck(input: {
   sources: Characterization[];
+  /** Every closed characterize Goal, oldest lock first (default: `sources`): a test file a Goal outside `sources` added tests to is newer too. */
+  held?: Characterization[];
   deliveryFiles: Record<string, string | undefined>;
   delivery: TestSet;
   base: TestSet;
@@ -40,7 +42,8 @@ export function characterizedCheck(input: {
   // Two characterize Goals can lock the same file (the later one adds or strengthens tests in it): a delivery holds one
   // version, and it must be the newest a lock recorded, the strongest. `sources` run from the oldest lock to the newest.
   const newest = (path: string, own: string) =>
-    [...input.sources].reverse().find(item => item.lock.files[path] !== undefined)?.lock.files[path] ?? own;
+    [...(input.held ?? input.sources)].reverse().find(item => item.lock.files[path] !== undefined)?.lock.files[path] ??
+    own;
   for (const { goalId, lock } of input.sources) {
     const files = Object.fromEntries(Object.entries(lock.files).map(([path, hash]) => [path, newest(path, hash)]));
     const delivered = lockedTestsCheck({

@@ -25,6 +25,8 @@ export type Coverage = {
   emptyGlobs: string[];
   /** The characterize Goals that cover at least one of the files: their locked tests are the refactor's evidence. */
   sources: Characterization[];
+  /** Every closed characterize Goal considered, covering these files or not: they can have locked the same test file, whose newest version counts. */
+  held: Characterization[];
 };
 
 /** Which of the files a refactor's `paths` reach are covered by a closed characterize Goal; each must match some `covers`. */
@@ -43,7 +45,7 @@ export function refactorCoverage(input: {
   const files = [...matched].sort();
   const uncovered = files.filter(file => !input.characterized.some(item => matchesAny(file, item.covers)));
   const sources = input.characterized.filter(item => files.some(file => matchesAny(file, item.covers)));
-  return { files, uncovered, emptyGlobs, sources };
+  return { files, uncovered, emptyGlobs, sources, held: input.characterized };
 }
 
 /** Why a refactor's `paths` are not all captured, as the refusal of `goal approve` and `lead commit`; empty when they are. */

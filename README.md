@@ -381,7 +381,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `bug open "<description>" --given <text> --when <text> --then <text> [--repro-hint <path>] [--part <part>] [--check <command>]` | Draft a Solo `bugfix` Goal (`GOAL-BUG-<n>`): one criterion proved by a red-green test, the description and flags as its hashed source. The check comes from the approved setup; `--check` is only for a project with none. |
 | `bug approve <id> [--appetite <S\|M\|L>] [--minutes <n>] [--attempts <n>] [--flag <name>]...` | **Gates A and B (H).** Approve, appetite (default S, 60 min, 3 attempts) and select in one go, with one confirmation. Refuses a Goal that is not a `bugfix`. |
 | `goal revise --file <json> --source <path> [--origin <text>]` | New Goal version; needs re-approval. |
-| `lead propose --file <json> [--by <name>]` | Submit an execution proposal (`baseCommit` required). |
+| `lead propose (--file <json> \| --bugfix --goal <id> [--base <sha>] [--stub <path>]...) [--by <name>]` | Submit an execution proposal (`baseCommit` required). `--bugfix` writes the Solo plan of a bug Goal from the Goal and its setup: the Tester reproduces, the Worker fixes. |
 | `lead commit <id> [--by <name>]` | Accept the plan. Solo gets `WP-MAIN`. A Goal pinned to a setup with test paths goes to `testing` first. |
 | `tests submit <goalId> --commit <sha> [--by <name>]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
 | `tests revise <goalId> --commit <sha> --reason <text> [--by <name>]` | Replace the lock. Exit 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception. |

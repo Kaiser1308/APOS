@@ -3,20 +3,36 @@ import { assertProposalRationale, parseExecutionProposal, proposalRationale } fr
 import { GitCommitInspector } from '../../app/integration.js';
 import { goalNeedsTests, setupLocksTests, testPlanProblems } from '../../domain/test-plan.js';
 import { UserError } from '../../domain/errors.js';
+import { bugfixPlan } from '../bugfix-plan.js';
 import { pinnedSetupOf } from '../test-lock-wiring.js';
 import { planLayerProblems } from '../lead-layers.js';
 import type { CliContext } from '../context.js';
+
+const collect = (value: string, previous: string[]): string[] => [...previous, value];
 
 export function registerLead(ctx: CliContext): void {
   const { program, write, repo, withJournal, withJournalAsync, options, readJsonFile } = ctx;
   const lead = program.command('lead');
   lead
     .command('propose')
-    .requiredOption('--file <json>')
+    .option('--file <json>', 'the execution proposal')
+    .option('--bugfix', 'plan a bugfix Goal as one Solo package: the Tester reproduces, the Worker fixes (with --goal)')
+    .option('--goal <id>', 'with --bugfix: the Goal to plan')
+    .option('--base <sha>', 'with --bugfix: the commit the bug is reproduced on (default: HEAD)')
+    .option(
+      '--stub <path>',
+      'with --bugfix: a module the reproduction imports (default: the Goal repro hint); repeatable',
+      collect,
+      [],
+    )
     .option('--by <name>', 'who proposes, for the log', 'lead')
-    .action(({ file, by }: { file: string; by: string }) =>
+    .action((flags: { file?: string; bugfix?: boolean; goal?: string; base?: string; stub: string[]; by: string }) =>
       withJournal(journal => {
-        const parsed = parseExecutionProposal(readJsonFile(file));
+        if (Boolean(flags.file) === Boolean(flags.bugfix))
+          throw new UserError('Give either --file <json> or --bugfix --goal <id>');
+        const bugfix = flags.bugfix ? bugfixPlan(ctx, journal, flags) : undefined;
+        const parsed = bugfix ?? parseExecutionProposal(readJsonFile(flags.file!));
+        const by = flags.by;
         assertProposalRationale(parsed);
         const current = journal.getGoal(parsed.goalId);
         if (!current) throw new Error(`Goal does not exist: ${parsed.goalId}`);

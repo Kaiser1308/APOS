@@ -1,4 +1,4 @@
-import { parseGoalSpec, type GoalSpec } from './contracts.js';
+import { parseExecutionProposal, parseGoalSpec, type ExecutionProposal, type GoalSpec } from './contracts.js';
 import { UserError } from './errors.js';
 import { sourceDigest } from './gate.js';
 import type { LayerSpec, ProjectSetup } from './project-setup.js';
@@ -105,5 +105,45 @@ export function bugGoalSpec(input: {
         ...(check.format ? { format: check.format } : {}),
       },
     ],
+  });
+}
+
+/**
+ * The Solo plan of a bug: the Tester reproduces it with a test, the Worker fixes it. `root` is the root of the part the
+ * bug lives in (the Worker may change code there), `stubs` the modules the reproduction imports (the hint, unless the
+ * Lead names others). A Goal with no setup has no root: the plan then carries no `paths`.
+ */
+export function bugfixProposal(input: {
+  goal: GoalSpec;
+  version: number;
+  baseCommit: string;
+  root?: string;
+  stubs: string[];
+}): ExecutionProposal {
+  const { goal, root } = input;
+  const stubs = input.stubs.length ? input.stubs : goal.reproHint ? [goal.reproHint] : [];
+  if (!stubs.length)
+    throw new UserError(
+      `${goal.id} has no --repro-hint: name the module the reproduction test imports with --stub <path> (repeatable)`,
+    );
+  return parseExecutionProposal({
+    id: `EXEC-${goal.id.replace(/^GOAL-/, '')}`,
+    version: input.version,
+    goalId: goal.id,
+    goalVersion: goal.version,
+    mode: 'solo-direct',
+    approach:
+      'The Tester adds a test that reproduces the bug and is red on the code as it is; it is locked. The Worker then fixes the code until that test and the rest are green',
+    rationale: 'A bug is one small change: one Tester commit with the test, one Worker commit with the fix',
+    risks: ['The test passes for another reason than the bug, or the fix reaches past the bug'],
+    baseCommit: input.baseCommit,
+    sourceSha256: goal.source.sha256,
+    ...(root === undefined ? {} : { paths: [root === '.' ? '**' : `${root}/**`] }),
+    stubPaths: stubs,
+    acceptanceMapping: goal.acceptance.map(item => ({
+      acceptanceId: item.id,
+      verification: 'locked reproduction test: red on the base commit, green on the delivery',
+    })),
+    verificationStrategy: 'the locked reproduction test, then the Goal check and the layers of the stage',
   });
 }

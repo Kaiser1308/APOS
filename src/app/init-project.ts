@@ -86,15 +86,24 @@ export async function initProject(
     const realRepo = realpathSync(repo);
     const inRepo = (path: string) => join(repo, relative(realRepo, path));
     const target = (path: string) => (existsSync(path) ? inRepo(realpathSync(path)) : path);
-    const dirty = (path: string) =>
-      execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', relative(repo, path)], {
-        encoding: 'utf8',
-      }).trim() !== '';
+    const inside = (path: string) => !relative(repo, path).startsWith('..');
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+    const dirty = (path: string) => git('status', '--porcelain', '--', relative(repo, path)).trim() !== '';
+    const ignored = (path: string) => {
+      try {
+        git('check-ignore', '-q', '--', relative(repo, path));
+        return true;
+      } catch {
+        return false; // exit 1: not ignored
+      }
+    };
     const names = ['AGENTS.md', 'CLAUDE.md'].map(name => join(repo, name));
-    const before = names.filter(path => dirty(path) || dirty(target(path))).flatMap(path => [path, target(path)]);
+    const before = names
+      .filter(path => [path, target(path)].some(p => inside(p) && dirty(p)))
+      .flatMap(path => [path, target(path)]);
     for (const real of writeAgentFiles(repo)) {
       const path = inRepo(real);
-      if (!relative(repo, path).startsWith('..') && !before.includes(path)) files.push(path);
+      if (inside(path) && !ignored(path) && !before.includes(path)) files.push(path);
     }
   }
   const paths = files.map(path => relative(repo, path));

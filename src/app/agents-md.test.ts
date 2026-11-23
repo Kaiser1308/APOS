@@ -169,3 +169,34 @@ it('commits the real file when AGENTS.md is a symlink to CLAUDE.md', async () =>
   expect(execFileSync('git', ['-C', dir, 'show', 'HEAD:CLAUDE.md'], { encoding: 'utf8' })).toContain('apos:begin');
   expect(execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8' }).trim()).toBe('');
 });
+
+it('writes but does not commit an AGENTS.md the project ignores', async () => {
+  const dir = repo();
+  writeFileSync(join(dir, '.gitignore'), 'AGENTS.md\n');
+  execFileSync('git', ['-C', dir, 'add', '.']);
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'base']);
+  await initProject(dir);
+  expect(read(dir, 'AGENTS.md')).toContain('apos:begin');
+  const committed = execFileSync('git', ['-C', dir, 'ls-tree', '-r', '--name-only', 'HEAD'], { encoding: 'utf8' });
+  expect(committed).not.toContain('AGENTS.md');
+  expect(committed).toContain('.apos/project.yaml');
+});
+
+it('does not abort when AGENTS.md is a symlink to a file outside the repository', async () => {
+  const { symlinkSync } = await import('node:fs');
+  const dir = repo();
+  const outside = mkdtempSync(join(tmpdir(), 'apos-outside-'));
+  dirs.push(outside);
+  writeFileSync(join(outside, 'shared.md'), '# Shared\n');
+  try {
+    symlinkSync(join(outside, 'shared.md'), join(dir, 'AGENTS.md'));
+  } catch {
+    return; // no permission to create symlinks (Windows without developer mode)
+  }
+  execFileSync('git', ['-C', dir, 'add', '.']);
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'base']);
+  await initProject(dir);
+  expect(execFileSync('git', ['-C', dir, 'ls-tree', '-r', '--name-only', 'HEAD'], { encoding: 'utf8' })).toContain(
+    '.apos/project.yaml',
+  );
+});

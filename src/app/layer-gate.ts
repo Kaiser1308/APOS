@@ -164,7 +164,9 @@ export class LayerGate {
       asked.unshift({ name: tool.metric ?? '', thresholds: [] });
     return asked.map((wanted, index) => {
       const id = index === 0 ? checkId : `${checkId}:${wanted.name}`;
-      const measured = { ...tool, ...(wanted.name ? { metric: wanted.name } : {}) };
+      // `value` is the display name for a scalar report, not an object path to look up.
+      const metricPath = wanted.name && (tool.metric || wanted.name !== 'value') ? { metric: wanted.name } : {};
+      const measured = { ...tool, ...metricPath };
       const values: number[] = [];
       for (let n = 0; n < (tool.runs ?? 3); n++) {
         const { exec, report } = this.deps.runner.run(head, measured, tool.command, root);

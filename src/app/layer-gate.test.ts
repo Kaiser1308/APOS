@@ -394,6 +394,26 @@ describe("non-functional criteria (the thresholds are the Goal's)", () => {
       metric: { name: 'p95_ms', value: 160 },
     });
   }, 120_000);
+  it('a scalar metric report can be judged by a benchmark criterion named value', async () => {
+    const goal = goalWith({
+      proof: 'benchmark',
+      benchmark: { tool: 'app.L5.bench', metric: 'value', op: '<', value: 200 },
+    });
+    const { report } = await closeWith(
+      {
+        goal,
+        layers: { L5: [{ id: 'bench', command: 'node scalar.js {report}', format: 'metric' }] },
+        top: closeOnly,
+        files: { 'scalar.js': "require('fs').writeFileSync(process.argv[2], '150');" },
+      },
+      {},
+    );
+    expect(report?.result, JSON.stringify(report?.checks)).toBe('green');
+    expect(report?.checks.find(check => check.checkId === 'app.L5.bench')).toMatchObject({
+      status: 'pass',
+      metric: { name: 'value', value: 150 },
+    });
+  }, 120_000);
   it('fails when the measurement is outside the threshold the Goal set, though the setup has none', async () => {
     const { report } = await closeWith(
       { goal: benchGoal, layers: { L5: [bench()] }, top: closeOnly },

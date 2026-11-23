@@ -13,8 +13,14 @@ export type LoadedCatalog = { entries: CatalogEntry[]; warnings: string[] };
 function readDir(dir: string, codec: SetupCodec, warnings: string[]): CatalogEntry[] {
   if (!existsSync(dir)) return [];
   const entries: CatalogEntry[] = [];
-  for (const name of readdirSync(dir).sort()) {
-    if (!name.endsWith(codec.extension)) continue;
+  const names = readdirSync(dir)
+    .filter(name => name.endsWith('.yaml') || name.endsWith('.json'))
+    .sort((left, right) => {
+      const leftYaml = left.endsWith('.yaml');
+      const rightYaml = right.endsWith('.yaml');
+      return leftYaml === rightYaml ? left.localeCompare(right) : leftYaml ? -1 : 1;
+    });
+  for (const name of names) {
     const path = join(dir, name);
     try {
       const parsed = catalogEntrySchema.safeParse(codec.parse(readFileSync(path, 'utf8')));

@@ -4,34 +4,34 @@ The catalog tells a Lead which tools usually fit a stack, so a project setup can
 
 ## Where it lives
 
-- Shipped with APOS: `catalog/<stack>.json` (python, java-gradle, java-maven, typescript).
+- Shipped with APOS: `catalog/<stack>.yaml` (python, java-gradle, java-maven, typescript).
 - Your own: `~/.apos/catalog/` (or `$APOS_HOME/catalog/`). A file whose `stack` matches a shipped one replaces it; a new `stack` is added. A file that does not parse or does not match the schema is skipped with a warning; it never hides the others.
-
-The file format is the one the build injects as `SetupCodec` (JSON today; see [setup.md](setup.md#switching-to-yaml)).
+- YAML is the preferred format. Existing `.json` catalog files are still read, and a home catalog entry overrides the bundled entry of the same stack.
 
 ## A catalog file
 
-```json
-{
-  "stack": "python",
-  "notes": ["verified: pytest 9.0.2 (--junitxml). Not verified: ruff, mypy, bandit."],
-  "detect": { "files": ["pyproject.toml"], "contains": { "pyproject.toml": "pytest" } },
-  "layers": {
-    "L1": [{ "id": "pytest", "command": "pytest --junitxml={report}", "format": "junit" }],
-    "L2": [
-      {
-        "id": "pytest-acceptance",
-        "command": "pytest tests/acceptance --junitxml={report}",
-        "format": "junit",
-        "runOne": "pytest tests/acceptance -k \"{name}\" --junitxml={report}"
-      }
-    ]
-  },
-  "assertPatterns": ["^\\s*assert\\b"],
-  "notImplementedPatterns": ["NotImplementedError"],
-  "forbid": ["@pytest\\.mark\\.(?:skip|skipif|xfail)"],
-  "needsHuman": ["pyproject.toml", ".github/**"]
-}
+```yaml
+stack: python
+notes:
+  - "verified: pytest 9.0.2 (--junitxml). Not verified: ruff, mypy, bandit."
+detect:
+  files: [pyproject.toml]
+  contains:
+    pyproject.toml: pytest
+layers:
+  L1:
+    - id: pytest
+      command: pytest --junitxml={report}
+      format: junit
+  L2:
+    - id: pytest-acceptance
+      command: pytest tests/acceptance --junitxml={report}
+      format: junit
+      runOne: 'pytest tests/acceptance -k "{name}" --junitxml={report}'
+assertPatterns: ['^\\s*assert\\b']
+notImplementedPatterns: [NotImplementedError]
+forbid: ['@pytest\\.mark\\.(?:skip|skipif|xfail)']
+needsHuman: [pyproject.toml, .github/**]
 ```
 
 | Field | Meaning |
@@ -84,7 +84,7 @@ A missing, empty or broken report is `unverifiable`, never "0 tests, green".
 
 ## Adding a stack or a tool
 
-1. Copy a shipped file to `~/.apos/catalog/<stack>.json` and edit it. Keep the commands in the form the tool really takes: run them once by hand.
+1. Copy a shipped file to `~/.apos/catalog/<stack>.yaml` and edit it. Keep the commands in the form the tool really takes: run them once by hand.
 2. If the tool cannot write one of the formats, write a small script that runs it and writes `apos-json`, and use the script as the tool's `command`. Write it once and reuse it for every project.
 3. Run `apos setup draft`, edit the result, commit it, then `apos setup probe` (see [setup.md](setup.md)). The probe is what proves a command on a real project.
 

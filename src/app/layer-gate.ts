@@ -223,6 +223,7 @@ export class LayerGate {
       head,
       base: atBase && !atBase.problems.length ? atBase.tests : undefined,
       locked,
+      loadErrorPatterns: setup.parts[run.part]?.tests?.loadErrorPatterns,
     });
     return result(checkId, verdict, { newFailures: verdict.newFailures });
   }

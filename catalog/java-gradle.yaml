@@ -1,0 +1,61 @@
+# APOS tool catalog. See docs/catalog.md before changing commands.
+stack: java-gradle
+notes:
+  - 'Not verified on this machine: Gradle (cleanTest test --tests, report directory build/test-results/test).'
+detect:
+  files:
+    - gradlew
+layers:
+  L0:
+    - id: compile
+      command: ./gradlew compileJava compileTestJava
+      format: exit
+  L1:
+    - id: gradle-unit
+      command: ./gradlew cleanTest test --tests "*Unit*"
+      format: junit
+      report: build/test-results/test/*.xml
+  L2:
+    - id: gradle-acceptance
+      command: ./gradlew cleanTest test --tests "*Acceptance*"
+      format: junit
+      report: build/test-results/test/*.xml
+      runOne: ./gradlew cleanTest test --tests "{classname}.{name|noparens}"
+  L3:
+    - id: gradle-integration
+      command: ./gradlew cleanTest test --tests "*Integration*"
+      format: junit
+      report: build/test-results/test/*.xml
+      runOne: ./gradlew cleanTest test --tests "{classname}.{name|noparens}"
+loadErrorPatterns:
+  - initializationError
+  - ClassNotFoundException
+  - NoClassDefFoundError
+  - ExceptionInInitializerError
+testPaths:
+  - src/test/**
+testInfra:
+  - src/test/resources/**
+  - build.gradle*
+  - settings.gradle*
+assertPatterns:
+  - \bassert(?:That|Equals|NotEquals|True|False|Null|NotNull|Same|NotSame|Throws|ThrowsExactly|ArrayEquals|DoesNotThrow|All|Timeout)\s*\(
+  - \bverify\s*\(
+notImplementedPatterns:
+  - UnsupportedOperationException
+  - NotImplementedException
+  - not implemented
+forbid:
+  - "@Disabled\\b"
+  - "@Ignore\\b"
+  - '@SuppressWarnings\s*\(\s*"all"'
+needsHuman:
+  - build.gradle
+  - build.gradle.kts
+  - settings.gradle
+  - settings.gradle.kts
+  - gradle.properties
+  - gradle/**
+  - gradlew
+  - gradlew.bat
+  - .github/**

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { runCli } from '../cli.js';
 import { ProjectJournal } from '../store/journal.js';
-import { jsonCodec } from '../domain/setup-codec.js';
+import { yamlCodec } from '../domain/setup-codec.js';
 import { sourceText, spec } from '../domain/fixtures.test-support.js';
 
 /**
@@ -164,14 +164,14 @@ async function scenario(stack: Stack) {
   await invoke('init');
   await invoke('setup', 'draft');
   // The runners are what this checks; linters and scanners are not installed everywhere.
-  const setup = jsonCodec.parse(readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8')) as {
+  const setup = yamlCodec.parse(readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8')) as {
     parts: Record<string, { layers: Record<string, unknown> }>;
   };
   for (const part of Object.values(setup.parts)) {
     delete part.layers.L0;
     delete part.layers.L5;
   }
-  const base = commit({ '.apos/project.yaml': jsonCodec.stringify(setup) }, 'setup');
+  const base = commit({ '.apos/project.yaml': yamlCodec.stringify(setup) }, 'setup');
   expect(await invoke('setup', 'probe', '--commit', base)).toBeUndefined();
   await invoke('setup', 'approve', '--commit', base, ...human);
   said();

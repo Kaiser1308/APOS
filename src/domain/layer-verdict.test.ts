@@ -33,6 +33,20 @@ describe('judgeTests', () => {
     });
     expect(judge([[t('a', 'skip'), t('b')]], [t('a'), t('b')]).status).toBe('pass');
   });
+  it('tests that never loaded are not a run, even when the base reports the same error', () => {
+    const broken = { id: 'collect', status: 'error' as const, message: 'ImportError while importing test module' };
+    const result = judgeTests({ label: 'api.L3', head: [[broken]], base: [broken], locked: [] });
+    expect(result).toMatchObject({ status: 'unverifiable' });
+    expect(result.reason).toContain('api.L3: tests could not load');
+    const some = judgeTests({
+      label: 'api.L3',
+      head: [[t('ok'), { id: 'b', status: 'fail', message: 'ModuleNotFoundError: x' }]],
+      base: [],
+      locked: [],
+      loadErrorPatterns: ['ModuleNotFoundError'],
+    });
+    expect(some.status).toBe('unverifiable');
+  });
   it('a locked test must pass even though it was red at the base', () => {
     const result = judge([[t('x', 'fail'), t('y')]], [t('x', 'fail'), t('y', 'fail')], ['x', 'y']);
     expect(result).toMatchObject({ status: 'fail', newFailures: [] });

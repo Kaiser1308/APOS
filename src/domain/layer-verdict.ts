@@ -1,3 +1,4 @@
+import { loadFailure } from './results/load-errors.js';
 import type { Finding, TestOutcome } from './results/types.js';
 import { describeThreshold, holds, type Threshold } from './threshold.js';
 
@@ -32,12 +33,18 @@ export function judgeTests(input: {
   base: TestOutcome[] | undefined;
   /** Ids of the tests the lock pins in this layer. */
   locked: string[];
+  /** The stack's `loadErrorPatterns`: a report of tests that never loaded (a collection error) is not a run. */
+  loadErrorPatterns?: string[];
 }): Verdict & { newFailures: string[] } {
   const { label, head } = input;
   const unverifiable = (reason: string) => ({ status: 'unverifiable' as const, reason, newFailures: [] });
   // A report of skipped tests ran nothing: it must not turn a layer green.
   if (!head.length || head.every(run => run.every(test => test.status === 'skip')))
     return unverifiable(`${label}: no test ran, so the layer proves nothing`);
+  for (const run of head) {
+    const broken = loadFailure(run, input.loadErrorPatterns);
+    if (broken) return unverifiable(`${label}: ${broken}`);
+  }
   const differing = disagreement(head);
   if (differing.length)
     return unverifiable(

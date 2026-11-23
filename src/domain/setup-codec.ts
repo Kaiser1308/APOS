@@ -11,6 +11,17 @@ export interface SetupCodec {
 /** `.apos/project.yaml` in the managed repo. A constant, so the format can change without touching callers. */
 export const SETUP_FILE = '.apos/project.yaml';
 
+/** Default codec for project setup and tool catalog files. JSON is a YAML subset, so existing files remain readable. */
+export const yamlCodec: SetupCodec = {
+  extension: '.yaml',
+  parse(text) {
+    const trimmed = text.replace(/^\uFEFF/, '').trim();
+    if (!trimmed) return null;
+    return parse(trimmed);
+  },
+  stringify: value => stringify(value, { indent: 2, lineWidth: 0 }),
+};
+
 /**
  * JSON in files, with one allowance: the flat `key: value` text `apos init` wrote before setup v2
  * (`schemaVersion: 1`), so an existing repo still reads as "no setup".
@@ -26,3 +37,4 @@ export const jsonCodec: SetupCodec = {
   },
   stringify: value => `${JSON.stringify(value, null, 2)}\n`,
 };
+import { parse, stringify } from 'yaml';

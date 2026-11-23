@@ -12,7 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { runCli } from '../cli.js';
-import { jsonCodec } from '../domain/setup-codec.js';
+import { yamlCodec } from '../domain/setup-codec.js';
 import { controllerHome } from '../store/event-log.js';
 import { ProjectJournal } from '../store/journal.js';
 import type { GoalState } from '../domain/transitions.js';
@@ -233,7 +233,7 @@ export function openProject(stack: Stack, cleanup: string[]) {
     stack.prepare?.(dir);
     await invoke('init');
     await invoke('setup', 'draft');
-    const setup = jsonCodec.parse(readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8')) as {
+    const setup = yamlCodec.parse(readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8')) as {
       parts: Record<string, { layers: Record<string, { command: string }[]> }>;
       system?: unknown;
       triggers?: unknown;
@@ -253,7 +253,7 @@ export function openProject(stack: Stack, cleanup: string[]) {
     ] as never;
     setup.system = { L4: [{ id: 'e2e', command: stack.setup.l4, format: 'junit' }] };
     setup.triggers = [{ when: { changed: ['src/ui/**'] }, at: 'submit', run: ['system.L4'] }];
-    const base = commit({ '.apos/project.yaml': jsonCodec.stringify(setup) }, 'setup');
+    const base = commit({ '.apos/project.yaml': yamlCodec.stringify(setup) }, 'setup');
     const probe = await invoke('setup', 'probe', '--commit', base);
     if (probe.code) throw new Error(`the probe failed: ${probe.text}`);
     const approved = await invoke('setup', 'approve', '--commit', base, ...human);

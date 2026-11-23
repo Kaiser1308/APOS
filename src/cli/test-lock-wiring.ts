@@ -5,13 +5,13 @@ import { GitCommitInspector } from '../app/integration.js';
 import { ToolRunner } from '../app/layer-runner.js';
 import { TestLockService } from '../app/test-lock.js';
 import { UserError } from '../domain/errors.js';
-import { jsonCodec } from '../domain/setup-codec.js';
+import { yamlCodec } from '../domain/setup-codec.js';
 import type { ProjectJournal } from '../store/journal.js';
 import type { CliContext } from './context.js';
 
 /** The pinned setup of a Goal, read from the commit it was approved at; undefined when the Goal has none. */
 export function pinnedSetupOf(ctx: CliContext, journal: ProjectJournal, setupVersion: number | undefined) {
-  return loadPinnedSetup(ctx.repo(), journal.setupHistory(), setupVersion, ctx.options.codec ?? jsonCodec);
+  return loadPinnedSetup(ctx.repo(), journal.setupHistory(), setupVersion, ctx.options.codec ?? yamlCodec);
 }
 
 const runnerFor = (ctx: CliContext, journal: ProjectJournal, goalId: string, dir: string) => {

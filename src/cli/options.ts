@@ -7,7 +7,7 @@ export type CliOptions = {
   inspector?: CommitInspector;
   gate?: GateOptions;
   home?: string;
-  /** How setup and catalog files are read and written; JSON unless the build injects another. */
+  /** How setup and catalog files are read and written; YAML by default. */
   codec?: SetupCodec;
   /** Where Human confirmations are asked; the real terminal by default. */
   io?: ConfirmIo;

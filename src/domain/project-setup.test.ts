@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseProjectSetup, parseSetupObject, setupSha256 } from './project-setup.js';
-import { jsonCodec } from './setup-codec.js';
+import { jsonCodec, yamlCodec } from './setup-codec.js';
 import { UserError } from './errors.js';
 
 const tool = { id: 'vitest', command: 'npx vitest run --reporter=junit --outputFile={report}', format: 'junit' };
@@ -125,6 +125,10 @@ describe('parseProjectSetup', () => {
     expect(() => parseProjectSetup('{ nope', jsonCodec)).toThrow(/cannot be read/);
     expect(() => parseProjectSetup('{"schemaVersion":9}', jsonCodec)).toThrow(UserError);
     expect(parseProjectSetup('', jsonCodec)).toEqual({ version: 1 });
+  });
+  it('reads legacy JSON through the default YAML codec and hashes normalized file text', () => {
+    const text = `${JSON.stringify(valid, null, 2)}\r\n`;
+    expect(parseProjectSetup(text, yamlCodec)).toMatchObject({ version: 2, sha256: setupSha256(text) });
   });
   it('round-trips what a codec writes', () => {
     const parsed = parseSetupObject(valid);

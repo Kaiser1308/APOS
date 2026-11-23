@@ -1,0 +1,58 @@
+# APOS tool catalog. See docs/catalog.md before changing commands.
+stack: java-maven
+notes:
+  - 'Not verified on this machine: Maven Surefire (-Dtest, -Dsurefire.failIfNoSpecifiedTests).'
+detect:
+  files:
+    - pom.xml
+layers:
+  L0:
+    - id: compile
+      command: mvn -B -q test-compile
+      format: exit
+  L1:
+    - id: surefire-unit
+      command: mvn -B test -Dtest="*Unit*" -Dsurefire.failIfNoSpecifiedTests=false
+      format: junit
+      report: target/surefire-reports/TEST-*.xml
+  L2:
+    - id: surefire-acceptance
+      command: mvn -B test -Dtest="*Acceptance*" -Dsurefire.failIfNoSpecifiedTests=false
+      format: junit
+      report: target/surefire-reports/TEST-*.xml
+      runOne: mvn -B test -Dtest="{classname}#{name|noparens}" -Dsurefire.failIfNoSpecifiedTests=false
+  L3:
+    - id: surefire-integration
+      command: mvn -B test -Dtest="*Integration*" -Dsurefire.failIfNoSpecifiedTests=false
+      format: junit
+      report: target/surefire-reports/TEST-*.xml
+      runOne: mvn -B test -Dtest="{classname}#{name|noparens}" -Dsurefire.failIfNoSpecifiedTests=false
+loadErrorPatterns:
+  - initializationError
+  - ClassNotFoundException
+  - NoClassDefFoundError
+  - ExceptionInInitializerError
+testPaths:
+  - src/test/**
+testInfra:
+  - src/test/resources/**
+  - pom.xml
+  - '**/pom.xml'
+assertPatterns:
+  - \bassert(?:That|Equals|NotEquals|True|False|Null|NotNull|Same|NotSame|Throws|ThrowsExactly|ArrayEquals|DoesNotThrow|All|Timeout)\s*\(
+  - \bverify\s*\(
+notImplementedPatterns:
+  - UnsupportedOperationException
+  - NotImplementedException
+  - not implemented
+forbid:
+  - "@Disabled\\b"
+  - "@Ignore\\b"
+  - '@SuppressWarnings\s*\(\s*"all"'
+needsHuman:
+  - pom.xml
+  - '**/pom.xml'
+  - .mvn/**
+  - mvnw
+  - mvnw.cmd
+  - .github/**

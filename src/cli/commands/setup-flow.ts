@@ -7,14 +7,14 @@ import { prepareApproval, recordApproval } from '../../app/setup-approve.js';
 import { probeSetup, recordProbe } from '../../app/setup-probe.js';
 import { UserError } from '../../domain/errors.js';
 import { parseProjectSetup } from '../../domain/project-setup.js';
-import { SETUP_FILE, jsonCodec } from '../../domain/setup-codec.js';
+import { SETUP_FILE, yamlCodec } from '../../domain/setup-codec.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
 
 /** apos setup draft | probe | approve | show: the lifecycle of a project's setup (`.apos/project.yaml`). */
 export function registerSetupFlow(ctx: CliContext): void {
   const { program, options, write, writeError, repo, withJournal, withJournalAsync, assertHuman } = ctx;
-  const codec = options.codec ?? jsonCodec;
+  const codec = options.codec ?? yamlCodec;
   const setup = program.command('setup').description('draft, probe and approve the project setup');
   const resolveCommit = (revision: string) => {
     try {
@@ -53,7 +53,11 @@ export function registerSetupFlow(ctx: CliContext): void {
         }),
       );
       const draft = draftSetup(repo(), entries, { parts });
-      writeFileSync(file, codec.stringify(draft.setup), 'utf8');
+      writeFileSync(
+        file,
+        `# Project setup: see docs/setup.md for the schema and workflow.\n${codec.stringify(draft.setup)}`,
+        'utf8',
+      );
       write(`Wrote ${SETUP_FILE}: ${Object.keys(draft.setup.parts).join(', ') || 'no parts'}`);
       for (const note of draft.notes) write(`- ${note}`);
       write('Not committed. Edit it, commit it, then: apos setup probe --commit <sha>');

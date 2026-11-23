@@ -2,6 +2,8 @@
 
 The setup (`.apos/project.yaml`, `schemaVersion: 2`) is the only thing that decides what the gate runs for a project. It is protected: a delivery that edits it fails the gate (`APOS-PROTECTED`). A repo from before v2 (`schemaVersion: 1`) still works and counts as "no setup": every guarantee that depends on a setup is off and the Goal's own checks run as before.
 
+Setup files use YAML. Existing setup files containing JSON remain readable because JSON is valid YAML. APOS hashes the exact setup text after normalizing CRLF and CR line endings to LF.
+
 ## The steps
 
 ```
@@ -19,17 +21,32 @@ apos setup show      # the latest approved version
 
 ## Format of the file
 
-```
+```yaml
 schemaVersion: 2
-parts:        # one per technology; roots must differ
-  backend: { root: backend, stack: java-gradle, layers: { L1: [ ...tools ] }, needsHuman: [...], forbid: [...] }
-system: { L4: [ ...tools ] }                         # layers that span parts
-floor: { submit: [L0, L1, L2], integrate: [L1, L2, L3], close: [L0, ..., L5] }
-triggers: [{ when: { changed: ["frontend/src/ui/**"] }, at: submit, run: ["system.L4"] }]
-mutation: { minScore: 70 }
+parts: # one per technology; roots must differ
+  backend:
+    root: backend
+    stack: java-gradle
+    layers:
+      L1: [ ...tools ]
+    needsHuman: [ ... ]
+    forbid: [ ... ]
+system: # layers that span parts
+  L4: [ ...tools ]
+floor:
+  submit: [L0, L1, L2]
+  integrate: [L1, L2, L3]
+  close: [L0, L1, L2, L3, L4, L5]
+triggers:
+  - when:
+      changed: ["frontend/src/ui/**"]
+    at: submit
+    run: ["system.L4"]
+mutation:
+  minScore: 70
 ```
 
-A part may also say where its tests are and how to read them:
+Use `apos setup draft` to write an editable YAML file with a link to this guide at the top. A part may also say where its tests are and how to read them:
 
 ```
 tests: { paths: ["tests/**", "**/test_*.py"],      # globs relative to the part's root
@@ -68,7 +85,3 @@ The draft starts strict. To loosen it for a project, edit `forbid` (patterns) or
 Every change is a new version: edit, commit, probe, approve. A Goal pins the latest approved version at `goal approve` (`--setup-version <n>` pins an older approved one). A setup approved later does not change a Goal that is running. To move a Goal to the new version: `goal revise`, then `goal approve` again. `goal list` and the UI show `setup vN` or `không có setup`.
 
 The first setup of a project is approved by the Human. Later changes (adding a tool or a layer) may be approved by an agent only on the Human's explicit say-so, with `--on-behalf "<where they agreed>"`.
-
-## Switching to YAML
-
-APOS reads and writes setup and catalog files through one object: `SetupCodec { extension, parse(text), stringify(value) }` (`src/domain/setup-codec.ts`). The shipped codec is JSON; a JSON file is valid YAML, which is why the setup keeps the name `.apos/project.yaml`. Moving to YAML means adding a YAML library, writing a second codec, injecting it in place of `jsonCodec` (`CliOptions.codec`, default in the setup commands) and converting `catalog/*.json`. Nothing else in the core changes.

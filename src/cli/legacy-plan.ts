@@ -70,8 +70,17 @@ export function refactorPlanProblems(ctx: CliContext, journal: ProjectJournal, s
         `the base ${base.slice(0, 12)} does not contain ${lock.commit.slice(0, 12)}, where ${goalId} locked the tests this refactor must keep: plan on a base that has them`,
       );
   const goalPaths = state.spec.paths ?? [];
-  if (!proposal.paths?.length)
+  // The gate scopes a delivery by the proposal's and every package's `paths` and `stubPaths`: all of them stay inside the Goal's.
+  const sources = [
+    { label: 'proposal.paths', globs: proposal.paths ?? [] },
+    { label: 'proposal.stubPaths', globs: proposal.stubPaths ?? [] },
+    ...Object.values(state.packages ?? {}).flatMap(item => [
+      { label: `${item.spec.id} paths`, globs: item.spec.paths ?? [] },
+      { label: `${item.spec.id} stubPaths`, globs: item.spec.stubPaths ?? [] },
+    ]),
+  ];
+  if (proposal.mode !== 'multi-wp' && !proposal.paths?.length)
     problems.push('proposal.paths is required: a refactor says which files its package may change');
-  else problems.push(...planPathProblems({ plan: proposal.paths, goalPaths, files: filesAt(ctx.repo(), base) }));
+  problems.push(...planPathProblems({ plan: sources, goalPaths, files: filesAt(ctx.repo(), base) }));
   return problems;
 }

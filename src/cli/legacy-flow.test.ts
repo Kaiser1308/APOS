@@ -159,7 +159,7 @@ describe('characterize, then refactor', () => {
     await p.invoke('goal', 'select', 'GOAL-R1', ...human);
 
     const base = p.git('rev-parse', 'HEAD');
-    const plan = (paths: string[], version: number) =>
+    const plan = (paths: string[], version: number, extra: object = {}) =>
       p.json('plan.json', {
         id: 'EXEC-R1',
         version,
@@ -171,6 +171,7 @@ describe('characterize, then refactor', () => {
         risks: [],
         baseCommit: base,
         paths,
+        ...extra,
         acceptanceMapping: [],
         verificationStrategy: 'the captured tests',
       });
@@ -178,7 +179,12 @@ describe('characterize, then refactor', () => {
     await expect(p.invoke('lead', 'commit', 'GOAL-R1')).rejects.toThrow(
       /reaches past the Goal's paths.*src\/other\.txt/,
     );
-    const fixed = plan(['src/impl.txt'], 2);
+    // The same through stubPaths, which the gate also takes as scope.
+    await p.invoke('lead', 'propose', '--file', plan(['src/impl.txt'], 2, { stubPaths: ['src/other.txt'] }));
+    await expect(p.invoke('lead', 'commit', 'GOAL-R1')).rejects.toThrow(
+      /proposal\.stubPaths "src\/other\.txt" reaches past/,
+    );
+    const fixed = plan(['src/impl.txt'], 3);
     await p.invoke('lead', 'propose', '--file', fixed);
     await p.invoke('lead', 'commit', 'GOAL-R1');
     expect(p.state('GOAL-R1')?.status).toBe('executing');
@@ -205,6 +211,7 @@ describe('characterize, then refactor', () => {
     p.out.length = 0;
     await p.invoke('package', 'submit', 'GOAL-R1', 'WP-MAIN', '--commit', stray);
     expect(p.out.join('\n')).toContain('APOS-SCOPE');
+    expect(p.out.join('\n')).toContain('APOS-REFACTOR-SCOPE');
     process.exitCode = undefined;
     // One that keeps add working is green, and the table says what was kept.
     const good = p.commit({ 'src/other.txt': 'other\n' }, 'put the stray file back');

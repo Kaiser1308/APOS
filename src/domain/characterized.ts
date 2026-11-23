@@ -1,6 +1,7 @@
 import { lockedTestsCheck, type TestSet } from './assurance.js';
 import type { CheckResult } from './gate.js';
 import type { Characterization } from './legacy.js';
+import { matchesAny } from './glob.js';
 import { lockedTestKeys } from './test-lock.js';
 
 export const CHARACTERIZED_CHECK = 'APOS-CHARACTERIZED';
@@ -66,4 +67,36 @@ export function characterizedCheck(input: {
       preserved: { tests, from },
     },
   );
+}
+
+export const REFACTOR_SCOPE_CHECK = 'APOS-REFACTOR-SCOPE';
+
+/**
+ * A refactor touches only what the Human approved with it: every file the delivery changed matches the Goal's `paths`,
+ * whatever scope the plan or a package declared (a plan the Lead can still change must not widen it). Files under `.apos/`,
+ * locked tests and sensitive files (judged by their own checks) are left to those checks.
+ */
+export function refactorScopeCheck(input: {
+  changed: string[];
+  paths: string[];
+  needsHuman: string[];
+  lockedFiles: string[];
+}): CheckResult {
+  const outside = input.changed.filter(
+    file =>
+      !file.startsWith('.apos/') &&
+      !input.lockedFiles.includes(file) &&
+      !matchesAny(file, input.needsHuman) &&
+      !matchesAny(file, input.paths),
+  );
+  return {
+    checkId: REFACTOR_SCOPE_CHECK,
+    status: outside.length ? 'fail' : 'pass',
+    reason: outside.length
+      ? `outside the paths the Human approved for this refactor (${input.paths.join(', ')}): ${outside.join(', ')}`
+      : 'every changed file is inside the refactor paths the Human approved',
+    base: [],
+    delivery: [],
+    newFailures: [],
+  };
 }

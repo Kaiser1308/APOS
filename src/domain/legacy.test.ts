@@ -77,14 +77,26 @@ describe('refactorCoverage', () => {
 
 describe('planPathProblems', () => {
   const files = ['legacy/a.py', 'legacy/b.py', 'other/c.py'];
+  const one = (globs: string[], label = 'proposal.paths') => [{ label, globs }];
   it('allows the Goal paths and globs inside them, and refuses one that reaches past', () => {
-    expect(planPathProblems({ plan: ['legacy/**'], goalPaths: ['legacy/**'], files })).toEqual([]);
-    expect(planPathProblems({ plan: ['legacy/a.py'], goalPaths: ['legacy/**'], files })).toEqual([]);
-    expect(planPathProblems({ plan: ['**'], goalPaths: ['legacy/**'], files })).toEqual([
+    expect(planPathProblems({ plan: one(['legacy/**']), goalPaths: ['legacy/**'], files })).toEqual([]);
+    expect(planPathProblems({ plan: one(['legacy/a.py']), goalPaths: ['legacy/**'], files })).toEqual([]);
+    expect(planPathProblems({ plan: one(['**']), goalPaths: ['legacy/**'], files })).toEqual([
       expect.stringContaining('other/c.py'),
     ]);
-    expect(planPathProblems({ plan: ['nowhere/**'], goalPaths: ['legacy/**'], files })).toEqual([
+    expect(planPathProblems({ plan: one(['nowhere/**']), goalPaths: ['legacy/**'], files })).toEqual([
       expect.stringContaining('matches no file'),
+    ]);
+  });
+  it('judges every source of scope and names which one reaches past: stubPaths and each package count', () => {
+    const problems = planPathProblems({
+      plan: [...one(['legacy/**']), ...one(['other/c.py'], 'proposal.stubPaths'), ...one(['other/**'], 'WP-B paths')],
+      goalPaths: ['legacy/**'],
+      files,
+    });
+    expect(problems).toEqual([
+      expect.stringContaining('proposal.stubPaths "other/c.py" reaches past'),
+      expect.stringContaining('WP-B paths "other/**" reaches past'),
     ]);
   });
 });

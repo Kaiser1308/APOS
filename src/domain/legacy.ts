@@ -59,21 +59,27 @@ export function coverageProblems(coverage: Coverage, at: string): string[] {
 }
 
 /**
- * The paths a refactor plan may name: each must be one of the Goal's own, or match only files the Goal's paths match
- * (a plan cannot reach past what the Human approved). A glob that matches no file is allowed only when it is the Goal's own.
+ * The paths a refactor plan may name, from wherever the gate takes its scope (`paths` and `stubPaths` of the proposal and of
+ * every package): each must be one of the Goal's own, or match only files the Goal's paths match (a plan cannot reach past
+ * what the Human approved). A glob that matches no file is allowed only when it is the Goal's own.
  */
-export function planPathProblems(input: { plan: string[]; goalPaths: string[]; files: string[] }): string[] {
+export function planPathProblems(input: {
+  plan: { label: string; globs: string[] }[];
+  goalPaths: string[];
+  files: string[];
+}): string[] {
   const problems: string[] = [];
-  for (const glob of input.plan) {
-    if (input.goalPaths.includes(glob)) continue;
-    const hits = input.files.filter(file => matchesAny(file, [glob]));
-    const outside = hits.filter(file => !matchesAny(file, input.goalPaths));
-    if (!hits.length) problems.push(`proposal.paths "${glob}" matches no file and is not one of the Goal's paths`);
-    else if (outside.length)
-      problems.push(
-        `proposal.paths "${glob}" reaches past the Goal's paths (${input.goalPaths.join(', ')}): ${outside.join(', ')}`,
-      );
-  }
+  for (const { label, globs } of input.plan)
+    for (const glob of globs) {
+      if (input.goalPaths.includes(glob)) continue;
+      const hits = input.files.filter(file => matchesAny(file, [glob]));
+      const outside = hits.filter(file => !matchesAny(file, input.goalPaths));
+      if (!hits.length) problems.push(`${label} "${glob}" matches no file and is not one of the Goal's paths`);
+      else if (outside.length)
+        problems.push(
+          `${label} "${glob}" reaches past the Goal's paths (${input.goalPaths.join(', ')}): ${outside.join(', ')}`,
+        );
+    }
   return problems;
 }
 

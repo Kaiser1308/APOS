@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { characterizedCheck, CHARACTERIZED_CHECK } from './characterized.js';
+import { characterizedCheck, CHARACTERIZED_CHECK, refactorScopeCheck } from './characterized.js';
 import type { Characterization } from './legacy.js';
 import type { TestLock } from './test-lock.js';
 
@@ -61,5 +61,21 @@ describe('characterizedCheck', () => {
   });
   it('is red with no characterization at all', () => {
     expect(characterizedCheck({ ...input, sources: [] }).status).toBe('fail');
+  });
+});
+
+describe('refactorScopeCheck', () => {
+  const base = { paths: ['legacy/pricing.py'], needsHuman: ['pyproject.toml'], lockedFiles: ['tests/test_a.py'] };
+  it('passes when every changed file is inside the paths the Human approved', () => {
+    expect(refactorScopeCheck({ ...base, changed: ['legacy/pricing.py', '.apos/goals/G/x.md'] }).status).toBe('pass');
+  });
+  it('is red for a file outside them, whatever the plan said: the Goal paths are the limit', () => {
+    const check = refactorScopeCheck({ ...base, changed: ['legacy/pricing.py', 'legacy/shipping.py'] });
+    expect(check.status).toBe('fail');
+    expect(check.reason).toContain('legacy/shipping.py');
+    expect(check.reason).not.toContain('legacy/pricing.py,');
+  });
+  it('leaves sensitive files and locked tests to their own checks', () => {
+    expect(refactorScopeCheck({ ...base, changed: ['pyproject.toml', 'tests/test_a.py'] }).status).toBe('pass');
   });
 });

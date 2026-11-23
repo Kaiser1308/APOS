@@ -22,6 +22,7 @@ import { fileAt, filesAt, sha256Of } from './git-files.js';
 import type { ToolRunner } from './layer-runner.js';
 import type { LayerId } from '../domain/layers.js';
 import { LayerGate, type LayerGateInput } from './layer-gate.js';
+import { refactorScopeCheck } from '../domain/characterized.js';
 import { characterizeScopeCheck, characterizedResult, coverageOfRefactor } from './characterized-gate.js';
 
 export type AssuranceDeps = {
@@ -244,6 +245,15 @@ export class AssuranceService {
         }
       checks.push(infraCheck({ lockInfra: lock.infra, delivery: now, inherited }));
     }
+    if (state.spec.kind === 'refactor')
+      checks.push(
+        refactorScopeCheck({
+          changed: changed.filter(file => !inherited.has(file)),
+          paths: state.spec.paths ?? [],
+          needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
+          lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
+        }),
+      );
     const paths = item.spec.paths;
     if (paths?.length)
       checks.push(

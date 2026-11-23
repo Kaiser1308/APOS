@@ -21,6 +21,12 @@ let cases = [
   ['legacy', fs.existsSync('legacy.flag') ? 'known defect' : ''],
   ['flaky', flip ? 'flipped' : ''],
 ];
+if (deps.dropOnce && process.env.APOS_DROP_ONCE) {
+  const file = process.env.APOS_DROP_ONCE;
+  const n = fs.existsSync(file) ? Number(fs.readFileSync(file, 'utf8')) : 0;
+  fs.writeFileSync(file, String(n + 1));
+  if (n === 2) cases = cases.filter(([name]) => name !== deps.dropOnce);
+}
 if (deps.drop) cases = cases.filter(([name]) => name !== deps.drop);
 const xml = cases.map(([name, bad]) => '<testcase classname="s" name="' + name + '">' + (deps.skip === name ? '<skipped/>' : deps.collect ? '<error message="collection error"/>' : bad ? '<failure message="' + bad + '"/>' : '') + '</testcase>').join('');
 fs.writeFileSync(process.argv[2], '<testsuite name="s">' + xml + '</testsuite>');

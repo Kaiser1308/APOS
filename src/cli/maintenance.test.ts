@@ -17,6 +17,7 @@ afterEach(() => {
   delete process.env.APOS_SCAN_FLAKY;
   delete process.env.APOS_SCAN_SEVERITY;
   delete process.env.APOS_EXIT_ON;
+  delete process.env.APOS_DROP_ONCE;
   if (saved === undefined) delete process.env.APOS_HOME;
   else process.env.APOS_HOME = saved;
   removeTemp();
@@ -289,6 +290,17 @@ describe('the gate of a maintenance Goal', () => {
     const second = await submit(p, skipped);
     expect(second.code).toBe(1);
     expect(second.text).toMatch(/not run any more: s::fmt-api/);
+  });
+
+  it('is unverifiable, not red, when a test is missing in one delivery run and back in the other', async () => {
+    const p = await prepare();
+    const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0', dropOnce: 'legacy' }) });
+    // The runs of L1, in order: inventory (head, base), then the layer on the head twice: the third overall is its first.
+    process.env.APOS_DROP_ONCE = `${temp('apos-drop-')}/counter`;
+    const got = await submit(p, sha);
+    expect(got.code).toBe(3);
+    expect(got.text).toMatch(/runs disagree/);
+    expect(p.state('GOAL-MAINT-001')!.packages?.['WP-MAIN']?.attempts).toBe(0);
   });
 
   it('is unverifiable when the base reports tests that never loaded, not red for the failures the delivery shows', async () => {

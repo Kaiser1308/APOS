@@ -324,13 +324,6 @@ export class LayerGate {
       .filter(entry => entry.part === run.part && entry.layer === run.layer && answersFor(entry.acceptanceId))
       .flatMap(entry => entry.testIds)
       .filter(id => !shared || !owned || owned.has(id));
-    // A maintenance Goal answers for the tests it had: one the delivery no longer runs (gone, or skipped) is lost coverage.
-    const lost = maintenance && atBase && head[0] ? lostTests(atBase.tests, head[0]) : [];
-    if (lost.length)
-      return result(checkId, {
-        status: 'fail',
-        reason: `${label}: ${lost.length} test(s) of the base are not run any more: ${lost.slice(0, 5).join(', ')}${lost.length > 5 ? ', ...' : ''}`,
-      });
     const verdict = judgeTests({
       label,
       head,
@@ -342,9 +335,23 @@ export class LayerGate {
       maintenance && atBase && !atBase.problems.length
         ? atBase.tests.filter(test => test.status === 'fail' || test.status === 'error').length
         : undefined;
-    return result(checkId, verdict, {
-      newFailures: verdict.newFailures,
-      ...(baseFailing === undefined ? {} : { baseFailing }),
-    });
+    // A maintenance Goal answers for the tests it had: one the delivery no longer runs (gone, or skipped) is lost coverage.
+    // Judged after the runs were found to agree and to have loaded, so an inconclusive delivery stays `unverifiable`.
+    const lost =
+      maintenance && atBase && verdict.status !== 'unverifiable' && head[0] ? lostTests(atBase.tests, head[0]) : [];
+    const lostNote = `${lost.length} test(s) of the base are not run any more: ${lost.slice(0, 5).join(', ')}${lost.length > 5 ? ', ...' : ''}`;
+    return result(
+      checkId,
+      lost.length
+        ? {
+            status: 'fail',
+            reason: verdict.status === 'fail' ? `${verdict.reason}; ${lostNote}` : `${label}: ${lostNote}`,
+          }
+        : verdict,
+      {
+        newFailures: verdict.newFailures,
+        ...(baseFailing === undefined ? {} : { baseFailing }),
+      },
+    );
   }
 }

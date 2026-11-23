@@ -13,6 +13,7 @@ import { pinnedSetupOf } from '../test-lock-wiring.js';
 import { approvalSetupVersion, baselineMissingOf } from '../goal-approval.js';
 import { maintenanceApprovalProblems } from '../../domain/maintenance.js';
 import { refactorApprovalProblems } from '../legacy-plan.js';
+import { removalApproval } from '../removal-approval.js';
 import type { CliContext } from '../context.js';
 
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
@@ -139,6 +140,14 @@ export function registerGoal(ctx: CliContext): void {
             ? maintenanceApprovalProblems(state.spec, pinnedSetupOf(ctx, journal, setupVersion))
             : [];
         if (unscanned.length) throw new UserError(`${id} cannot be approved:\n- ${unscanned.join('\n- ')}`);
+        // A Goal that removes tests shows which ones, found on the repo as it is now, before the Human confirms.
+        const removal = state ? removalApproval(ctx, journal, state, setupVersion) : { problems: [], lines: [] };
+        if (removal.problems.length)
+          throw new UserError(`${id} cannot be approved:\n- ${removal.problems.join('\n- ')}`);
+        if (removal.lines.length) {
+          write(`${id} will remove these tests, and only these (the rest must stay):`);
+          for (const line of removal.lines) write(line);
+        }
         const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
         new GoalRegistryService(journal).approve(
           id,

@@ -2,7 +2,8 @@ import { characterizedCheck } from '../domain/characterized.js';
 import type { TestSet } from '../domain/assurance.js';
 import type { CheckResult } from '../domain/gate.js';
 import { characterizations, refactorCoverage, type Characterization, type Coverage } from '../domain/legacy.js';
-import type { GoalState } from '../domain/transitions.js';
+import { removalOf, withoutRemoved } from '../domain/removal.js';
+import { effectiveStatus, type GoalState } from '../domain/transitions.js';
 import { rootedGlobs, matchesAny } from '../domain/glob.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
@@ -25,6 +26,12 @@ export function coverageOfRefactor(
     item => !inspector || !base || inspector.contains(repo, item.lock.commit, base),
   );
   const coverage = refactorCoverage({ paths, files: base ? filesAt(repo, base) : [], characterized: held });
+  // A Goal that removed tests after the lock took them out of what a refactor must keep: the Human approved that list.
+  if (inspector) {
+    const changed = (item: Characterization) => afterRemovals(repo, goals, item, inspector);
+    coverage.sources = coverage.sources.map(changed);
+    coverage.held = coverage.held.map(changed);
+  }
   // The oldest lock first: where two Goals locked the same file the newest version is the one a delivery must hold.
   if (inspector) {
     const older = (a: Characterization, b: Characterization) =>
@@ -37,6 +44,40 @@ export function coverageOfRefactor(
     coverage.held.sort(older);
   }
   return coverage;
+}
+
+/**
+ * A characterization with the tests the closed removal Goals took out since its lock (those whose verified commit holds
+ * the lock) left out, and the files they changed held as they left them. Goals that removed tests before the lock count for nothing.
+ */
+function afterRemovals(
+  repo: string,
+  goals: GoalState[],
+  item: Characterization,
+  inspector: CommitInspector,
+): Characterization {
+  let lock = item.lock;
+  const removals = goals
+    .filter(state => effectiveStatus(state) === 'closed' && removalOf(state.spec).length && state.verifiedCommit)
+    .sort((a, b) => a.spec.id.localeCompare(b.spec.id));
+  for (const state of removals) {
+    const commit = state.verifiedCommit!;
+    if (!inspector.contains(repo, lock.commit, commit)) continue;
+    // Only a removal that took tests out of this lock's map has anything to say about its files: one that merely edited a
+    // captured test it kept is not excused (the refactor's check still holds the file to what was locked).
+    const count = (item: typeof lock) => item.map.reduce((sum, entry) => sum + entry.testIds.length, 0);
+    if (count(withoutRemoved(lock, removalOf(state.spec), {})) === count(lock)) continue;
+    const files = Object.fromEntries(
+      Object.keys(lock.files)
+        .filter(path => state.gate?.changedFiles?.includes(path))
+        .map(path => {
+          const content = fileAt(repo, commit, path);
+          return [path, content ? sha256Of(content) : undefined];
+        }),
+    );
+    lock = withoutRemoved(lock, removalOf(state.spec), files);
+  }
+  return { ...item, lock };
 }
 
 /** The check of `APOS-CHARACTERIZED` on a delivery, from the two runs of the layers the captured tests live in. */

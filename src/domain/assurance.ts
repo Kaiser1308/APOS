@@ -1,5 +1,6 @@
 import type { CheckResult } from './gate.js';
 import { matchesAny } from './glob.js';
+import { entryMatches, type RemovedTest } from './removal.js';
 import { testRefKey, type ReviewTestLock } from './review-tests.js';
 import { testKey, type LayerOutcome, type TestLock } from './test-lock.js';
 
@@ -77,29 +78,60 @@ export function lockedTestsCheck(input: {
 /**
  * No test is lost: every test that ran (pass, fail or error) at the base is still in the delivery and not skipped, and
  * no `forbid` pattern shows up in a line the delivery added. A skipped test at the base may stay skipped.
+ *
+ * A Goal with `removed` criteria declares the old tests that go (`removable`): exactly those may be gone. A declared test
+ * the delivery still has (whatever its status), or one the base never had, is red; so is any other test that is gone.
+ * `lockedBy` says which other Goal locked a test, so the table can say whose tests went.
  */
 export function inventoryCheck(input: {
   base: TestSet;
   delivery: TestSet;
   addedLines: string[];
   forbid: string[];
+  removable?: RemovedTest[];
+  lockedBy?: (key: string) => string | undefined;
 }): CheckResult {
   const problems: string[] = [];
+  const declared = input.removable ?? [];
+  const isDeclared = (key: string) => declared.some(item => entryMatches(item.entry, key));
+  const removed: string[] = [];
   for (const [key, status] of Object.entries(input.base)) {
-    if (status === 'skip') continue;
     const now = input.delivery[key];
+    if (isDeclared(key)) {
+      if (now !== undefined) problems.push(`declared removed but still there: ${key}`);
+      else removed.push(key);
+      continue;
+    }
+    if (status === 'skip') continue;
     if (now === undefined) problems.push(`test missing: ${key}`);
     else if (now === 'skip') problems.push(`test now skipped: ${key}`);
   }
+  for (const item of declared)
+    if (!Object.keys(input.base).some(key => entryMatches(item.entry, key)))
+      problems.push(`declared removed but not on the base: ${item.entry}`);
   for (const pattern of input.forbid) {
     const re = new RegExp(pattern);
     const hit = input.addedLines.find(line => re.test(line));
     if (hit !== undefined)
       problems.push(`forbidden pattern /${pattern}/ in an added line: ${hit.trim().slice(0, 120)}`);
   }
-  return problems.length
-    ? result(INVENTORY_CHECK, 'fail', problems.join('; '))
-    : result(INVENTORY_CHECK, 'pass', `${Object.keys(input.base).length} tests at the base are all still there`);
+  if (problems.length) return result(INVENTORY_CHECK, 'fail', problems.join('; '));
+  const kept = Object.keys(input.base).length - removed.length;
+  if (!declared.length) return result(INVENTORY_CHECK, 'pass', `${kept} tests at the base are all still there`);
+  const owners = new Map<string, string[]>();
+  for (const key of removed) {
+    const owner = input.lockedBy?.(key);
+    if (owner) owners.set(owner, [...(owners.get(owner) ?? []), key]);
+  }
+  const locked = [...owners].sort(([a], [b]) => a.localeCompare(b)).map(([goalId, tests]) => ({ goalId, tests }));
+  return {
+    ...result(
+      INVENTORY_CHECK,
+      'pass',
+      `${kept} tests at the base are all still there; the ${removed.length} declared as removed are gone`,
+    ),
+    removal: { tests: removed, locked },
+  };
 }
 
 /**

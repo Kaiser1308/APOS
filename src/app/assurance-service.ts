@@ -22,7 +22,15 @@ import type { LayerId } from '../domain/layers.js';
 import { LayerGate, type LayerGateInput } from './layer-gate.js';
 import { maintenanceScope } from '../domain/maintenance.js';
 import { refactorScopeCheck } from '../domain/characterized.js';
-import { addedLines, integrationChecks, judgedByAPackage, unverifiable } from './integration-assurance.js';
+import {
+  addedLines,
+  closeInventory,
+  integrationChecks,
+  judgedByAPackage,
+  unverifiable,
+} from './integration-assurance.js';
+import { inventoryLayers, lockedByOthers } from './removal-gate.js';
+import { removalEntries, removalOf } from '../domain/removal.js';
 import { characterizeScopeCheck, characterizedResult, coverageOfRefactor } from './characterized-gate.js';
 
 export type AssuranceDeps = {
@@ -54,6 +62,7 @@ export class AssuranceService {
     // A refactor holds the captured tests at every later stage too: the close stage reads them on the verified commit.
     // The scope the Human approved with a legacy Goal binds the integration commit and the close stage like a package.
     if (input.stage !== 'submit') ran.checks = [...ran.checks, ...this.legacyChecks(state, input)];
+    if (input.stage === 'close') ran.checks = [...ran.checks, ...this.removalChecks(state, input)];
     if (input.stage !== 'integrate') return ran;
     ran.checks = [...ran.checks, ...this.integration(state, input)];
     // A review of the integration commit locks its tests into every later integration commit, like a package's.
@@ -71,7 +80,23 @@ export class AssuranceService {
     const setup = this.deps.loadSetup(state);
     if (!setup) return [];
     const runTests = (...args: Parameters<AssuranceService['runTests']>) => this.runTests(...args);
-    return integrationChecks({ repo: this.deps.repo, setup, runTests }, state, input);
+    return integrationChecks({ repo: this.deps.repo, setup, runTests, goals: this.deps.goals }, state, input);
+  }
+
+  /** What the tests declared removed owe at the close stage: a Goal without `removed` criteria is asked nothing here. */
+  private removalChecks(state: GoalState, input: LayerGateInput): CheckResult[] {
+    const setup = this.deps.loadSetup(state);
+    if (!setup) return [];
+    return closeInventory({
+      repo: this.deps.repo,
+      setup,
+      state,
+      removable: removalOf(state.spec),
+      base: input.base,
+      head: input.head,
+      goals: this.deps.goals?.(),
+      runTests: (...args) => this.runTests(...args),
+    });
   }
 
   /** The checks of a characterize or refactor Goal at a stage that sees the whole Goal (the integration commit, the close). */
@@ -221,11 +246,12 @@ export class AssuranceService {
     const { repo } = this.deps;
     const lock = state.testLock;
     const reviews = (state.reviewTests ?? []).filter(review => review.packageId === item.spec.id);
-    const wanted = new Map<string, { part: string; layer: LayerId }>();
-    for (const [part, where] of Object.entries(setup.parts))
-      if (where.layers.L1?.length) wanted.set(`${part}.L1`, { part, layer: 'L1' });
-    for (const entry of lock?.map ?? [])
-      wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
+    // The package answers for the removals of its own criteria: the tests of an old feature go with the package that owns it.
+    const removable = removalEntries(
+      state.spec,
+      item.spec.acceptance.flatMap(criterion => (criterion.goalAcceptanceId ? [criterion.goalAcceptanceId] : [])),
+    );
+    const wanted = inventoryLayers(setup, lock, removable);
 
     for (const review of reviews)
       for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
@@ -267,6 +293,8 @@ export class AssuranceService {
             delivery: delivery.set,
             addedLines: addedLines(repo, base, head),
             forbid: Object.values(setup.parts).flatMap(part => part.forbid),
+            removable,
+            lockedBy: lockedByOthers(this.deps.goals?.(), state.spec.id),
           }),
     );
     const inherited = this.inherited(state, item, head, base);

@@ -149,3 +149,29 @@ APOS v2 started, resumed, woke and watched agents through Orca (`controller watc
 - **A weakened test whose assertion count does not fall**, or a stub-test pair that agrees to prove nothing. The count is a line regex; the second net is mutation testing (phase 5).
 - **Tests that reach inside the code instead of the declared entries.** Not checked until the catalogue has a rule per stack (phase 4).
 - **A live run of a Lead and an orchestrator on a real project.** The end-to-end tests drive the CLI on scratch repos.
+
+## Layers by stage, non-functional proof and the assurance table (phase 4)
+
+| Injected fault | Expected | Test |
+| --- | --- | --- |
+| A floor or triggered layer has no test at that stage (focus 1) | `unverifiable`, the message names the layer (`app.L1 unit: no test ran`) | `layer-gate.test.ts` › a floor layer in which no test ran is unverifiable and names the layer; `layer-verdict.test.ts` › is unverifiable, naming the layer, when no test ran at all |
+| A layer fails (exit code, new failure, locked test) | red, the check is `<part>.<layer>.<tool>` | `layer-gate.test.ts` › L0 is an exit-code tool: red on a non-zero exit; `layer-verdict.test.ts` › a locked test must pass even though it was red at the base |
+| The Lead adds a layer the setup does not have (focus 2) | `lead commit` refuses and names the layer | `lead-commit-plan.test.ts` › refuses a plan whose Lead-added layer is not in the setup; `layer-plan.test.ts` › layerChoiceProblems |
+| The Lead adds layers to a Goal with no setup | refused: nothing would run | `lead-commit-plan.test.ts` › refuses added layers for a Goal that has no setup |
+| A benchmark's runs land on both sides of the threshold (focus 3) | `unverifiable`, never the best run | `layer-verdict.test.ts` › is unverifiable when runs land on both sides; `layer-gate.test.ts` › runs on both sides of the threshold are unverifiable |
+| A test layer's repeated runs disagree | `unverifiable` | `layer-gate.test.ts` › runs a test layer as many times as the setup says, and flaky results are unverifiable |
+| A SARIF finding below `failOn` (focus 4) | not red; the count is on the table | `layer-gate.test.ts` › a SARIF finding below failOn is not red, but its count is kept; `assurance-report.test.ts` › shows what a SARIF layer found below the blocking level |
+| A SARIF finding at `failOn` or above | red, names the rule and file | `layer-gate.test.ts` › a SARIF finding at the blocking level is red |
+| The integration gate of a Multi-WP Goal runs no layer (focus 5) | it runs the integrate stage on the integration commit; a broken L3 test is red and named | `layers-multi.test.ts` (real pytest and vitest) |
+| A package is judged on the locked tests of another package | each package answers only for its own criteria; the Goal for all at integrate and close | `layers-multi.test.ts` |
+| A setup threshold looser than the Goal's | the Goal's holds; both must hold | `layer-gate.test.ts` › a setup threshold cannot loosen the Goal |
+| A benchmark or scan criterion names a tool the pinned setup lacks or has with another format | `goal approve` refuses, naming criterion and tool | `goal-approve-proof.test.ts` |
+| Dropping a floor layer without an exception, or with one for another scope, stage or layer | the layer runs | `layer-plan.test.ts` › reductions; `exceptions.test.ts` › floor-reduced |
+| An exception recorded after a gate ran | it never re-judges that gate; it counts for the next | `layer-gate.test.ts` › a floor layer cut by an approved exception … by log order |
+| A trigger, the Lead or a criterion names a layer the floor also cuts | it still runs | `layer-plan.test.ts` › cannot cancel what a trigger or the Goal asked for |
+| Close with a red close-stage layer | refused, names the layer; an exception on `<goal>:close:<layer>` lets the same commit close | `close-layers.test.ts`; `layer-gate.test.ts` › layers at the close stage |
+| Close of a Goal whose close-stage layers never ran | refused | `layer-gate.test.ts` › … refuses to close one whose layers never ran |
+| An acceptance test imports an internal module that is not a declared entry | `tests submit` / `revise` refuse, naming file and line | `test-entry-rule.test.ts`; `entry-rule.test.ts` |
+| A stack with no entry rule | not checked; the table says "chưa kiểm" | `test-entry-rule.test.ts`; `assurance-report.test.ts` |
+| An agent cuts a layer or weakens tests | logged as `agent:<name>`, listed on the table with "agent duyệt thay: n chỗ" | `assurance-report.test.ts` › names who approved each exception; `layers-flow.test.ts` |
+

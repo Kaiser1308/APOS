@@ -35,6 +35,17 @@ describe('Goal contract', () => {
   it('rejects acceptance without a check', () => {
     expect(() => parseGoalSpec({ ...goal, acceptance: [{ ...goal.acceptance[0], checkIds: [] }] })).toThrow();
   });
+  it('allows a Goal whose criteria are all proved by benchmark or scan tools without Goal checks', () => {
+    const acceptance = [
+      {
+        ...goal.acceptance[0]!,
+        checkIds: [],
+        proof: 'benchmark' as const,
+        benchmark: { tool: 'app.L5.bench', metric: 'p95_ms', op: '<' as const, value: 200 },
+      },
+    ];
+    expect(parseGoalSpec({ ...goal, checks: [], acceptance }).checks).toEqual([]);
+  });
   it('requires a reason to exclude a requirement and forbids accepting an excluded one', () => {
     const excluded = { ...goal.requirements[0], disposition: 'excluded' as const };
     expect(() => parseGoalSpec({ ...goal, requirements: [excluded] })).toThrow(/needs a reason/);

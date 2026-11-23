@@ -31,6 +31,7 @@ import { untrustedProtectedFiles } from './protected-milestones.js';
 import { ShellExecutor, type CommandExecutor } from './shell-executor.js';
 import { GitWorktreeFactory, type WorkspaceFactory } from './gate-workspace.js';
 import type { AssuranceService } from './assurance-service.js';
+import { recordCloseGate } from './close-gate.js';
 
 export type { CommandExecutor, ExecResult } from './shell-executor.js';
 export { ShellExecutor } from './shell-executor.js';
@@ -58,7 +59,7 @@ export type GateOptions = {
   artifactRoot?: string;
   sourceDigest?: (repoPath: string, goalId: string) => string | undefined;
   /** The locked-tests, inventory and scope checks of a package gate; without it a gate runs the Goal's checks only. */
-  assurance?: Pick<AssuranceService, 'checks'>;
+  assurance?: Pick<AssuranceService, 'checks' | 'layerChecks'>;
   now?: () => string;
 };
 
@@ -69,7 +70,7 @@ export class GateService {
   private readonly artifactRoot: string;
   private readonly digest: (repoPath: string, goalId: string) => string | undefined;
   private readonly now: () => string;
-  private readonly assurance?: Pick<AssuranceService, 'checks'>;
+  private readonly assurance?: Pick<AssuranceService, 'checks' | 'layerChecks'>;
 
   constructor(
     private readonly store: GoalRepository,
@@ -147,6 +148,14 @@ export class GateService {
     const guard = protectedCheck(goalId, untrustedProtectedFiles(this.store, goalId, repoPath, head, changedFiles));
     if (guard) checks.push(guard);
     checks.push(...(this.assurance?.checks(state, item, head, base, changedFiles) ?? []));
+    const layered = this.assurance?.layerChecks(state, {
+      stage: 'submit',
+      scope: packageId,
+      head,
+      base,
+      changed: changedFiles,
+    });
+    checks.push(...(layered?.checks ?? []));
     const report: GateReport = {
       gateId: `GATE-${randomUUID()}`,
       goalId,
@@ -157,6 +166,7 @@ export class GateService {
       attemptKey: `${item.spec.id}@${item.spec.version}:${item.attempts}`,
       ...(state.setupVersion === undefined ? {} : { setupVersion: state.setupVersion }),
       phase: 'delivery',
+      ...(layered?.layers ? { layers: layered.layers } : {}),
       changedFiles,
       warnings: gateWarnings({
         spec: state.spec,
@@ -234,6 +244,18 @@ export class GateService {
           )
         : undefined;
     if (guard) checks.push(guard);
+    // The integration commit of a Multi-WP Goal runs the layers of the integrate stage, on top of the Goal's own checks.
+    const layered =
+      phase === 'delivery' && state.proposal?.mode === 'multi-wp'
+        ? this.assurance?.layerChecks(state, {
+            stage: 'integrate',
+            scope: goalId,
+            head: input.deliveryCommit,
+            base: state.testLock?.commit ?? baseCommit,
+            changed: changedFiles,
+          })
+        : undefined;
+    checks.push(...(layered?.checks ?? []));
     const report: GateReport = {
       gateId,
       goalId,
@@ -244,6 +266,7 @@ export class GateService {
       attemptKey: attempt,
       ...(state.setupVersion === undefined ? {} : { setupVersion: state.setupVersion }),
       phase,
+      ...(layered?.layers ? { layers: layered.layers } : {}),
       changedFiles,
       warnings:
         phase === 'delivery'
@@ -262,6 +285,17 @@ export class GateService {
     writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
     this.store.append(newEvent(goalId, 'gate-recorded', report, this.now()));
     return report;
+  }
+
+  /** The close-stage layers on the verified commit, recorded as their own gate (see `recordCloseGate`). */
+  runClose(goalId: string, repoPath: string): GateReport | undefined {
+    return recordCloseGate(this.store, goalId, repoPath, {
+      assurance: this.assurance,
+      inspector: this.inspector,
+      shell: this.executor.shell,
+      artifactRoot: this.artifactRoot,
+      now: this.now,
+    });
   }
 
   confirmManual(

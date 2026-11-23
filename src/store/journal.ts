@@ -10,6 +10,7 @@ import {
   type GoalState,
 } from '../domain/transitions.js';
 import { UserError } from '../domain/errors.js';
+import { buildAssuranceReport, renderAssuranceText } from '../domain/assurance-report.js';
 import { parseGoalSpec } from '../domain/contracts.js';
 import { sourceDigest } from '../domain/gate.js';
 import {
@@ -190,6 +191,12 @@ export class ProjectJournal implements GoalRepository {
         content: `# ${goalId}: controller gate ${gate.result}\n\nBase ${gate.baseCommit} → delivery ${gate.deliveryCommit} (${gate.environment.shell}, ${gate.environment.node})\n\n${gate.checks.map(item => `- ${item.checkId}: **${item.status}** — ${item.reason}${item.newFailures.length ? ` (new: ${item.newFailures.join(', ')})` : ''}`).join('\n')}\n`,
       });
     }
+    // The assurance table of a Goal pinned to a setup is part of its record, refreshed at every milestone.
+    if (state.setupVersion !== undefined)
+      docs.push({
+        path: 'assurance.md',
+        content: `# ${goalId}: mức bảo đảm\n\n\`\`\`\n${renderAssuranceText(buildAssuranceReport(state))}\n\`\`\`\n`,
+      });
     const commit = commitGoalDocuments(this.repoPath, goalId, docs, message);
     if (!commit) return;
     const files: Record<string, string> = {};

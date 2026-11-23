@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { UserError } from './errors.js';
+import { stageLayersSchema } from './layer-plan.js';
+import { THRESHOLD_OPS } from './threshold.js';
 
 const namedText = z.string().trim().min(1);
 const id = z
@@ -9,6 +11,7 @@ const id = z
 const version = z.number().int().positive();
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const commit = z.string().regex(/^[0-9a-fA-F]{40,64}$/);
+const TOOL_REF = /^(?:[a-z][a-z0-9-]*)\.L[0-6]\.[^.\s][^\s]*$/;
 
 /** Immutable verbatim snapshot of where the Goal came from. Stored at `.apos/goals/<id>/source.md`. */
 const sourceSchema = z.object({
@@ -45,13 +48,31 @@ const acceptanceSchema = z.object({
   examples: z.array(z.object({ input: namedText, expected: namedText })).default([]),
   boundaries: z.array(namedText).default([]),
   prohibited: z.array(namedText).default([]),
-  checkIds: z.array(id).min(1),
+  /** Goal checks that prove the criterion. At least one, except for a `benchmark` or `scan` criterion: the close stage proves it. */
+  checkIds: z.array(id).default([]),
   ambiguity: ambiguitySchema.optional(),
   /**
    * How the criterion is proved. Absent means `red-green`: a test that is red before the work and green after.
-   * `benchmark` and `scan` arrive in phase 4. Kept optional so Goals written earlier replay unchanged.
+   * `benchmark` and `scan` are non-functional proofs: a tool of the pinned setup that the gate runs at the close stage
+   * against a threshold the Human approved with the Goal. Kept optional so Goals written earlier replay unchanged.
    */
-  proof: z.enum(['red-green', 'stays-green', 'manual']).optional(),
+  proof: z.enum(['red-green', 'stays-green', 'manual', 'benchmark', 'scan']).optional(),
+  /** `proof: 'benchmark'`: `tool` is `<part>.<layer>.<id>` of a `metric` tool; the criterion holds when `metric op value`. */
+  benchmark: z
+    .object({
+      tool: z.string().regex(TOOL_REF, 'a tool is "<part>.<layer>.<id>"'),
+      metric: namedText,
+      op: z.enum(THRESHOLD_OPS),
+      value: z.number().finite(),
+    })
+    .optional(),
+  /** `proof: 'scan'`: `tool` is `<part>.<layer>.<id>` of a `sarif` tool; findings from `failOn` up fail the criterion. */
+  scan: z
+    .object({
+      tool: z.string().regex(TOOL_REF, 'a tool is "<part>.<layer>.<id>"'),
+      failOn: z.enum(['error', 'warning', 'note']),
+    })
+    .optional(),
   given: namedText.optional(),
   when: namedText.optional(),
   then: namedText.optional(),
@@ -94,13 +115,18 @@ const goalSchema = z
     checks: z.array(checkSchema).default([]),
     dependencies: z.array(id).default([]),
     priority: z.number().int().nonnegative().default(1),
+    /** Switches the Human approves with the Goal (`mutation`, `perf`): a setup tool that says `when: flag:x` runs only with `x`. */
+    flags: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/, 'a flag is a word')).optional(),
   })
   .superRefine((goal, ctx) => {
     const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
     const sketch = goal.acceptance.length === 0 && goal.checks.length === 0;
+    const allAcceptanceUsesToolProofs =
+      goal.acceptance.length > 0 && goal.acceptance.every(item => item.proof === 'benchmark' || item.proof === 'scan');
     if (!sketch && goal.acceptance.length === 0)
       issue(['acceptance'], 'Goal must declare at least one acceptance criterion');
-    if (!sketch && goal.checks.length === 0) issue(['checks'], 'Goal must declare at least one check');
+    if (!sketch && !allAcceptanceUsesToolProofs && goal.checks.length === 0)
+      issue(['checks'], 'Goal must declare at least one check');
     if (!sketch && goal.scope.length === 0) issue(['scope'], 'Goal must declare at least one scope entry');
     const unique = (items: { id: string }[], label: string, path: string) => {
       const seen = new Set<string>();
@@ -124,6 +150,20 @@ const goalSchema = z
         );
     }
     for (const [index, item] of goal.acceptance.entries()) {
+      const nonFunctional = item.proof === 'benchmark' || item.proof === 'scan';
+      if (!nonFunctional && item.checkIds.length === 0)
+        issue(['acceptance', index], `Acceptance ${item.id} needs at least one check`);
+      if (item.proof === 'benchmark' && !item.benchmark)
+        issue(
+          ['acceptance', index],
+          `Acceptance ${item.id} has proof "benchmark" but no benchmark: { tool, metric, op, value }`,
+        );
+      if (item.proof === 'scan' && !item.scan)
+        issue(['acceptance', index], `Acceptance ${item.id} has proof "scan" but no scan: { tool, failOn }`);
+      if (item.benchmark && item.proof !== 'benchmark')
+        issue(['acceptance', index], `Acceptance ${item.id} has a benchmark but its proof is not "benchmark"`);
+      if (item.scan && item.proof !== 'scan')
+        issue(['acceptance', index], `Acceptance ${item.id} has a scan but its proof is not "scan"`);
       for (const requirementId of item.requirementIds) {
         const requirement = requirements.get(requirementId);
         if (!requirement)
@@ -180,6 +220,8 @@ const proposalSchema = z
     stubPaths: z.array(namedText).optional(),
     /** The public entry points acceptance tests may call. */
     entries: z.array(namedText).optional(),
+    /** Solo: layers added to WP-MAIN, by stage, on top of the setup's floor. Each must exist in the pinned setup. */
+    layers: stageLayersSchema.optional(),
     acceptanceMapping: z
       .array(z.object({ acceptanceId: id, verification: namedText, level: z.literal('goal').optional() }))
       .min(1),

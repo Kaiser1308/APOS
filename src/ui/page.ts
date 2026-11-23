@@ -219,6 +219,8 @@ details > summary { cursor:pointer; color:var(--accent); }
     box.appendChild(h("h3", { text: "Budget" })); box.appendChild(h("div", { text: budget(g) }));
     if (g.packageList.length) { box.appendChild(h("h3", { text: "Work packages" })); box.appendChild(dag(g.packageList));
       g.packageList.forEach(function (p) { box.appendChild(h("div", null, [h("b", { text: p.id + " " }), chip(p.status), h("span", { class: "mute", text: " " + p.owner + ", submit đỏ " + p.attempts + (g.appetite ? "/" + g.appetite.maxAttempts : "") + " - " + p.outcome }), p.blocker ? h("div", { class: "err", text: p.blocker.kind + ": " + p.blocker.note }) : null])); }); }
+    box.appendChild(h("h3", { text: "Mức bảo đảm" }));
+    box.appendChild(h("pre", { class: "assurance", text: g.assuranceText }));
     box.appendChild(h("h3", { text: "Findings" }));
     if (!g.findings.length) box.appendChild(h("div", { class: "mute", text: "none" }));
     g.findings.forEach(function (f) { box.appendChild(h("div", null, [chip(f.kind, "lead"), h("span", { text: " " + f.note }), h("span", { class: "mute", text: " (" + f.by + ")" })])); });

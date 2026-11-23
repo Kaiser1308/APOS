@@ -1,3 +1,4 @@
+import { entryViolations } from '../domain/entry-rule.js';
 import { matchesAny, rootedGlobs } from '../domain/glob.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 import { acceptanceProof, needsTest } from '../domain/test-plan.js';
@@ -30,6 +31,8 @@ export type Inspection = {
   map: TestMapEntry[];
   /** sha256 of every test-infrastructure file at the commit. */
   infra: Record<string, string>;
+  /** Parts whose acceptance tests could not be held to the declared entries (no rule for their stack). */
+  unchecked: string[];
   /** Tests per mapped layer, for the summary `apos tests show` prints. */
   testCount: number;
 };
@@ -144,7 +147,8 @@ export function inspectTests(input: InspectInput): Inspection {
         map,
         proofOf: id => {
           const item = criteria.get(id);
-          return item ? acceptanceProof(item) : undefined;
+          const proof = item ? acceptanceProof(item) : undefined;
+          return proof === 'benchmark' || proof === 'scan' ? undefined : proof;
         },
         outcomes,
         patterns: Object.fromEntries(
@@ -175,6 +179,7 @@ export function inspectTests(input: InspectInput): Inspection {
   // The files that hold the mapped tests are locked even when the tester did not change them (a stays-green test).
   const treeFiles = filesAt(repo, commit);
   const holders = new Set(testFiles);
+  const acceptanceHolders = new Map<string, string>();
   if (ran)
     for (const outcome of outcomes) {
       const where = setup.parts[outcome.part]!;
@@ -186,13 +191,33 @@ export function inspectTests(input: InspectInput): Inspection {
           const test = outcome.tests.find(item => item.id === id);
           if (!test) continue;
           const holder = holderOf(candidates, where.root, test);
-          if (holder) holders.add(holder);
-          else
+          if (holder) {
+            holders.add(holder);
+            if (entry.layer === 'L2') acceptanceHolders.set(holder, outcome.part);
+          } else
             problems.push(
               `${entry.acceptanceId} ${entry.part}.${entry.layer} ${id}: cannot tell which file holds this test, so it cannot be locked`,
             );
         }
     }
+  // Acceptance tests go through the declared entries only, for the stacks whose catalog says how to read an import.
+  const present = new Set(treeFiles);
+  for (const [file, partName] of acceptanceHolders) {
+    const where = setup.parts[partName]!;
+    const rule = where.tests?.entryRule;
+    const text = fileAt(repo, commit, file);
+    if (!rule || !text) continue;
+    problems.push(
+      ...entryViolations({
+        rule,
+        file,
+        text: text.toString('utf8'),
+        partRoot: where.root,
+        exists: path => present.has(path),
+        allowed: path => matchesAny(path, stubs) || matchesAny(path, rootedGlobs(where.root, where.tests?.paths ?? [])),
+      }),
+    );
+  }
   for (const file of holders) {
     const content = fileAt(repo, commit, file);
     if (!content) {
@@ -235,6 +260,15 @@ export function inspectTests(input: InspectInput): Inspection {
     files,
     asserts,
     map,
+    unchecked: [
+      ...new Set(
+        map
+          .filter(
+            entry => entry.layer === 'L2' && setup.parts[entry.part] && !setup.parts[entry.part]!.tests?.entryRule,
+          )
+          .map(entry => entry.part),
+      ),
+    ].sort(),
     testCount: map.reduce((sum, entry) => sum + entry.testIds.length, 0),
   };
 }

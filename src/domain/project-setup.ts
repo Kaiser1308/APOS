@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { catalogToolSchema } from './catalog.js';
 import { UserError } from './errors.js';
+import { entryRuleSchema } from './entry-rule.js';
+import { thresholdSchema } from './threshold.js';
 import type { SetupCodec } from './setup-codec.js';
 import { LAYER_IDS, type LayerId } from './layers.js';
 
@@ -15,6 +17,15 @@ const layerSpec = catalogToolSchema.extend({
     .string()
     .regex(/^(always|flag:[A-Za-z][A-Za-z0-9_-]*)$/, 'when must be "always" or "flag:<name>"')
     .optional(),
+  /**
+   * How often a test layer runs on the delivery before it is judged (default 1), or a `metric` is measured (default 3).
+   * Runs that disagree make the layer `unverifiable`.
+   */
+  runs: z.number().int().min(1).max(5).optional(),
+  /** `sarif`: the lowest finding level that turns the layer red (default `error`). */
+  failOn: z.enum(['error', 'warning', 'note']).optional(),
+  /** `metric`: the setup's own threshold; a Goal criterion that names the tool overrides it. */
+  threshold: thresholdSchema.optional(),
 });
 export type LayerSpec = z.infer<typeof layerSpec>;
 
@@ -57,6 +68,8 @@ const testsSchema = z.object({
   assertPatterns: z.array(z.string()).default([]),
   notImplementedPatterns: z.array(z.string()).default([]),
   loadErrorPatterns: z.array(z.string()).default([]),
+  /** Copied from the catalog at draft time. Absent: tests are not held to the declared entries ("chưa kiểm"). */
+  entryRule: entryRuleSchema.optional(),
 });
 export type PartTests = z.infer<typeof testsSchema>;
 

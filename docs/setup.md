@@ -2,6 +2,8 @@
 
 The setup (`.apos/project.yaml`, `schemaVersion: 2`) is the only thing that decides what the gate runs for a project. It is protected: a delivery that edits it fails the gate (`APOS-PROTECTED`). A repo from before v2 (`schemaVersion: 1`) still works and counts as "no setup": every guarantee that depends on a setup is off and the Goal's own checks run as before.
 
+Setup files use YAML. Existing setup files containing JSON remain readable because JSON is valid YAML. APOS hashes the exact setup text after normalizing CRLF and CR line endings to LF.
+
 ## The steps
 
 ```
@@ -19,17 +21,32 @@ apos setup show      # the latest approved version
 
 ## Format of the file
 
-```
+```yaml
 schemaVersion: 2
-parts:        # one per technology; roots must differ
-  backend: { root: backend, stack: java-gradle, layers: { L1: [ ...tools ] }, needsHuman: [...], forbid: [...] }
-system: { L4: [ ...tools ] }                         # layers that span parts
-floor: { submit: [L0, L1, L2], integrate: [L1, L2, L3], close: [L0, ..., L5] }
-triggers: [{ when: { changed: ["frontend/src/ui/**"] }, at: submit, run: ["system.L4"] }]
-mutation: { minScore: 70 }
+parts: # one per technology; roots must differ
+  backend:
+    root: backend
+    stack: java-gradle
+    layers:
+      L1: [ ...tools ]
+    needsHuman: [ ... ]
+    forbid: [ ... ]
+system: # layers that span parts
+  L4: [ ...tools ]
+floor:
+  submit: [L0, L1, L2]
+  integrate: [L1, L2, L3]
+  close: [L0, L1, L2, L3, L4, L5]
+triggers:
+  - when:
+      changed: ["frontend/src/ui/**"]
+    at: submit
+    run: ["system.L4"]
+mutation:
+  minScore: 70
 ```
 
-A part may also say where its tests are and how to read them:
+Use `apos setup draft` to write an editable YAML file with a link to this guide at the top. A part may also say where its tests are and how to read them:
 
 ```
 tests: { paths: ["tests/**", "**/test_*.py"],      # globs relative to the part's root
@@ -40,20 +57,33 @@ tests: { paths: ["tests/**", "**/test_*.py"],      # globs relative to the part'
 
 `infra` lists **test infrastructure**: files that change how tests run without being tests (`conftest.py`, `pytest.ini`, `pyproject.toml`, `vitest.config.*`, setup files, `src/test/resources/**`). Add the ones your project has. `apos tests submit` hashes every file that matches at the lock commit; afterwards a package that changes, adds or deletes one gets `needs-human` (`APOS-INFRA`), because a broad `paths` (`tests/**`, `**`) would otherwise let a package add a `conftest.py` hook that swallows the failure of a locked test, or a `setupFiles` entry that mocks the code under test, and report the locked red test as green.
 
-`draft` copies these from the catalogue (`testPaths`, `testInfra`, `assertPatterns`, `notImplementedPatterns`, `loadErrorPatterns`). The probe checks that every pattern compiles. They are what locks acceptance tests (`apos tests submit`): which files a tester may commit and lock, which failures count as red for the right reason, which count as "never loaded", and how assertions are counted (a rough line count). A setup approved before phase 3 has no `tests`; a Goal pinned to it runs without locked tests, and a new setup version adds them. `needsHuman` and `forbid` are read by the package gate (`APOS-SCOPE`, `APOS-INVENTORY`), also relative to the part's root.
+`entryRule` (copied from the catalogue; absent for a stack that has none) tells `apos tests submit` how to read an import in an acceptance test and where the module lives, so a test that imports an internal module that is not a declared stub is refused. See [catalog.md](catalog.md#entryrule).
 
-A tool is a [catalog tool](catalog.md#a-tool) plus `when` (`always`, or `flag:<name>` for a Goal flag). A trigger's `run` entries are `<part>.<layer>` or `system.<layer>` and must name a layer the setup defines. "system" is not a part name. Layers run by stage from phase 4. Today the package gate runs L1 of every part and the layers the locked tests live in, and nothing else of the setup's layers.
+`draft` copies these from the catalogue (`testPaths`, `testInfra`, `assertPatterns`, `notImplementedPatterns`, `loadErrorPatterns`, `entryRule`). The probe checks that every pattern compiles. They are what locks acceptance tests (`apos tests submit`): which files a tester may commit and lock, which failures count as red for the right reason, which count as "never loaded", and how assertions are counted (a rough line count). A setup approved before phase 3 has no `tests`; a Goal pinned to it runs without locked tests, and a new setup version adds them. `needsHuman` and `forbid` are read by the package gate (`APOS-SCOPE`, `APOS-INVENTORY`), also relative to the part's root.
+
+A tool is a [catalog tool](catalog.md#a-tool) plus `when` (`always`, or `flag:<name>` for a Goal flag), `runs`, `failOn` and `threshold` (below). A trigger's `run` entries are `<part>.<layer>` or `system.<layer>` and must name a layer the setup defines. "system" is not a part name.
+
+For `sarif` and `metric` tools, `reportExitCodes` optionally lists accepted process exit codes (default `[0]`). APOS still judges the report's findings or metric threshold; a nonzero code outside this list fails the check even when the report looks clean.
+
+## Layers by stage
+
+What the gate runs is decided by stage: `submit` (`package submit`), `integrate` (`integration gate`, Multi-WP) and `close` (`outcome close`). See [Layers by stage](../README.md#layers-by-stage) for the whole picture; this is the setup side.
+
+- **`floor`** lists the layers per stage. A stage you leave out keeps its default: `submit: [L0, L1, L2]`, `integrate: [L1, L2, L3]`, `close: [L0, L1, L2, L3, L4, L5]`. L6 is a manual check, not a tool. At `submit` only the parts with a changed file run (by `root`), `system` does not; at `integrate` and `close` every part and `system` run. A floor layer that no part in scope defines is not run, and the assurance table says "không chạy ở khâu ...: setup không có công cụ cho lớp này".
+- **`triggers`** pull a layer to an earlier stage: `{ when: { changed: ["src/ui/**"] }, at: submit, run: ["system.L4"] }` runs e2e at `submit` whenever a changed file matches (globs are relative to the repo root); `{ when: { goalFlag: "perf" }, at: submit, run: ["app.L5"] }` fires on a Goal flag. A trigger fires only at its own `at` stage. The triggered target keeps its own `when: flag:` condition.
+- **`when: "flag:<name>"`** on a tool: it runs only when the Goal carries that flag (`flags` in the Goal, approved by the Human). A flag-gated tool that a criterion names (`benchmark`, `scan`) runs anyway: the criterion is the Goal asking.
+- **`runs`** (1 to 5): how many times a test layer (`junit`, `apos-json`) is run on the delivery before it is judged (default 1), or a `metric` is measured (default 3). Results that disagree make the layer `unverifiable`: for a metric, runs on both sides of the threshold; never the best run.
+- **`failOn`** (`error`, `warning`, `note`; default `error`) on a `sarif` tool: findings from this level up turn the layer red. Lower findings are counted on the assurance table, not red.
+- **`threshold`** (`{ op: "<", value: 200 }`) on a `metric` tool: the setup's own bound. A Goal criterion that names the tool adds its own threshold; both must hold, so the setup can never loosen what the Goal approved. A metric tool with no threshold anywhere is `unverifiable` when it runs: put it behind a flag, or give it one.
+
+Each tool becomes one check named `<part>.<layer>.<tool>`. A test layer (`junit`, `apos-json`) is green when no test fails that did not fail at the base and every locked test passes (at `submit` a package answers for the tests of its own criteria; at the later stages the Goal answers for all). A layer in which no test ran is `unverifiable`.
 
 ## Loosening the strict floor
 
-The draft starts strict. To loosen it for a project, edit `forbid` (patterns) or `floor` (layers per stage) in the setup, commit, probe, approve a new version. Dropping a floor layer for one package is a per-Goal exception and needs the Human.
+The draft starts strict. To loosen it for a project, edit `forbid` (patterns) or `floor` (layers per stage) in the setup, commit, probe, approve a new version. Dropping a floor layer for one package is a per-Goal exception: `apos exception approve <goal> --kind floor-reduced --ref <package>:<stage>:<layer> --reason <why> (--by agent:<name> | --human)`; at `integrate` and `close` the ref starts with the Goal id. An agent may approve it (logged as `agent:<name>`, shown on the assurance table). It counts for every gate that runs after it is recorded, never for one that already ran.
 
 ## Changing the setup between Goals
 
 Every change is a new version: edit, commit, probe, approve. A Goal pins the latest approved version at `goal approve` (`--setup-version <n>` pins an older approved one). A setup approved later does not change a Goal that is running. To move a Goal to the new version: `goal revise`, then `goal approve` again. `goal list` and the UI show `setup vN` or `không có setup`.
 
 The first setup of a project is approved by the Human. Later changes (adding a tool or a layer) may be approved by an agent only on the Human's explicit say-so, with `--on-behalf "<where they agreed>"`.
-
-## Switching to YAML
-
-APOS reads and writes setup and catalog files through one object: `SetupCodec { extension, parse(text), stringify(value) }` (`src/domain/setup-codec.ts`). The shipped codec is JSON; a JSON file is valid YAML, which is why the setup keeps the name `.apos/project.yaml`. Moving to YAML means adding a YAML library, writing a second codec, injecting it in place of `jsonCodec` (`CliOptions.codec`, default in the setup commands) and converting `catalog/*.json`. Nothing else in the core changes.

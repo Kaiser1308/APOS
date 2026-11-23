@@ -4,6 +4,7 @@ import { GitCommitInspector } from '../../app/integration.js';
 import { goalNeedsTests, setupLocksTests, testPlanProblems } from '../../domain/test-plan.js';
 import { UserError } from '../../domain/errors.js';
 import { pinnedSetupOf } from '../test-lock-wiring.js';
+import { planLayerProblems } from '../lead-layers.js';
 import type { CliContext } from '../context.js';
 
 export function registerLead(ctx: CliContext): void {
@@ -68,6 +69,9 @@ export function registerLead(ctx: CliContext): void {
         // A Goal pinned to a setup that says where tests are gets a tester before any code; the decision is recorded here
         // because replaying older logs must not change what they did.
         const setup = pinnedSetupOf(ctx, journal, state.setupVersion);
+        // The Lead only adds layers the approved setup has; a layer it invented would run nothing and look green.
+        const layerProblems = planLayerProblems(state, setup);
+        if (layerProblems.length) throw new UserError(`The plan is not ready:\n- ${layerProblems.join('\n- ')}`);
         const testing = Boolean(setup && setupLocksTests(setup) && goalNeedsTests(state.spec));
         journal.append(
           newEvent(id, 'proposal-approved', { by: flags.by, proposalVersion: state.proposal.version, testing }),

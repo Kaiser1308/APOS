@@ -1,0 +1,89 @@
+# APOS tool catalog. See docs/catalog.md before changing commands.
+stack: typescript
+notes:
+  - 'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc.'
+detect:
+  files:
+    - package.json
+  contains:
+    package.json: '"vitest"'
+layers:
+  L0:
+    - id: tsc
+      command: npx tsc --noEmit
+      format: exit
+    - id: eslint
+      command: npx eslint . --format @microsoft/eslint-formatter-sarif --output-file {report}
+      format: sarif
+  L1:
+    - id: vitest
+      command: npx vitest run --reporter=junit --outputFile={report} --exclude "**/*.{acceptance,integration}.test.ts"
+      format: junit
+  L2:
+    - id: vitest-acceptance
+      command: npx vitest run acceptance.test --reporter=junit --outputFile={report}
+      format: junit
+      runOne: npx vitest run "{classname}" --reporter=junit --outputFile={report} -t "^{name|spaced|regex}$"
+  L3:
+    - id: vitest-integration
+      command: npx vitest run integration.test --reporter=junit --outputFile={report}
+      format: junit
+      runOne: npx vitest run "{classname}" --reporter=junit --outputFile={report} -t "^{name|spaced|regex}$"
+  L5:
+    - id: semgrep
+      command: semgrep scan --config auto --sarif-output={report} .
+      format: sarif
+loadErrorPatterns:
+  - Failed to load
+  - Cannot find module
+  - Failed to resolve import
+  - SyntaxError
+  - Transform failed
+testPaths:
+  - '**/*.test.ts'
+  - '**/*.spec.ts'
+  - tests/**
+testInfra:
+  - vitest.config.*
+  - vite.config.*
+  - jest.config.*
+  - '**/vitest.setup.*'
+  - '**/setupTests.*'
+  - tsconfig*.json
+assertPatterns:
+  - \bexpect\s*\(
+  - \bassert(?:\.\w+)?\s*\(
+  - \bexpectTypeOf\s*\(
+notImplementedPatterns:
+  - '[Nn]ot implemented'
+  - NotImplemented
+  - 'TODO: implement'
+entryRule:
+  importPatterns:
+    - ^\s*(?:import|export)\b[^'"\n]*?\bfrom\s+['"]([^'"]+)['"]
+    - ^\s*\}\s*from\s+['"]([^'"]+)['"]
+    - ^\s*import\s+['"]([^'"]+)['"]
+  allowImports:
+    - ^vitest$
+    - '^node:'
+    - ^@vitest/
+  moduleSeparator: /
+  moduleFiles:
+    - '{path}.ts'
+    - '{path}.tsx'
+    - '{path}/index.ts'
+  stripExtension: \.(?:js|jsx|ts|tsx|mjs|cjs)$
+forbid:
+  - \b(?:it|test|describe)\.(?:skip|only|todo|fails)\b
+  - \b(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(
+  - '@ts-(?:ignore|nocheck)'
+  - eslint-disable
+needsHuman:
+  - package.json
+  - package-lock.json
+  - pnpm-lock.yaml
+  - yarn.lock
+  - tsconfig*.json
+  - eslint.config.*
+  - vitest.config.*
+  - .github/**

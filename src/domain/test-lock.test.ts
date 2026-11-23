@@ -91,6 +91,20 @@ describe('testing stage', () => {
   });
 });
 
+describe('layers the Lead adds', () => {
+  it('a Solo plan carries its layers into WP-MAIN; a plan without them leaves the key out', () => {
+    const solo = (extra: object) => {
+      let state = applyEvent(undefined, event('goal-drafted', spec));
+      state = applyEvent(state, event('goal-approved', approval));
+      state = applyEvent(state, event('goal-selected'));
+      state = applyEvent(state, event('proposal-drafted', { ...proposal, baseCommit: BASE, ...extra }));
+      return applyEvent(state, event('proposal-approved', { by: 'lead' })).packages?.['WP-MAIN']?.spec;
+    };
+    expect(solo({ layers: { submit: ['L3'] } })?.layers).toEqual({ submit: ['L3'] });
+    expect(solo({})).not.toHaveProperty('layers');
+  });
+});
+
 describe('test map', () => {
   it('accepts L2, L3, L4 entries and refuses L1 or an empty id list', () => {
     const entry = { acceptanceId: 'AC-1', part: 'app', layer: 'L2', testIds: ['a'] };

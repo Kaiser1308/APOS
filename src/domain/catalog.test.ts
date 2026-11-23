@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { parse as parseYaml } from 'yaml';
 import { catalogEntrySchema, catalogToolSchema } from './catalog.js';
 import { STACKS } from './catalog-stacks.test-support.js';
 import { parseSetupObject } from './project-setup.js';
 
 describe('first-wave catalog content', () => {
+  it('uses regex escapes that work when copied from the YAML catalog example', () => {
+    const docs = readFileSync(new URL('../../docs/catalog.md', import.meta.url), 'utf8');
+    const example = docs.split('```yaml\n')[1]?.split('\n```')[0];
+    expect(example).toBeDefined();
+    const parsed = parseYaml(example!) as { assertPatterns: string[]; forbid: string[] };
+    expect(parsed.assertPatterns.some(pattern => new RegExp(pattern).test('    assert total == 1'))).toBe(true);
+    expect(parsed.forbid.some(pattern => new RegExp(pattern).test('@pytest.mark.skip'))).toBe(true);
+  });
+
   it('has the four stacks, each valid against the schema', () => {
     expect(STACKS.map(entry => entry.stack)).toEqual(['typescript', 'python', 'java-gradle', 'java-maven']);
     for (const entry of STACKS) expect(catalogEntrySchema.safeParse(entry).success, entry.stack).toBe(true);
@@ -20,6 +31,20 @@ describe('first-wave catalog content', () => {
       }
       expect(entry.layers.L2?.[0]?.runOne, entry.stack).toBeDefined();
     }
+  });
+  it('tells Python and TypeScript how to read an import; Java has no rule yet, and the table says "chưa kiểm"', () => {
+    const rules = Object.fromEntries(STACKS.map(entry => [entry.stack, entry.entryRule !== undefined]));
+    expect(rules).toEqual({ typescript: true, python: true, 'java-gradle': false, 'java-maven': false });
+    const read = (stack: string, line: string) => {
+      const rule = STACKS.find(entry => entry.stack === stack)!.entryRule!;
+      return rule.importPatterns.map(pattern => new RegExp(pattern).exec(line)?.[1]).find(Boolean);
+    };
+    expect(read('python', 'from app.core import run')).toBe('app.core');
+    expect(read('python', 'import app')).toBe('app');
+    expect(read('python', '# from app.core import run')).toBeUndefined();
+    expect(read('typescript', "import { add } from './calc.js';")).toBe('./calc.js');
+    expect(read('typescript', '} from "./calc.js";')).toBe('./calc.js');
+    expect(read('typescript', "// derived from './calc.js'")).toBeUndefined();
   });
   it('gives every stack a strict floor and wave-3 patterns that match what they should', () => {
     for (const entry of STACKS) {
@@ -73,6 +98,10 @@ describe('catalog schema', () => {
     expect(catalogToolSchema.safeParse({ ...tool, runOne: 'vitest' }).success).toBe(false);
     expect(catalogToolSchema.safeParse({ ...tool, runOne: 'vitest -t {name}' }).success).toBe(true);
     expect(catalogToolSchema.safeParse({ ...tool, format: 'tap' }).success).toBe(false);
+  });
+  it('retains explicitly allowed exit codes for report-producing tools', () => {
+    const tool = { id: 'scan', command: 'scan --sarif {report}', format: 'sarif' as const, reportExitCodes: [2] };
+    expect(catalogToolSchema.parse(tool).reportExitCodes).toEqual([2]);
   });
 });
 

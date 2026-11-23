@@ -4,34 +4,34 @@ The catalog tells a Lead which tools usually fit a stack, so a project setup can
 
 ## Where it lives
 
-- Shipped with APOS: `catalog/<stack>.json` (python, java-gradle, java-maven, typescript).
+- Shipped with APOS: `catalog/<stack>.yaml` (python, java-gradle, java-maven, typescript).
 - Your own: `~/.apos/catalog/` (or `$APOS_HOME/catalog/`). A file whose `stack` matches a shipped one replaces it; a new `stack` is added. A file that does not parse or does not match the schema is skipped with a warning; it never hides the others.
-
-The file format is the one the build injects as `SetupCodec` (JSON today; see [setup.md](setup.md#switching-to-yaml)).
+- YAML is the preferred format. Existing `.json` catalog files are still read, and a home catalog entry overrides the bundled entry of the same stack.
 
 ## A catalog file
 
-```json
-{
-  "stack": "python",
-  "notes": ["verified: pytest 9.0.2 (--junitxml). Not verified: ruff, mypy, bandit."],
-  "detect": { "files": ["pyproject.toml"], "contains": { "pyproject.toml": "pytest" } },
-  "layers": {
-    "L1": [{ "id": "pytest", "command": "pytest --junitxml={report}", "format": "junit" }],
-    "L2": [
-      {
-        "id": "pytest-acceptance",
-        "command": "pytest tests/acceptance --junitxml={report}",
-        "format": "junit",
-        "runOne": "pytest tests/acceptance -k \"{name}\" --junitxml={report}"
-      }
-    ]
-  },
-  "assertPatterns": ["^\\s*assert\\b"],
-  "notImplementedPatterns": ["NotImplementedError"],
-  "forbid": ["@pytest\\.mark\\.(?:skip|skipif|xfail)"],
-  "needsHuman": ["pyproject.toml", ".github/**"]
-}
+```yaml
+stack: python
+notes:
+  - "verified: pytest 9.0.2 (--junitxml). Not verified: ruff, mypy, bandit."
+detect:
+  files: [pyproject.toml]
+  contains:
+    pyproject.toml: pytest
+layers:
+  L1:
+    - id: pytest
+      command: pytest --junitxml={report}
+      format: junit
+  L2:
+    - id: pytest-acceptance
+      command: pytest tests/acceptance --junitxml={report}
+      format: junit
+      runOne: 'pytest tests/acceptance -k "{name}" --junitxml={report}'
+assertPatterns: ['^\s*assert\b']
+notImplementedPatterns: [NotImplementedError]
+forbid: ['@pytest\.mark\.(?:skip|skipif|xfail)']
+needsHuman: [pyproject.toml, .github/**]
 ```
 
 | Field | Meaning |
@@ -43,6 +43,7 @@ The file format is the one the build injects as `SetupCodec` (JSON today; see [s
 | `testPaths` | Globs, relative to the part's root, of the files that hold tests: what a tester may commit and what gets locked (Python `tests/**`, `**/test_*.py`; TypeScript `**/*.test.ts`, `**/*.spec.ts`, `tests/**`; Java `src/test/**`). |
 | `testInfra` | Globs of test infrastructure: `conftest.py`, `pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`, `**/__init__.py` (Python); `vitest.config.*`, `vite.config.*`, `jest.config.*`, `**/vitest.setup.*`, `**/setupTests.*`, `tsconfig*.json` (TypeScript); `src/test/resources/**`, build files (Java). Copied to `tests.infra` by `draft`; changing one after the lock needs a decision. |
 | `assertPatterns`, `notImplementedPatterns`, `loadErrorPatterns` | Regexes that count assertions line by line (rough), recognise a stub's "not implemented", and recognise a test that never loaded. Used by `apos tests submit`. |
+| `entryRule` | How to read an import in an acceptance test; see [below](#entryrule). Absent: the stack's tests are not held to the declared entries, and the assurance table says "chưa kiểm". |
 | `forbid` | Regexes forbidden in added diff lines: the strict floor a draft starts with. |
 | `needsHuman` | Globs of sensitive files (dependencies, build config) that need a Human. |
 | `notes` | Free text: which tool versions the commands were checked against, and what was not. |
@@ -55,6 +56,7 @@ The file format is the one the build injects as `SetupCodec` (JSON today; see [s
 | `command` | Run in the part's directory, in a clean worktree. `{report}` is replaced with a path APOS provides. |
 | `format` | `junit`, `sarif`, `metric`, `apos-json`, or `exit`. |
 | `report` | Where the report is when the command does not use `{report}`: a path or glob relative to the part. Every file the glob matches is read and merged; no file means the report is unreadable. |
+| `reportExitCodes` | Optional exit codes accepted when reading a `sarif` or `metric` report (default `[0]`). The report still decides findings or threshold status. Set this for tools that intentionally return a nonzero status while writing a usable report. |
 | `metric` | For `format: metric`: dotted path to the number (e.g. `metrics.mutationScore`). Omit when the file is one number. |
 | `runOne` | Runs a single test, needed to prove a test can run alone; see below. |
 
@@ -83,8 +85,23 @@ A missing, empty or broken report is `unverifiable`, never "0 tests, green".
 
 ## Adding a stack or a tool
 
-1. Copy a shipped file to `~/.apos/catalog/<stack>.json` and edit it. Keep the commands in the form the tool really takes: run them once by hand.
+1. Copy a shipped file to `~/.apos/catalog/<stack>.yaml` and edit it. Keep the commands in the form the tool really takes: run them once by hand.
 2. If the tool cannot write one of the formats, write a small script that runs it and writes `apos-json`, and use the script as the tool's `command`. Write it once and reuse it for every project.
 3. Run `apos setup draft`, edit the result, commit it, then `apos setup probe` (see [setup.md](setup.md)). The probe is what proves a command on a real project.
 
 Commands that Gradle or Maven run need care: Gradle skips an up-to-date `test`, so the shipped commands use `cleanTest test`; both write a directory of XML files, so they set `report` to a glob.
+
+
+## `entryRule`
+
+A test may call the code only through the entries the plan declares (`stubPaths`). The catalogue says how to see what a test imports; the core knows no language.
+
+| Field | Meaning |
+| --- | --- |
+| `importPatterns` | An array of regexes tried on each line of an L2 test file, anchored on the statement (so a comment or a sentence that says "from" matches nothing). Group 1 is the module (several, comma separated, for Python `import a, b`); the optional group 2 is the names of a `from <module> import <names>`: a name that is a submodule of the module is judged as that submodule, any other name as a symbol of the module itself. |
+| `allowImports` | Regexes on the module text: libraries and the standard library, never judged. A module that does not exist as a file in the repo is not judged either, so this list only matters for a repo file that shadows a library. |
+| `moduleSeparator` | `.` (Python) or `/` (TypeScript): what separates the parts of a module path. A leading `.` is relative to the test file. |
+| `moduleFiles` | The files a module may be, `{path}` standing for its path with `/`: `{path}.py`, `{path}/__init__.py`; `{path}.ts`, `{path}/index.ts`. |
+| `stripExtension` | A regex removed from the end of an import first (`.js` in TypeScript's `./calc.js`). |
+
+An import that resolves to a file of the repo is allowed when that file matches a declared `stubPaths` glob or the part's `tests.paths`; otherwise `tests submit` (and `tests revise`) refuse it with `<file>:<line>: imports "<module>" (<path>), an internal module that is not a declared entry`. The rule reads import statements line by line: a dynamic import, a call through a re-export, a `from x import (` list that spans several lines, or a statement inside a string or block comment is not read right. Java has no rule yet.

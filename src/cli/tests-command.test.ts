@@ -26,11 +26,12 @@ async function cli() {
 it('says there is no lock yet while the Goal is testing, and a package cannot be submitted', async () => {
   const p = await cli();
   await p.invoke('goal', 'show', p.goalId);
-  expect(p.out).toEqual([
+  expect(p.out.slice(0, 3)).toEqual([
     `${p.goalId}\ttesting\tcheck in`,
     'setup v1',
     expect.stringContaining('chưa có khoá test') as unknown,
   ]);
+  expect(p.out.join('\n')).toContain('Test đã khoá       không có');
   await expect(p.invoke('package', 'submit', p.goalId, 'WP-MAIN', '--commit', p.base)).rejects.toThrow(
     /acceptance tests are not locked yet: run `apos tests submit` first/,
   );

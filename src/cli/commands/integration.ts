@@ -1,10 +1,18 @@
 import { IntegrationService } from '../../app/integration.js';
 import { MergeService } from '../../app/merge.js';
 import { GateService } from '../../app/gate-service.js';
+import type { GateReport } from '../../domain/gate.js';
 import { newEvent } from '../../app/events.js';
 import { UserError } from '../../domain/errors.js';
 import { integrationGateProblem } from '../../domain/integration-gate.js';
+import { assuranceService } from '../test-lock-wiring.js';
 import type { CliContext } from '../context.js';
+
+/** What did not pass, one line each, as `package submit` prints it: a red layer is named. */
+const reasonsOf = (report: GateReport): string[] =>
+  report.checks
+    .filter(check => check.status !== 'pass')
+    .map(check => `  ${check.checkId} ${check.status}: ${check.reason}`);
 
 export function registerIntegration(ctx: CliContext): void {
   const { program, options, write, repo, withJournal } = ctx;
@@ -29,10 +37,15 @@ export function registerIntegration(ctx: CliContext): void {
             by,
           }),
         );
-        const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(goalId, repo(), {
+        const report = new GateService(journal, {
+          inspector: options.inspector,
+          ...options.gate,
+          assurance: assuranceService(ctx, journal, goalId),
+        }).run(goalId, repo(), {
           deliveryCommit: commit,
         });
         write(`Integration gate ${report.result} on ${commit}`);
+        for (const line of reasonsOf(report)) write(line);
       }),
     );
   integration
@@ -54,12 +67,13 @@ export function registerIntegration(ctx: CliContext): void {
         const current = journal.getGoal(goalId)?.gate;
         // The controller gates the integration commit itself; a red result wakes the Lead on the next tick.
         if (current?.deliveryCommit !== input.commitRef || current.result !== 'green') {
-          const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(
-            goalId,
-            repo(),
-            { deliveryCommit: input.commitRef },
-          );
+          const report = new GateService(journal, {
+            inspector: options.inspector,
+            ...options.gate,
+            assurance: assuranceService(ctx, journal, goalId),
+          }).run(goalId, repo(), { deliveryCommit: input.commitRef });
           write(`Integration gate ${report.result} on ${input.commitRef}`);
+          for (const line of reasonsOf(report)) write(line);
           if (report.result !== 'green') throw new Error(`Integration gate is ${report.result}`);
         }
         new IntegrationService(journal, options.inspector).complete(goalId, repo(), input);

@@ -74,6 +74,7 @@ export class TestLockService {
         asserts: seen.asserts,
         infra: seen.infra,
         map: seen.map,
+        unchecked: seen.unchecked,
         by,
       }),
     );
@@ -115,6 +116,7 @@ export class TestLockService {
         asserts: seen.asserts,
         infra: seen.infra,
         map: seen.map,
+        unchecked: seen.unchecked,
         by,
         revisionOf: before.commit,
         reason,

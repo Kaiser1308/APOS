@@ -124,11 +124,14 @@ it('goal show says "không có khoá test" for a Goal that pinned no setup, and 
   await approve();
   out.length = 0;
   await invoke('goal', 'show', spec.id);
-  expect(out).toEqual([
+  expect(out.slice(0, 3)).toEqual([
     `${spec.id}\tapproved\t${spec.outcome}`,
     'không có setup',
     expect.stringContaining('không có khoá test') as unknown,
   ]);
+  // The assurance table follows: with no setup, it says so and says everything that depends on one is off.
+  expect(out.slice(3).join('\n')).toContain(`${spec.id}  không có setup`);
+  expect(out.slice(3).join('\n')).toContain('mọi bảo đảm theo setup tắt: Goal không có setup');
   approveSetup(1, 'a');
   const second = await project();
   second.approveSetup(1, 'a');

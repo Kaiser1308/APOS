@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { CommandCheck, GoalCheck, GoalSpec } from './contracts.js';
 import type { GoalState } from './transitions.js';
+import type { LayerId } from './layers.js';
+import type { LayerWhy, Stage } from './layer-plan.js';
 
 /** One execution of one check on one commit, in a fresh workspace. */
 export type CheckRun = {
@@ -22,6 +24,17 @@ export type CheckResult = {
   base: CheckRun[];
   delivery: CheckRun[];
   newFailures: string[];
+  /** A SARIF layer: how many findings it blocked on and how many were lower, so the table can show them. */
+  findings?: { blocking: number; lower: number };
+  /** A metric layer: the measured value (the median of the runs). */
+  metric?: { name: string; value: number };
+};
+/** What a gate decided to run at its stage: kept with the report so the assurance table can be rebuilt from the log. */
+export type LayerPlanRecord = {
+  stage: Stage;
+  runs: { part: string; layer: LayerId; tool: string; format: string; why: LayerWhy; reduced?: boolean }[];
+  /** Floor layers and flag-gated tools that did not run, and why. */
+  skipped: string[];
 };
 export type GateResult = 'green' | 'red' | 'unverifiable' | 'needs-human' | 'pending';
 export type GateEnvironment = { platform: string; shell: string; node: string };
@@ -40,8 +53,10 @@ export type GateReport = {
   warnings?: string[];
   /** The setup version the Goal was pinned to when this gate ran; absent = the Goal has no setup. */
   setupVersion?: number;
-  /** `post-merge` reruns the checks on the merge commit at the target branch. */
-  phase?: 'delivery' | 'post-merge';
+  /** `post-merge` reruns the checks on the merge commit at the target branch; `close` runs the close-stage layers on the verified commit. */
+  phase?: 'delivery' | 'post-merge' | 'close';
+  /** The layers this gate planned (absent for a Goal without a setup, and for gates recorded before layers existed). */
+  layers?: LayerPlanRecord;
   environment: GateEnvironment;
   checks: CheckResult[];
   result: GateResult;

@@ -6,8 +6,11 @@ import type { ProjectSetup } from './project-setup.js';
 /** How a criterion is proved; Goals written before phase 3 carry none and mean `red-green`. */
 export const acceptanceProof = (item: Acceptance): NonNullable<Acceptance['proof']> => item.proof ?? 'red-green';
 
-/** Whether a criterion needs a locked test (`red-green`, `stays-green`) rather than a manual confirmation. */
-export const needsTest = (item: Acceptance): boolean => acceptanceProof(item) !== 'manual';
+/** The proofs the close stage gives (a tool and a threshold), and the Human's manual confirmation: none of them is a locked test. */
+export const NON_TEST_PROOFS: readonly string[] = ['manual', 'benchmark', 'scan'];
+
+/** Whether a criterion needs a locked test (`red-green`, `stays-green`) rather than a manual confirmation or a non-functional proof. */
+export const needsTest = (item: Acceptance): boolean => !NON_TEST_PROOFS.includes(acceptanceProof(item));
 
 /** Whether the Goal has any criterion a locked test must prove: only then is there a `testing` stage. */
 export const goalNeedsTests = (goal: GoalSpec): boolean => goal.acceptance.some(needsTest);

@@ -20,6 +20,8 @@ describe('package gate with locked tests', () => {
       'APOS-INVENTORY:pass',
       'APOS-INFRA:pass',
       'APOS-SCOPE:pass',
+      'app.L1.unit:pass',
+      'app.L2.acceptance:pass',
     ]);
   }, 120_000);
 

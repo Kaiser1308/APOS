@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from '../cli.js';
-import { jsonCodec } from '../domain/setup-codec.js';
+import { jsonCodec, yamlCodec } from '../domain/setup-codec.js';
 
 const dirs: string[] = [];
 const saved = process.env.APOS_HOME;
@@ -47,7 +47,10 @@ it('drafts, probes and approves a setup; approval is a Human decision; a setup e
   writeFileSync(join(dir, 'package.json'), '{"devDependencies":{"vitest":"^4"}}');
   await invoke('setup', 'draft');
   expect(out.join('\n')).toMatch(/Wrote .apos\/project.yaml: app/);
-  const drafted = JSON.parse(readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8')) as {
+  const draftText = readFileSync(join(dir, '.apos', 'project.yaml'), 'utf8');
+  expect(draftText).toMatch(/^# Project setup: see docs\/setup\.md/m);
+  expect(draftText).toContain('schemaVersion: 2');
+  const drafted = yamlCodec.parse(draftText) as {
     parts: { app: { stack: string } };
   };
   expect(drafted.parts.app.stack).toBe('typescript');

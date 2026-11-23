@@ -8,6 +8,9 @@ import { buildPlan } from '../../domain/plan.js';
 import { GoalRegistryService } from '../../app/registry.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import { lockSummary } from '../lock-summary.js';
+import { buildAssuranceReport, renderAssuranceText } from '../../domain/assurance-report.js';
+import { pinnedSetupOf } from '../test-lock-wiring.js';
+import { proofToolProblems } from '../../domain/proof-tools.js';
 import type { CliContext } from '../context.js';
 
 export function registerGoal(ctx: CliContext): void {
@@ -38,7 +41,7 @@ export function registerGoal(ctx: CliContext): void {
   goal
     .command('show')
     .argument('<id>')
-    .description('status, pinned setup and locked tests of one Goal')
+    .description('status, pinned setup, locked tests and the assurance table of one Goal')
     .action((id: string) =>
       withJournal(journal => {
         const state = journal.getGoal(id);
@@ -46,6 +49,15 @@ export function registerGoal(ctx: CliContext): void {
         write(`${id}\t${state.status}\t${state.spec.outcome}`);
         write(state.setupVersion === undefined ? 'không có setup' : `setup v${state.setupVersion}`);
         for (const line of lockSummary(state)) write(line);
+        // The pinned setup adds the stacks and the layers the close stage will run; the table reads without it when it cannot be loaded.
+        let setup;
+        try {
+          setup = pinnedSetupOf(ctx, journal, state.setupVersion);
+        } catch {
+          setup = undefined;
+        }
+        write('');
+        for (const line of renderAssuranceText(buildAssuranceReport(state, setup)).split('\n')) write(line);
       }),
     );
   // Gate A: the Human approves WHAT, together with the appetite only the controller will see.
@@ -91,6 +103,15 @@ export function registerGoal(ctx: CliContext): void {
             throw new UserError(
               `Setup version ${flags.setupVersion} was never approved (approved: ${approvals.map(item => item.version).join(', ') || 'none'})`,
             );
+        }
+        // A benchmark or scan criterion names a tool of the setup the Goal is pinned to: approving one the setup lacks proves nothing.
+        const goalSpec = journal.getGoal(id)?.spec;
+        if (goalSpec?.acceptance.some(item => item.benchmark || item.scan)) {
+          const setup = pinnedSetupOf(ctx, journal, setupVersion);
+          const problems = setup
+            ? proofToolProblems(goalSpec, setup)
+            : [`${id} has benchmark or scan criteria but there is no approved setup to take their tools from`];
+          if (problems.length) throw new UserError(`${id} cannot be approved:\n- ${problems.join('\n- ')}`);
         }
         const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
         new GoalRegistryService(journal).approve(id, appetite, undefined, confirmation, setupVersion);

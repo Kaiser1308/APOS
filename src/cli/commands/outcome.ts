@@ -8,6 +8,9 @@ import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
 import { controllerHome } from '../../store/event-log.js';
 import { closeProblems } from '../../domain/transitions.js';
+import { closeLayerProblems } from '../../domain/close-gate.js';
+import { withGateLease } from '../../store/lease.js';
+import { assuranceService } from '../test-lock-wiring.js';
 import { UserError } from '../../domain/errors.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
@@ -32,6 +35,25 @@ export function registerOutcome(ctx: CliContext): void {
           // Before any merge: a close that is going to be refused must not have merged anything first.
           const problems = closeProblems(state);
           if (problems.length) throw new UserError(problems.join('; '));
+          // The close-stage layers run on the commit the Goal was verified on, before anything is merged or closed.
+          if (state.setupVersion !== undefined) {
+            const gate = new GateService(journal, {
+              inspector: options.inspector,
+              ...options.gate,
+              assurance: assuranceService(ctx, journal, id),
+            });
+            const held = await withGateLease(ctx.home(), () => Promise.resolve(gate.runClose(id, repo())));
+            if (!held.ran)
+              throw new UserError(
+                `Another gate is running for this project (pid ${held.holder}): wait for it, then close again`,
+              );
+            write(`Close-stage layers ${held.value?.result ?? 'did not run'} on ${state.verifiedCommit}`);
+            const blocked = closeLayerProblems(journal.getGoal(id)!);
+            if (blocked.length)
+              throw new UserError(
+                `${blocked.join('; ')}. Fix it and submit again, or approve an exception (apos exception approve --kind floor-reduced --ref ${id}:close:<layer>); a verified Goal whose verified commit cannot pass is revised with \`apos outcome revise\``,
+              );
+          }
           if (flags.mergeTo) {
             const merges = new MergeService(journal);
             merges.authorize(id, flags.mergeTo, flags.by ?? 'human');

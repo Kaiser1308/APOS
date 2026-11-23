@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ExceptionService } from './exceptions.js';
+import { floorReductions } from '../domain/exceptions.js';
 import { buildInbox } from './inbox.js';
 import { cleanProjects, lockedProject } from './test-lock.test-support.js';
 
@@ -64,7 +65,9 @@ describe('exception approve', () => {
     expect(ask({})).toThrow(/WP-MAIN is pending: only a package that needs a human/);
     expect(ask({ kind: 'nope' })).toThrow(/--kind is one of/);
     expect(ask({ by: 'lead' })).toThrow(/--by is agent:<name>/);
-    expect(ask({ kind: 'floor-reduced' })).toThrow(/reserved for phase 4/);
+    expect(ask({ kind: 'floor-reduced', ref: 'WP-MAIN:submit:L2' })).toThrow(
+      /has no setup: there is no floor to reduce/,
+    );
     expect(ask({ reason: ' ' })).toThrow(/--reason is required/);
     expect(ask({ kind: 'tests-weakened', ref: 'a'.repeat(40) })).toThrow(
       /revision waiting for approval: there is none/,
@@ -72,6 +75,36 @@ describe('exception approve', () => {
     expect(() => service.approve('GOAL-NOPE', { kind: 'needs-human', ref: 'x', reason: 'r', by: 'agent:x' })).toThrow(
       /Goal not found/,
     );
+  }, 120_000);
+});
+
+describe('floor-reduced', () => {
+  const approve = (p: Awaited<ReturnType<typeof lockedProject>>, ref: string, by = 'agent:lead') =>
+    new ExceptionService(p.journal, p.loadSetup).approve(p.goalId, {
+      kind: 'floor-reduced',
+      ref,
+      reason: 'docs only',
+      by,
+    });
+  it('is recorded with who, anchored on the commit that locked the tests, and read back by floorReductions', async () => {
+    const p = await lockedProject();
+    approve(p, 'WP-MAIN:submit:L2');
+    expect(p.state().exceptions).toMatchObject([
+      { kind: 'floor-reduced', ref: 'WP-MAIN:submit:L2', commit: p.lockCommit, by: 'agent:lead' },
+    ]);
+    expect(floorReductions(p.state(), 'WP-MAIN', 'submit')).toEqual([{ stage: 'submit', layer: 'L2' }]);
+    expect(floorReductions(p.state(), 'WP-MAIN', 'close')).toEqual([]);
+    expect(floorReductions(p.state(), 'WP-OTHER', 'submit')).toEqual([]);
+  }, 120_000);
+  it('refuses a malformed ref, an unknown package, a layer the stage floor does not have, and a wrong scope', async () => {
+    const p = await lockedProject();
+    expect(() => approve(p, 'WP-MAIN')).toThrow(/<package>:<stage>:<layer>/);
+    expect(() => approve(p, 'WP-NOPE:submit:L2')).toThrow(/WP-NOPE is not a package/);
+    expect(() => approve(p, 'WP-MAIN:submit:L3')).toThrow(/L3 is not in the submit floor/);
+    expect(() => approve(p, 'WP-MAIN:close:L2')).toThrow(
+      new RegExp(`the scope is the Goal itself: --ref ${p.goalId}:close:L2`),
+    );
+    expect(() => approve(p, `${p.goalId}:close:L2`)).not.toThrow();
   }, 120_000);
 });
 

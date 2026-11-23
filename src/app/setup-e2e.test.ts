@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { loadCatalog } from './catalog-loader.js';
 import { draftSetup } from './setup-draft.js';
 import { probeSetup } from './setup-probe.js';
-import { jsonCodec } from '../domain/setup-codec.js';
+import { yamlCodec } from '../domain/setup-codec.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 
 /**
@@ -39,7 +39,7 @@ function commitAll(dir: string, files: Record<string, string>): string {
 }
 
 async function probeDraft(dir: string, stack: string) {
-  const { entries } = loadCatalog({ codec: jsonCodec, home: temp('apos-e2e-home-') });
+  const { entries } = loadCatalog({ codec: yamlCodec, home: temp('apos-e2e-home-') });
   const { setup, notes } = draftSetup(dir, entries);
   expect(notes).toEqual([]);
   expect(setup.parts.app?.stack).toBe(stack);
@@ -49,9 +49,9 @@ async function probeDraft(dir: string, stack: string) {
       app: { ...setup.parts.app!, layers: { ...setup.parts.app!.layers, L0: undefined, L5: undefined } },
     },
   };
-  const commit = commitAll(dir, { '.apos/project.yaml': jsonCodec.stringify(runners) });
+  const commit = commitAll(dir, { '.apos/project.yaml': yamlCodec.stringify(runners) });
   const report = await probeSetup(dir, commit, {
-    codec: jsonCodec,
+    codec: yamlCodec,
     artifactRoot: temp('apos-e2e-art-'),
     catalog: entries,
   });

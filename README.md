@@ -34,7 +34,7 @@
 4. [Quick start](#quick-start)
 5. [The Goal contract](#the-goal-contract)
 6. [Delivery flows](#delivery-flows)
-7. [Project setup](#project-setup) and [Web UI](#web-ui)
+7. [Project setup](#project-setup), [Layers by stage](#layers-by-stage), [The assurance table](#the-assurance-table) and [Web UI](#web-ui)
 8. [Configuration and state](#configuration-and-state)
 9. [Trust model](#trust-model)
 10. [CLI reference](#cli-reference)
@@ -240,7 +240,7 @@ The **appetite** (`size`, `maxWallMinutes`, `maxAttempts`, `overrun`) is kept on
 
 The wall-clock budget runs from `goal select` to `verified`. Past it, `package submit` refuses: with `--overrun ask` the Goal is blocked and the Human decides (raise it with `goal appetite`), with `--overrun stop` the submission is refused and nothing is written. Ending the Goal stays the Human's call (`outcome stop`).
 
-For a Goal pinned to a setup the gate adds up to three checks next to the Goal's own: `APOS-LOCKED` (only when the Goal has locked tests), `APOS-INVENTORY` (L1 of every part, plus the locked layers; the setup's `forbid` patterns on added lines) and `APOS-SCOPE` (only when the plan names `paths`). With locked tests (see [Locked tests](#locked-tests)) the base of the package is the commit that locked them. A Goal pinned to no setup gets none of these.
+For a Goal pinned to a setup the gate adds up to three checks next to the Goal's own: `APOS-LOCKED` (only when the Goal has locked tests), `APOS-INVENTORY` (L1 of every part, plus the locked layers; the setup's `forbid` patterns on added lines) and `APOS-SCOPE` (only when the plan names `paths`), and then one check per layer of the submit stage (see [Layers by stage](#layers-by-stage)). With locked tests (see [Locked tests](#locked-tests)) the base of the package is the commit that locked them. A Goal pinned to no setup gets none of these.
 
 A green gate also prints **warnings** (`needs attention: ...`) when the diff changes tests or oracles, shared paths or the files the checks run. They block nothing and also appear in `apos inbox` and the UI. See [Limits](#limits).
 
@@ -249,12 +249,12 @@ A green gate also prints **warnings** (`needs attention: ...`) when the diff cha
 Chosen by the Lead when one session is too small. `lead propose` then `package add --file <json> --reason <text>` for each package (at least two, acyclic, versioned interfaces `name@vN`, acceptance with the `checkIds` its gate runs), then `lead commit`. APOS notifies the Human.
 
 - Each package is submitted with `package submit <goalId> <WP-ID> --commit <sha>`. A package with dependencies is submitted only after they are green, on a commit that contains theirs.
-- When every package is green: build one integration commit that has every package commit as an ancestor, run `apos integration gate <goalId> --commit <sha> --reason <text>`, and when it is green `apos integration complete <goalId> --commit <sha> [--conflict-resolution <text>]`. That verifies the Goal. A review is not required.
+- When every package is green: build one integration commit that has every package commit as an ancestor, run `apos integration gate <goalId> --commit <sha> --reason <text>` (it runs the layers of the **integrate** stage on that commit: L1, L2 and L3 by default, so a broken integration test is red and named), and when it is green `apos integration complete <goalId> --commit <sha> [--conflict-resolution <text>]`. That verifies the Goal. A review is not required.
 - `package revise` / `add` / `remove` change the plan; a revised package and everything built on it goes back to `pending`.
 
 ### Closing
 
-`outcome close` needs the Goal `verified` **and** its verified commit to be the commit of the last green gate (the `WP-MAIN` gate for Solo, the integration gate for Multi-WP). A different commit, a red or missing gate: refused, `--on-behalf` included. `--merge-to <branch>` authorizes one merge of exactly that commit and reruns the gate on the merge; if that gate is red the Goal stays `verified`.
+`outcome close` needs the Goal `verified` **and** its verified commit to be the commit of the last green gate (the `WP-MAIN` gate for Solo, the integration gate for Multi-WP). A different commit, a red or missing gate: refused, `--on-behalf` included. For a Goal pinned to a setup, `outcome close` first runs the layers of the **close** stage on the verified commit (L0 to L5 by default, plus the benchmark and scan criteria) and closes only when they are green, or when every layer that is not green was cut by an approved `floor-reduced` exception. A verified commit that cannot pass cannot be fixed in place: `outcome revise` sends the Goal back. `--merge-to <branch>` authorizes one merge of exactly that commit and reruns the gate on the merge; if that gate is red the Goal stays `verified`.
 
 ## Locked tests
 
@@ -264,16 +264,60 @@ For a Goal pinned to a setup whose parts say where their tests are (`tests.paths
 2. **`apos tests submit <goalId> --commit <sha>`** runs the layers of the mapped tests at that commit, twice, and checks in order, reporting every problem: the commit contains the plan base; the diff touches only test files, declared stubs and `tests.json`; every criterion that needs a test has one; every mapped test is in the report; a `red-green` test **fails** (or errors with the stack's "not implemented" pattern) and does not match the stack's load-error patterns (a test that is already green, or red because it never loaded, is refused and named); a `stays-green` test passes; two runs agree. If everything holds it records `tests-locked` (commit, sha256 of every test file, a count of assertions per file, the map). If not, nothing is written.
 3. **Packages** are now gated on top of the locked commit (a commit that does not contain it is refused with "rebase onto it"), and the gate adds: **`APOS-LOCKED`** (no locked file differs by a byte, deleted included, and the package's mapped tests pass on a full run of their layer), **`APOS-INVENTORY`** (every test that ran at the base, L1 included, is still there and not skipped; no `forbid` pattern in an added line) and **`APOS-SCOPE`** (no file changed outside the package's `paths` and stubs; a file that matches the setup's `needsHuman` makes the package **`needs-human`**, exit 3, instead of red).
 4. **Test infrastructure.** `tests.infra` in the setup lists files such as `conftest.py` or `vitest.config.*`; `tests submit` hashes them, and a package that changes, adds or deletes one gets `needs-human` (`APOS-INFRA`, `hạ tầng test bị sửa: <path>`), because such a file can turn a locked red test green without touching it. Approve with `--kind tests-infra`.
-5. **Exceptions.** `apos exception approve <goalId> --kind needs-human|tests-infra|tests-weakened --ref <package|commit> --reason <text> (--by agent:<name> | --human)`. An agent may approve on the Human's behalf (logged as `agent:<name>`); `--human` needs a terminal or `--on-behalf`. A `needs-human` exception for a package and commit makes the same commit green on submit without running the gate again; it waits in `apos inbox` until then. `floor-reduced` is in the schema and refused until phase 4 reads it.
+5. **Exceptions.** `apos exception approve <goalId> --kind needs-human|tests-infra|tests-weakened --ref <package|commit> --reason <text> (--by agent:<name> | --human)`. An agent may approve on the Human's behalf (logged as `agent:<name>`); `--human` needs a terminal or `--on-behalf`. A `needs-human` exception for a package and commit makes the same commit green on submit without running the gate again; it waits in `apos inbox` until then. `floor-reduced` cuts one floor layer (see [Layers by stage](#layers-by-stage)): `--ref <package>:<stage>:<layer>` (`<goalId>:<stage>:<layer>` at integrate and close); it counts for every gate that runs after it is recorded.
 6. **Changing locked tests.** `apos tests revise <goalId> --commit <sha> --reason <text>`: the commit contains the locked one and is checked like a submission (so it is red again on the old code). It must keep every locked test id (a rename is a deletion), at least as many tests for each criterion and at least as many assertions in each file. If it does, it re-locks (`revisionOf`) and every package goes back to `pending`. If it does not, it waits as `tests-revision-pending` until a `tests-weakened` exception names the commit; then the same command locks it.
 
 `apos tests show <goalId>` prints the locked commit, tests per layer and which tests prove which criterion.
+
+7. **Tests go through the declared entries.** For a stack whose catalogue has an `entryRule` (Python and TypeScript), `tests submit` and `tests revise` refuse an acceptance (L2) test that imports an internal module of the repo that is not a declared stub or part of the tests, naming the file and line. A stack with no rule is not checked and the assurance table says "chưa kiểm". Libraries and the standard library are never judged.
 
 **Counting assertions is rough.** It counts lines that match a regular expression of the stack (`assertPatterns`), so a test can be weakened without the count falling, or the count can fall for a harmless reason. It is a tripwire, not a proof; mutation testing (phase 5) is the second net.
 
 ## Project setup
 
-A project can carry a setup (`.apos/project.yaml`, schema version 2): the tools the gate may run, per part of the repo and per layer, with a strict floor. The Lead drafts it from the tool catalogue (`catalog/`: Python, Java with Gradle or Maven, TypeScript), APOS probes every command in clean worktrees, the Human approves it, and each Goal pins the approved version when it is approved. Tools report in one of four standard formats (JUnit XML, SARIF, a metric, APOS JSON) or by exit code alone. See [docs/setup.md](docs/setup.md) and [docs/catalog.md](docs/catalog.md). A repo without a setup still works: guarantees that depend on a setup are off.
+A project can carry a YAML setup (`.apos/project.yaml`, schema version 2): the tools the gate may run, per part of the repo and per layer, with a strict floor. Existing JSON setup files remain readable. The Lead drafts it from the YAML tool catalogue (`catalog/`: Python, Java with Gradle or Maven, TypeScript), APOS probes every command in clean worktrees, the Human approves it, and each Goal pins the approved version when it is approved. Tools report in one of four standard formats (JUnit XML, SARIF, a metric, APOS JSON) or by exit code alone. See [docs/setup.md](docs/setup.md) and [docs/catalog.md](docs/catalog.md). A repo without a setup still works: guarantees that depend on a setup are off.
+
+## Layers by stage
+
+A Goal pinned to a setup is gated by layers (spec 6.2), not only by its own checks. What runs at each stage is one pure function, `planLayers`, of the pinned setup, the package, the Goal and the files changed; the plan is recorded with the gate.
+
+| Stage | When | Floor (default) |
+| --- | --- | --- |
+| `submit` | `package submit`, on the parts with a changed file | L0, L1, L2 |
+| `integrate` | `integration gate` and `complete`, Multi-WP, every part and `system` | L1, L2, L3 |
+| `close` | `outcome close`, on the verified commit | L0, L1, L2, L3, L4, L5 |
+
+A layer is what the setup's tools say it is. L6 is a manual check, not a tool. On top of the floor, a layer runs because:
+
+- **the Lead added it** for a package (`layers: { submit: ["L3"] }` in the proposal or the package). The setup must have it for the package's parts or for `system`, or `lead commit` refuses and names the layer. The Lead can only add;
+- **a trigger fired** (a changed file matches the setup's glob, or the Goal has the flag): `src/ui/**` pulls e2e into `submit`;
+- **a criterion names the tool** (`proof: benchmark` or `scan`): the tool runs at `close`, and earlier if the Lead adds its layer.
+
+Dropping a floor layer needs `apos exception approve --kind floor-reduced`. An agent may approve it; the table shows who. A trigger, the Lead or a criterion that also names the layer still runs it.
+
+Each tool becomes one check, `<part>.<layer>.<tool>`, read by its format: `junit` and `apos-json` are green when no test fails that did not fail at the base and every **locked** test passes; `exit` is green on exit 0; `sarif` is red from `failOn` (default `error`) up and the lower findings are counted on the table; `metric` is judged against thresholds. A layer in which no test ran is `unverifiable` and named, never green. `runs` (setup, per tool: default 1 for tests, 3 for a metric) repeats the run: results that disagree are `unverifiable`, never the best of them.
+
+### Non-functional criteria
+
+An acceptance criterion may have `proof: "benchmark"` with `benchmark: { tool: "<part>.<layer>.<id>", metric: "p95_ms", op: "<", value: 200 }` or `proof: "scan"` with `scan: { tool: "...", failOn: "warning" }`. The threshold is the **Goal's**, so the Human approved it; the setup's own threshold can only add to it, never loosen it. Such a criterion needs no Goal check and no locked test; `goal approve` refuses a tool the pinned setup does not have or has with the wrong format.
+
+## The assurance table
+
+`apos goal show <id>`, the Overview tab of `apos ui` and `.apos/goals/<id>/assurance.md` (committed with the Goal record at each milestone) show what the Goal's guarantees rest on, derived from the log:
+
+```
+GOAL-001  setup v1  (app: python)
+  Tiêu chí           3   máy chứng minh 3 · anh xác nhận tay 0
+  Test đã khoá       L2 1
+  Kiểm kê / phạm vi  bật
+  Lớp khâu submit    WP-MAIN: L1 pytest ✓ · L2 pytest-acceptance bớt · L3 pytest-integration (Lead thêm) ✓ ...
+  Lớp khâu đóng      L1 pytest ✓ · L2 pytest-acceptance ✓ · ... · L5 bench (tiêu chí) ✓ (p95_ms 150)
+  Ngoại lệ           floor-reduced WP-MAIN:submit:L2 (agent:lead): ...
+  Agent duyệt thay   1 chỗ: floor-reduced WP-MAIN:submit:L2 (agent:lead)
+  Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+```
+
+It says what the machine proved, what you confirm by hand, which layers were cut and by whom (`human`, `on-behalf:<where>`, `agent:<name>`), tools whose only evidence is an exit code, and what is off (a flag-gated tool, a floor layer with no tool, the entry check for a stack with no rule, no setup at all).
 
 ## Web UI
 
@@ -338,8 +382,8 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `tests submit <goalId> --commit <sha> [--by <name>]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
 | `tests revise <goalId> --commit <sha> --reason <text> [--by <name>]` | Replace the lock. Exit 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception. |
 | `tests show <goalId>` | The locked commit, tests per layer, the criterion-to-test map. |
-| `exception approve <goalId> --kind <kind> --ref <ref> --reason <text> (--by agent:<name> \| --human)` | An agent, or the Human (**H** with `--human`), approves a sensitive-file change or weakened locked tests. |
-| `goal show <id>` | Status, pinned setup and locked tests of one Goal. |
+| `exception approve <goalId> --kind <kind> --ref <ref> --reason <text> (--by agent:<name> \| --human)` | An agent, or the Human (**H** with `--human`), approves a sensitive-file change, weakened locked tests, a change to test infrastructure, or cutting a floor layer. |
+| `goal show <id>` | Status, pinned setup, locked tests and the [assurance table](#the-assurance-table) of one Goal. |
 | `package add --file <json> --reason <text>`, `package revise <goalId> --file <json> --reason <text>`, `package remove <goalId> <packageId> --reason <text>`, `package list <goalId>` | Plan the packages of a Multi-WP Goal. |
 | `package submit <goalId> <packageId> --commit <sha> [--by <name>] [--json]` | Gate a commit now. Exit 0 green, 1 red, 3 needs-human or unverifiable. |
 | `integration gate <goalId> --commit <sha> --reason <text> [--by <name>]` | Gate the integration commit. |
@@ -390,7 +434,7 @@ Conventions and the dependency rules: [`AGENTS.md`](AGENTS.md), [`docs/architect
 ## Limits
 
 - **Test locking needs a setup that names the tests.** Only a Goal pinned to a setup with `tests.paths` on its parts, and with a criterion proved by a test, has locked tests. Any other Goal still runs without them, and a delivery can change or delete the tests that gate it (the gate only warns). `goal show` says which kind of Goal it is.
-- **The assertion count is rough** (a regex per line, see [Locked tests](#locked-tests)). **Whether the tests call the code only through the declared entries is not checked**; it rests on the tester until the catalogue has a rule per stack (phase 4).
+- **The assertion count is rough** (a regex per line, see [Locked tests](#locked-tests)). **Whether the tests call the code only through the declared entries is checked only for the stacks whose catalogue has an `entryRule`** (Python, TypeScript; not Java yet); the assurance table says "chưa kiểm" for the others. The check reads import lines, so a dynamic import or a call through a re-export is not seen.
 - **Test ids are the layer report's ids.** A runner that changes how it names tests (for example renaming a `describe`) looks like a deleted test.
 - **The gate runs the Goal's own checks.** What it proves is only as good as the checks the Goal names. Phase 2 to 5 add the check catalogue, locked acceptance tests and quality layers (see the roadmap).
 - **Single host, trusted user** (see the trust model). Windows and Linux; Node 24+.
@@ -404,5 +448,5 @@ Phase 1 (this version) removed the orchestration layer and put `package submit`,
 
 2. ~~Result formats, a tool catalogue and a project setup with draft, probe and approve~~ (done: see [Project setup](#project-setup)). 
 3. ~~Locking the acceptance tests before the code is written, red-for-the-right-reason checks, test inventory and scope guards~~ (done: see [Locked tests](#locked-tests)).
-4. Test layers L0 to L6 per stage, non-functional proofs and a per-Goal table of what the machine proves and what you confirmed by hand.
+4. ~~Test layers L0 to L6 per stage, non-functional proofs and a per-Goal table of what the machine proves and what you confirmed by hand~~ (done: see [Layers by stage](#layers-by-stage) and [The assurance table](#the-assurance-table)).
 5. Reviews and AI tools that can block only with a red test, and mutation testing.

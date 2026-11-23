@@ -106,7 +106,7 @@ const human = ['--on-behalf', 'demo'];
  * The bug story: one command opens the Goal, one the Human approves, and the usual flow follows. The Tester's test
  * reproduces the bug on the code as it is (red, locked); the Worker's fix turns it green; the Human closes.
  */
-function bugStory(base) {
+function bugStory() {
   const bug = JSON.parse(readFileSync(join(source, 'bug.json'), 'utf8'));
   const id = 'GOAL-BUG-001';
   expectText(
@@ -220,7 +220,7 @@ try {
   const base = commit('setup');
   apos(0, 'probe every tool of the setup in a clean worktree', 'setup', 'probe', '--commit', base);
   apos(0, 'the Human approves the probed setup', 'setup', 'approve', '--commit', base, ...human);
-  if (demo.story === 'bugfix') bugStory(base);
+  if (demo.story === 'bugfix') bugStory();
   else {
     apos(
       0,

@@ -1,0 +1,4 @@
+{
+  "story": "removal",
+  "tools": ["pytest", "python"]
+}

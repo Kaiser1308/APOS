@@ -33,7 +33,7 @@
 3. [Install](#install)
 4. [Quick start](#quick-start)
 5. [The Goal contract](#the-goal-contract)
-6. [Delivery flows](#delivery-flows) (Solo, [a bug](#fixing-a-bug-apos-bug), [an old repo](#an-old-repo-with-few-tests), Multi-WP)
+6. [Delivery flows](#delivery-flows) (Solo, [a bug](#fixing-a-bug-apos-bug), [a removal](#removing-a-feature-a-removed-criterion), [an old repo](#an-old-repo-with-few-tests), Multi-WP)
 7. [Project setup](#project-setup), [Layers by stage](#layers-by-stage), [The assurance table](#the-assurance-table) and [Web UI](#web-ui)
 8. [Configuration and state](#configuration-and-state)
 9. [Trust model](#trust-model)
@@ -286,11 +286,36 @@ What the gate holds a maintenance Goal to, at `package submit` (and again at the
 3. **A named finding is gone.** `--security <finding>` takes a fingerprint or a `ruleId` that exactly one finding of the base has. A finding the base does not show is refused at `open` and at `approve` (`không tái hiện được finding trên base`), and so is a setup with no scan tool. On the delivery the finding must be absent: `APOS-SECURITY`.
 4. **Only manifests, lockfiles and `--paths` change.** The globs of the manifests come from the catalog (`manifests`, copied to the setup part at `draft`); any other changed file is red and named. A manifest that the setup lists as sensitive (`needsHuman`) still waits for a decision, which an agent may give (`exception approve --by agent:<name>`); the table lists it.
 
-The table says it: `Bảo trì: chỉ chạm manifest/lockfile (+ paths); lỗi có sẵn trên base: n; lỗi mới: 0`, `Quét: finding mới 0 (dưới mức chặn: n)` (or `Quét: setup không có công cụ`), and for a security Goal `Vá bảo mật: finding <id> có trên <base>, không còn trên <commit>`.
+The table says it: `Bảo trì: chỉ chạm manifest/lockfile (+ paths); lỗi có sẵn trên base: n; lỗi mới: 0`, `Quét: finding mới 0 (dưới mức chặn: n)` (or `Quét: setup không có công cụ`), and for a security Goal `Vá bảo mật: finding <ruleId> (<fingerprint>) có trên <base>, không còn trên <commit>`.
 
 **Dependabot and other pull requests.** `apos maintenance open --from-pr 12 [--remote origin]` fetches `pull/12/head` with plain git (no `gh`, no network beyond that fetch), keeps it under `refs/apos/pr/12`, records the number and the sha in the Goal, and takes the description from the title of the first commit when none is given. `apos package submit <goal> WP-MAIN --from-pr` gates exactly that sha: if the remote moved the pull request since, it says so and asks for `--commit <sha>`. A pull request that does not contain the plan's base commit is refused, as any commit is (`rebase the change onto it`); plan on the pull request's own base with `apos lead propose --maintenance --goal <id> --base <sha>` if that is what you mean. The table's `Nguồn` line says `từ PR #12 <sha>`.
 
 `npm run demo:maint` runs the story on `examples/ts-maint` (no network: the dependency is a folder in `vendor/`); see [docs/demo.md](docs/demo.md).
+
+### Removing a feature (a `removed` criterion)
+
+Taking a feature out is an ordinary Goal whose criterion says "the feature is gone", and whose approval carries the list of old tests that go with it. Nothing else may disappear:
+
+```json
+{
+  "id": "AC-1",
+  "text": "Coupons are gone: total() takes no coupon and the cart has no apply_coupon",
+  "requirementIds": ["R-1"],
+  "checkIds": ["CHK-1"],
+  "proof": "removed",
+  "removesTests": [
+    "app.L1::tests.test_coupons::test_ten_percent_coupon_takes_off_a_tenth",
+    "app.L1::tests.test_coupons::test_an_unknown_coupon_is_refused"
+  ]
+}
+```
+
+A `removesTests` entry is `<part>.<layer>::<test id as the layer's report gives it>`, or `<part>.<layer>::<file>` for every test of that file (for pytest `tests.test_coupons`, the classname; for vitest the file path). A repeated id (`#2`) and a parametrized one (`name[...]`) belong to their test. The list is the **Goal's**, not the plan's: the Human approves it, so the Lead cannot add a test to it. The proof has two halves:
+
+1. **A test of absence.** The Tester writes a test that is red on the code as it is because the feature is there, and green once it is gone: it calls the public entry and asserts the absence (the route answers 404, the command says it does not exist, the argument is refused, the attribute is not on a module that imports fine). It is locked by `tests submit` like any red-green test, with two more rules. It must fail on an **assertion**: a test that errors, or that raises an exception that is not an assertion (an `ImportError` of the code that is going away, an `AttributeError`, a `TypeError`, "not implemented"; pytest reports an exception raised in a test body as a failure, so APOS reads the first line of the message, roughly) proves nothing about the feature, and is refused. And in a Goal whose test-proved criteria are all `removed`, the Tester changes tests and `tests.json` and nothing else (no stub, no code), so the test is red on the code as it is.
+2. **The old tests go, exactly.** `goal approve` runs the declared layers on the repo as it is, prints the tests that will be removed (so the Human sees them before confirming) and refuses an entry no test matches. At every gate (submit, integrate, close) the inventory then allows the loss of the declared tests and of no other: a test that vanished and was not declared is red and named (locked or not); a declared test the delivery still runs (or skips) is red (`declared removed but still there`); an entry that matches nothing on the base is red. Only a Goal with a `removed` criterion may lose tests: every other Goal keeps the old rule. A Multi-WP Goal's package answers for the entries of its own criterion; the integration commit and the close stage for all of them. The plan's `paths` must include the files of the old tests, or the scope check is red.
+
+The declared tests may be the locked tests of another Goal, a characterize Goal's included: the Human approved the list. The table says whose (`xoá đúng 2 test đã khai (1 test đã khoá của GOAL-003)`), and a later `refactor` no longer requires them (it holds the file as the removal Goal left it). The table's line is `Xoá tính năng: AC-1: test <id> đỏ trên <lock commit>, xanh trên <commit>; xoá đúng n test đã khai (k test đã khoá của GOAL-…)`. `npm run demo:remove` runs the story on `examples/py-remove` with pytest; see [docs/demo.md](docs/demo.md).
 
 ### An old repo with few tests
 
@@ -493,7 +518,7 @@ Mutation testing is the second net under the assertion count: it changes the cod
 
 ## Demo
 
-`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug` and `npm run demo:legacy` run an example (`examples/ts-orders`, `examples/py-parking`, `examples/ts-bug`, `examples/py-legacy`) through the whole flow with the real binary and a real test runner, and print the assurance table. The output of all four is in [docs/demo.md](docs/demo.md).
+`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug`, `npm run demo:maint`, `npm run demo:legacy` and `npm run demo:remove` run an example (`examples/ts-orders`, `examples/py-parking`, `examples/ts-bug`, `examples/ts-maint`, `examples/py-legacy`, `examples/py-remove`) through the whole flow with the real binary and a real test runner, and print the assurance table. The output of all of them is in [docs/demo.md](docs/demo.md).
 
 ## Old logs (legacy Goals)
 

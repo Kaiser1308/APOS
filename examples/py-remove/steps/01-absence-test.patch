@@ -1,0 +1,36 @@
+diff --git a/.apos/goals/GOAL-001/tests.json b/.apos/goals/GOAL-001/tests.json
+new file mode 100644
+index 0000000..c8af49b
+--- /dev/null
++++ b/.apos/goals/GOAL-001/tests.json
+@@ -0,0 +1,11 @@
++[
++  {
++    "acceptanceId": "AC-1",
++    "part": "app",
++    "layer": "L2",
++    "testIds": [
++      "tests.acceptance.test_no_coupons::test_total_no_longer_takes_a_coupon",
++      "tests.acceptance.test_no_coupons::test_the_cart_no_longer_knows_how_to_apply_one"
++    ]
++  }
++]
+diff --git a/tests/acceptance/test_no_coupons.py b/tests/acceptance/test_no_coupons.py
+new file mode 100644
+index 0000000..723f5a5
+--- /dev/null
++++ b/tests/acceptance/test_no_coupons.py
+@@ -0,0 +1,13 @@
++import pytest
++
++import shop.cart
++from shop.cart import total
++
++
++def test_total_no_longer_takes_a_coupon():
++    with pytest.raises(TypeError):
++        total([("pen", 1000, 1)], coupon="TEN")
++
++
++def test_the_cart_no_longer_knows_how_to_apply_one():
++    assert not hasattr(shop.cart, "apply_coupon")

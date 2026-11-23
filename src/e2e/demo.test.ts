@@ -86,6 +86,21 @@ describe('demo-goal.mjs', () => {
   );
 
   it.skipIf(!(hasPytest && hasPython))(
+    'py-remove: a feature removed with the old tests the Goal declared: one more is red, one forgotten is red, exactly those gone is green',
+    () => {
+      const done = spawnSync(process.execPath, [script, 'py-remove'], { encoding: 'utf8' });
+      expect(done.stderr).toBe('');
+      expect(done.stdout).toContain('every step ended as expected');
+      expect(done.stdout).toContain('will remove these tests, and only these');
+      expect(done.stdout).toContain('test missing: app.L1::tests.test_cart::test_an_empty_cart_totals_zero');
+      expect(done.stdout).toContain('declared removed but still there');
+      expect(done.stdout).toContain('xoá đúng 2 test đã khai');
+      expect(done.status).toBe(0);
+    },
+    600_000,
+  );
+
+  it.skipIf(!(hasPytest && hasPython))(
     'py-parking: the same story with pytest',
     () => {
       const done = spawnSync(process.execPath, [script, 'py-parking'], { encoding: 'utf8' });

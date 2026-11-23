@@ -1,0 +1,39 @@
+{
+  "id": "GOAL-001",
+  "version": 1,
+  "outcome": "The shop no longer takes coupons, and nothing else changes",
+  "requirements": [
+    {
+      "id": "R-1",
+      "sourceSpan": "paragraph 2",
+      "text": "A cart is totalled from its lines alone: it takes no coupon, and the code that applies one is gone",
+      "disposition": "acceptance"
+    },
+    {
+      "id": "R-2",
+      "sourceSpan": "paragraph 3",
+      "text": "The tests that describe coupons are removed, and only those",
+      "disposition": "acceptance"
+    }
+  ],
+  "scope": ["shop/cart.py", "shop/coupons.py"],
+  "exclusions": ["Totals, the empty cart and checkout are not changed"],
+  "acceptance": [
+    {
+      "id": "AC-1",
+      "text": "Coupons are gone: total() takes no coupon and the cart does not know how to apply one",
+      "requirementIds": ["R-1", "R-2"],
+      "given": "a cart of one line",
+      "when": "a coupon is passed to total()",
+      "then": "it is refused: total() takes no coupon, and the cart module has no apply_coupon",
+      "checkIds": ["CHK-1"],
+      "proof": "removed",
+      "removesTests": [
+        "app.L1::tests.test_coupons::test_ten_percent_coupon_takes_off_a_tenth",
+        "app.L1::tests.test_coupons::test_an_unknown_coupon_is_refused"
+      ]
+    }
+  ],
+  "checks": [{ "id": "CHK-1", "kind": "command", "command": "pytest -q", "expect": "pass" }],
+  "priority": 1
+}

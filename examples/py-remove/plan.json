@@ -1,0 +1,30 @@
+{
+  "id": "EXEC-001",
+  "version": 1,
+  "goalId": "GOAL-001",
+  "goalVersion": 1,
+  "mode": "solo-direct",
+  "approach": "Take the coupon argument out of total(), delete shop/coupons.py and the two tests that describe coupons",
+  "rationale": "One small module and its two tests: a single owner is faster than splitting",
+  "risks": [
+    "A test that only looks unrelated is deleted with the feature: the inventory names it"
+  ],
+  "paths": [
+    "shop/**",
+    "tests/test_coupons.py",
+    "tests/test_cart.py"
+  ],
+  "acceptanceMapping": [
+    {
+      "acceptanceId": "AC-1",
+      "verification": "locked test of absence, and the declared tests gone"
+    }
+  ],
+  "verificationStrategy": "the locked test of absence, then the inventory: exactly the declared tests are gone",
+  "stubPaths": [
+    "shop/cart.py"
+  ],
+  "entries": [
+    "total"
+  ]
+}

@@ -1,0 +1,51 @@
+diff --git a/shop/cart.py b/shop/cart.py
+index 2d46dcd..c7c8fcc 100644
+--- a/shop/cart.py
++++ b/shop/cart.py
+@@ -1,9 +1,3 @@
+-from shop.coupons import apply_coupon
+-
+-
+-def total(items, coupon=None):
+-    """The total in cents of (name, unit price in cents, quantity) lines, less an optional coupon."""
+-    amount = sum(cents * quantity for _name, cents, quantity in items)
+-    if coupon is not None:
+-        amount = apply_coupon(amount, coupon)
+-    return amount
++def total(items):
++    """The total in cents of (name, unit price in cents, quantity) lines."""
++    return sum(cents * quantity for _name, cents, quantity in items)
+diff --git a/shop/coupons.py b/shop/coupons.py
+deleted file mode 100644
+index 1f1ffa0..0000000
+--- a/shop/coupons.py
++++ /dev/null
+@@ -1,10 +0,0 @@
+-"""Discount coupons: a code takes a share off a total."""
+-
+-CODES = {"TEN": 10, "HALF": 50}
+-
+-
+-def apply_coupon(amount, code):
+-    """The amount in cents after the coupon `code`; an unknown code is refused."""
+-    if code not in CODES:
+-        raise ValueError(f"unknown coupon {code!r}")
+-    return amount - amount * CODES[code] // 100
+diff --git a/tests/test_coupons.py b/tests/test_coupons.py
+deleted file mode 100644
+index 71b9ca3..0000000
+--- a/tests/test_coupons.py
++++ /dev/null
+@@ -1,12 +0,0 @@
+-import pytest
+-
+-from shop.cart import total
+-
+-
+-def test_ten_percent_coupon_takes_off_a_tenth():
+-    assert total([("pen", 1000, 1)], coupon="TEN") == 900
+-
+-
+-def test_an_unknown_coupon_is_refused():
+-    with pytest.raises(ValueError):
+-        total([("pen", 1000, 1)], coupon="NOPE")

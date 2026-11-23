@@ -1,6 +1,6 @@
-# Demo: four example stories, run for real
+# Demo: six example stories, run for real
 
-`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug` and `npm run demo:legacy` copy an example from `examples/` to a temp directory, `git init` it and drive the **real** APOS binary (`dist/cli.js`, so run `npm run build` first) with a real test runner (vitest, pytest). Every step prints the command, its exit code and what APOS said, and checks the exit code it expected; a surprise exits 1. A machine without a tool the example needs (`git`, `npx`/vitest, `python`/pytest) stops at once with exit 2 and names it: the script never reports a pass it did not see. `--keep` leaves the temp directory in place. See `examples/README.md` for the files of an example.
+`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug`, `npm run demo:maint`, `npm run demo:legacy` and `npm run demo:remove` copy an example from `examples/` to a temp directory, `git init` it and drive the **real** APOS binary (`dist/cli.js`, so run `npm run build` first) with a real test runner (vitest, pytest). Every step prints the command, its exit code and what APOS said, and checks the exit code it expected; a surprise exits 1. A machine without a tool the example needs (`git`, `npx`/vitest, `python`/pytest) stops at once with exit 2 and names it: the script never reports a pass it did not see. `--keep` leaves the temp directory in place. See `examples/README.md` for the files of an example.
 
 The story, in order: setup draft, probe, approve; Goal create, approve, select; the Lead proposes and commits a plan; the Tester submits the acceptance tests (locked); a delivery that edits a locked test is red; a delivery with wrong code is red; the right code is green; a reviewer blocks with a red test; the final fix (the review's test is now locked and green) is green; the Human closes the Goal; `goal show` prints the assurance table.
 
@@ -506,17 +506,17 @@ Wrote .apos/project.yaml: app
 Not committed. Edit it, commit it, then: apos setup probe --commit <sha>
 
 # probe every tool of the setup in a clean worktree
-$ apos setup probe --commit 0bd46669dd  # exit 0
+$ apos setup probe --commit 9f143d39e3  # exit 0
 ok   app.L1 vitest: 2 tests, stable over 2 runs
 ok   app.L2 vitest-acceptance: 1 tests, runOne ok, stable over 2 runs
 ok   app.L3 vitest-integration: 1 tests, runOne ok
 ok   app.L5 node-scan: findings
 ok   app.tests patterns: 13 patterns compile; tests under **/*.test.ts, **/*.spec.ts, tests/**
-setup 554c06fdbbb7 at 0bd46669ddd4: probe passed
+setup 554c06fdbbb7 at 9f143d39e3e6: probe passed
 
 # the Human approves the probed setup
-$ apos setup approve --commit 0bd46669dd --on-behalf demo  # exit 0
-Approved setup v1 (554c06fdbbb7) at 0bd46669ddd4
+$ apos setup approve --commit 9f143d39e3 --on-behalf demo  # exit 0
+Approved setup v1 (554c06fdbbb7) at 9f143d39e3e6
 
 # the PM opens a maintenance Goal that must remove CVE-FMT-1; the base is scanned once, and the finding is found there
 $ apos maintenance open Upgrade fmt to a version without CVE-FMT-1 --security CVE-FMT-1 --paths CHANGELOG.md  # exit 0
@@ -541,8 +541,8 @@ $ apos lead commit GOAL-MAINT-001  # exit 0
 Accepted GOAL-MAINT-001. Deliver with `apos package submit GOAL-MAINT-001 <package> --commit <sha>`.
 
 # the Worker upgrades to fmt 2.0.0, which renames format(): a test green on the base is red now, so it is red
-$ apos package submit GOAL-MAINT-001 WP-MAIN --commit 61ec1ebd77  # exit 1
-WP-MAIN red on 61ec1ebd776d572b4c9932354baaae49b755a745
+$ apos package submit GOAL-MAINT-001 WP-MAIN --commit e5e9e4ffa5  # exit 1
+WP-MAIN red on e5e9e4ffa52e54c94829fd3146b7552728e05a03
   APOS-SCOPE needs-human: sensitive files changed, a decision is needed: package.json
   app.L1.vitest fail: app.L1 vitest: 2 new failure(s) vs the base: src/price.test.ts::shows a price in dollars and cents, src/price.test.ts::shows zero as $0.00
   app.L2.vitest-acceptance fail: app.L2 vitest-acceptance: 1 new failure(s) vs the base: src/price.acceptance.test.ts::a customer sees the same price text on every screen
@@ -551,32 +551,32 @@ WP-MAIN red on 61ec1ebd776d572b4c9932354baaae49b755a745
   needs attention: files the checks run or are built from changed: package.json
 
 # the Worker upgrades to 1.1.0 and also edits src/price.ts: not a manifest and not a declared path, so it is red
-$ apos package submit GOAL-MAINT-001 WP-MAIN --commit 5de5fef14e  # exit 1
-WP-MAIN red on 5de5fef14e4e323d6ed7a733c1b9b9a6c5158158
+$ apos package submit GOAL-MAINT-001 WP-MAIN --commit 7233fffb92  # exit 1
+WP-MAIN red on 7233fffb92a177b93b4f575f1a1b9d0208d79adc
   APOS-SCOPE fail: outside the package paths (package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, CHANGELOG.md): src/price.ts; sensitive files also changed: package.json
   needs attention: declared risks: The upgrade changes behaviour the existing tests do not cover
   needs attention: files the checks run or are built from changed: package.json
 
 # the Worker upgrades to 1.1.0 and nothing else: package.json is a sensitive file, so the gate waits for a decision
-$ apos package submit GOAL-MAINT-001 WP-MAIN --commit dffcabbf91  # exit 3
-WP-MAIN needs-human on dffcabbf91d71b95d014e51c01fd285f6d5df168
+$ apos package submit GOAL-MAINT-001 WP-MAIN --commit 1fc5fa2fdb  # exit 3
+WP-MAIN needs-human on 1fc5fa2fdb70fb1e07fb29f710ed43d471533277
   APOS-SCOPE needs-human: sensitive files changed, a decision is needed: package.json
   needs attention: declared risks: The upgrade changes behaviour the existing tests do not cover
   needs attention: files the checks run or are built from changed: package.json
 
 # an agent approves the manifest change on the Human’s behalf (the table will say so)
 $ apos exception approve GOAL-MAINT-001 --kind needs-human --ref WP-MAIN --reason a dependency upgrade changes package.json by definition --by agent:lead  # exit 0
-Approved needs-human for WP-MAIN on dffcabbf91d71b95d014e51c01fd285f6d5df168 by agent:lead. Submit WP-MAIN again with the same commit.
+Approved needs-human for WP-MAIN on 1fc5fa2fdb70fb1e07fb29f710ed43d471533277 by agent:lead. Submit WP-MAIN again with the same commit.
 
 # the same commit again: no new failure, no new finding, CVE-FMT-1 gone, only the manifest changed: green
-$ apos package submit GOAL-MAINT-001 WP-MAIN --commit dffcabbf91  # exit 0
-WP-MAIN green on dffcabbf91d71b95d014e51c01fd285f6d5df168; GOAL-MAINT-001 verified
+$ apos package submit GOAL-MAINT-001 WP-MAIN --commit 1fc5fa2fdb  # exit 0
+WP-MAIN green on 1fc5fa2fdb70fb1e07fb29f710ed43d471533277; GOAL-MAINT-001 verified
   needs attention: declared risks: The upgrade changes behaviour the existing tests do not cover
   needs attention: files the checks run or are built from changed: package.json
 
 # the Human closes the Goal on the commit that passed the gate
 $ apos outcome close GOAL-MAINT-001 --on-behalf demo  # exit 0
-Close-stage layers green on dffcabbf91d71b95d014e51c01fd285f6d5df168
+Close-stage layers green on 1fc5fa2fdb70fb1e07fb29f710ed43d471533277
 close GOAL-MAINT-001
 
 # the assurance table says what was proved against the base
@@ -593,7 +593,7 @@ GOAL-MAINT-001  setup v1  (app: typescript)
   Lớp khâu đóng      L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration ✓ · L5 node-scan ✓
   Bảo trì            chỉ chạm manifest/lockfile (+ paths); lỗi có sẵn trên base: 0; lỗi mới: 0
   Quét               finding mới 0 (dưới mức chặn: 0)
-  Vá bảo mật         finding h:1dec7211f4b07fa0 có trên 5c69273, không còn trên dffcabb
+  Vá bảo mật         finding CVE-FMT-1 (h:1dec7211f4b07fa0) có trên c0d0f4a, không còn trên 1fc5fa2
   Duyệt              duyệt gộp bằng maintenance approve (on-behalf:demo)
   Ngoại lệ           needs-human WP-MAIN (agent:lead): a dependency upgrade changes package.json by definition
   Agent duyệt thay   1 chỗ: needs-human WP-MAIN (agent:lead)
@@ -603,4 +603,106 @@ GOAL-MAINT-001  setup v1  (app: typescript)
   Tắt / chưa kiểm    khoá test: tắt (setup không khai tests.paths, hoặc Goal không có tiêu chí cần test)
 
 demo ts-maint: every step ended as expected.
+```
+
+## Removing a feature (`py-remove`: the shop drops its coupons)
+
+`npm run demo:remove` takes a feature out and shows what the gate lets disappear. The Goal has one criterion, `proof: "removed"`, whose `removesTests` names the two old tests that describe coupons. `goal approve` prints the tests that will go before the Human confirms. The Tester locks two tests of absence (`total()` takes no coupon, the cart module has no `apply_coupon`), red while coupons exist. Then three deliveries: one deletes a test nobody declared (red, and it is named), one removes the code and leaves a declared test (red, `declared removed but still there`), and the one that removes the feature and exactly the two declared tests is green. The table ends with the `Xoá tính năng` line.
+
+```text
+demo py-remove: working in <tmp> (a temp directory; --keep leaves it)
+
+# init the project
+$ apos init  # exit 0
+Initialized <repo>
+
+# draft the setup from the catalog
+$ apos setup draft  # exit 0
+Wrote .apos/project.yaml: app
+Not committed. Edit it, commit it, then: apos setup probe --commit <sha>
+
+# probe every tool of the setup in a clean worktree
+$ apos setup probe --commit 279a204583  # exit 0
+ok   app.L1 pytest: 4 tests, stable over 2 runs
+ok   app.L2 pytest-acceptance: 1 tests, runOne ok, stable over 2 runs
+ok   app.L3 pytest-integration: 1 tests, runOne ok
+ok   app.tests patterns: 10 patterns compile; tests under tests/**, **/test_*.py, **/*_test.py
+setup f715beccff6c at 279a20458320: probe passed
+
+# the Human approves the probed setup
+$ apos setup approve --commit 279a204583 --on-behalf demo  # exit 0
+Approved setup v1 (f715beccff6c) at 279a20458320
+
+# the PM drafts the Goal: one criterion, "coupons are gone", that names the two old tests that go with them
+$ apos goal create --file <apos>/examples/py-remove/goal.json --source <apos>/examples/py-remove/brief.md  # exit 0
+Drafted GOAL-001
+
+# the Human approves: before confirming they are shown the tests the Goal will remove, found on the repo as it is
+$ apos goal approve GOAL-001 --size S --max-minutes 60 --max-attempts 5 --on-behalf demo  # exit 0
+GOAL-001 will remove these tests, and only these (the rest must stay):
+  AC-1: 2 test(s)
+    - app.L1::tests.test_coupons::test_ten_percent_coupon_takes_off_a_tenth
+    - app.L1::tests.test_coupons::test_an_unknown_coupon_is_refused
+Approved GOAL-001 on setup v1
+
+# the Human selects it
+$ apos goal select GOAL-001 --on-behalf demo  # exit 0
+Selected GOAL-001
+
+# the Lead proposes a Solo plan
+$ apos lead propose --file <tmp>/work/plan.json  # exit 0
+Proposed EXEC-001
+
+# the Lead commits the plan: the Goal waits for the test that says coupons are gone
+$ apos lead commit GOAL-001  # exit 0
+Accepted GOAL-001. Next the tester writes the acceptance tests and stubs: `apos tests submit GOAL-001 --commit <sha>`. Packages open once they are locked.
+
+# the Tester hands over two tests of absence (total() takes no coupon, the cart has no apply_coupon): red while coupons exist, so they are locked
+$ apos tests submit GOAL-001 --commit a7210367e3  # exit 0
+Locked 2 tests in 1 files on a7210367e3a292f5d0d0db8622885622131618c8. Packages are gated on top of this commit.
+
+# a Worker removes coupons and also deletes a test nobody declared: red, and it names the test
+$ apos package submit GOAL-001 WP-MAIN --commit 893d50459b  # exit 1
+WP-MAIN red on 893d50459b38bec69f0cfa0914839c75bd1ad356
+  APOS-INVENTORY fail: test missing: app.L1::tests.test_cart::test_an_empty_cart_totals_zero
+  needs attention: declared risks: A test that only looks unrelated is deleted with the feature: the inventory names it
+
+# a Worker removes coupons but keeps one of the two declared tests: red, "declared removed but still there"
+$ apos package submit GOAL-001 WP-MAIN --commit 29ac44c53e  # exit 1
+WP-MAIN red on 29ac44c53eff1894f7150b3f53457d27a2914c16
+  CHK-1 fail: exit 1 on delivery
+  APOS-INVENTORY fail: declared removed but still there: app.L1::tests.test_coupons::test_an_unknown_coupon_is_refused
+  app.L1.pytest fail: app.L1 pytest: 1 new failure(s) vs the base: tests.test_coupons::test_an_unknown_coupon_is_refused
+  needs attention: declared risks: A test that only looks unrelated is deleted with the feature: the inventory names it
+
+# a Worker removes coupons and exactly the two declared tests: the test of absence is green, no other test is lost
+$ apos package submit GOAL-001 WP-MAIN --commit 58430618dc  # exit 0
+WP-MAIN green on 58430618dc83d0b96e7847d7115ca0875f78641b; GOAL-001 verified
+  needs attention: declared risks: A test that only looks unrelated is deleted with the feature: the inventory names it
+
+# the Human closes the Goal on the commit that passed the gate
+$ apos outcome close GOAL-001 --on-behalf demo  # exit 0
+Close-stage layers green on 58430618dc83d0b96e7847d7115ca0875f78641b
+close GOAL-001
+
+# the assurance table says which test proved the feature gone and how many old tests went
+$ apos goal show GOAL-001  # exit 0
+GOAL-001	closed	The shop no longer takes coupons, and nothing else changes
+setup v1
+khoá test: commit a7210367e3a292f5d0d0db8622885622131618c8, 2 test, 1 file, 2 assert (đếm dòng, chỉ gần đúng)
+
+GOAL-001  setup v1  (app: python)
+  Tiêu chí           1   máy chứng minh 1 · anh xác nhận tay 0
+  Test đã khoá       L2 2
+  Kiểm kê / phạm vi  bật
+  Lớp khâu submit    WP-MAIN: L1 pytest ✓ · L2 pytest-acceptance ✓
+  Lớp khâu đóng      L1 pytest ✓ · L2 pytest-acceptance ✓ · L3 pytest-integration ✓
+  Xoá tính năng      AC-1: test app.L2::tests.acceptance.test_no_coupons::test_total_no_longer_takes_a_coupon, app.L2::tests.acceptance.test_no_coupons::test_the_cart_no_longer_knows_how_to_apply_one đỏ trên a721036, xanh trên 5843061; xoá đúng 2 test đã khai
+  Agent duyệt thay   0 chỗ
+  Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L4 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L5 không chạy ở khâu close: setup không có công cụ cho lớp này
+
+demo py-remove: every step ended as expected.
 ```

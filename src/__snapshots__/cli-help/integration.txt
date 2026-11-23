@@ -4,8 +4,8 @@ Options:
   -h, --help                   display help for command
 
 Commands:
-  gate [options] <goalId>      Lead: ask the controller to gate the integration
-                               commit; the request is an event with its reason
+  gate [options] <goalId>      Lead: gate the integration commit now; the
+                               request is an event with its reason
   prepare <goalId>
   complete [options] <goalId>
   merge [options] <goalId>

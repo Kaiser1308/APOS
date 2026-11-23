@@ -10,7 +10,7 @@ import { ProjectJournal } from '../store/journal.js';
 import { ReadOnlyJournal } from '../store/readonly-journal.js';
 import { buildInbox } from '../app/inbox.js';
 import { buildSnapshot } from '../ui/read-model.js';
-import { approval, proposal, sourceText, spec } from '../domain/fixtures.test-support.js';
+import { approval, DELIVERY, proposal, soloGreen, sourceText, spec } from '../domain/fixtures.test-support.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -140,12 +140,12 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
         'GOAL-002',
         '--size',
         'M',
-        '--max-spend',
-        '10',
         '--max-minutes',
         '120',
         '--max-attempts',
         '3',
+        '--on-behalf',
+        'test',
       ),
     ).rejects.toThrow(/sketch|acceptance/i);
   });
@@ -191,11 +191,11 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
     add('GOAL-002', 'goal-selected');
     add('GOAL-002', 'proposal-drafted', { ...proposal, goalId: 'GOAL-002' });
     add('GOAL-002', 'proposal-approved');
-    add('GOAL-002', 'execution-started', { runId: 'r', taskId: 't', dispatchId: 'd', owner: 'lead', repoPath: dir });
-    add('GOAL-002', 'verified');
+    for (const item of soloGreen()) add('GOAL-002', item.type, item.data);
+    add('GOAL-002', 'verified', { deliveryCommit: DELIVERY });
     opened.close();
 
-    await invoke('outcome', 'close', 'GOAL-002');
+    await invoke('outcome', 'close', 'GOAL-002', '--on-behalf', 'test');
 
     // R-2 was deferred to GOAL-002, which closed without accepting R-2 -> exactly one notice in inbox
     const inbox1 = buildInbox(new ReadOnlyJournal(home));
@@ -265,55 +265,5 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
     expect([...ro.failures]).toEqual([]);
     const snap = buildSnapshot(ro);
     expect(snap.plan?.requirements.find(r => r.id === 'R-OLD')?.status).toBe('unplanned');
-  });
-
-  it('lead recommend prioritizes the approved Goal holding the most accepted requirements', async () => {
-    const { dir, home, sourceFile, out, invoke } = await setup();
-    const g1 = { ...spec, id: 'GOAL-001', priority: 1 };
-    const g2 = {
-      ...spec,
-      id: 'GOAL-002',
-      priority: 1,
-      requirements: [
-        spec.requirements[0],
-        { id: 'R-2', sourceSpan: 'line 4', text: 'second req', disposition: 'acceptance' },
-        { id: 'R-3', sourceSpan: 'line 5', text: 'third req', disposition: 'acceptance' },
-      ],
-      acceptance: [{ ...spec.acceptance[0], requirementIds: ['R-1', 'R-2', 'R-3'] }],
-    };
-    writeFileSync(join(dir, 'small.json'), JSON.stringify(g1));
-    writeFileSync(join(dir, 'big.json'), JSON.stringify(g2));
-    await invoke('goal', 'create', '--file', join(dir, 'small.json'), '--source', sourceFile);
-    await invoke('goal', 'create', '--file', join(dir, 'big.json'), '--source', sourceFile);
-    await invoke(
-      'goal',
-      'approve',
-      'GOAL-001',
-      '--size',
-      'S',
-      '--max-spend',
-      '5',
-      '--max-minutes',
-      '60',
-      '--max-attempts',
-      '2',
-    );
-    await invoke(
-      'goal',
-      'approve',
-      'GOAL-002',
-      '--size',
-      'M',
-      '--max-spend',
-      '10',
-      '--max-minutes',
-      '120',
-      '--max-attempts',
-      '2',
-    );
-    out.length = 0;
-    await invoke('lead', 'recommend');
-    expect(out.at(-1)).toMatch(/^GOAL-002:/);
-    void home;
   });
 });

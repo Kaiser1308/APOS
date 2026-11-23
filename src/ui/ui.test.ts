@@ -25,11 +25,19 @@ import { buildInbox } from '../app/inbox.js';
 import { buildHumanInbox } from '../app/wait.js';
 import { ProjectJournal } from '../store/journal.js';
 import { ReadOnlyJournal } from '../store/readonly-journal.js';
-import { DELIVERY, approval, gateReport, proposal, sourceText, spec } from '../domain/fixtures.test-support.js';
+import {
+  DELIVERY,
+  approval,
+  gateReport,
+  proposal,
+  soloGreen,
+  sourceText,
+  spec,
+} from '../domain/fixtures.test-support.js';
 import type { GoalEventType, GoalStatus } from '../domain/transitions.js';
 import { attemptKey } from '../domain/gate.js';
 import { buildStory } from './story.js';
-import { HOLDER, buildGoalDetail, buildSnapshot, findGateLog, tickRunning } from './read-model.js';
+import { HOLDER, buildGoalDetail, buildSnapshot, findGateLog } from './read-model.js';
 import { PAGE } from './page.js';
 import { route, startUi } from './server.js';
 
@@ -102,7 +110,6 @@ async function seeded() {
   b.add('goal-selected');
   b.add('proposal-drafted', { ...proposal, goalId: 'GOAL-B' });
   b.add('proposal-approved');
-  b.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   b.add('blocked', { kind: 'technical', note: 'needs a decision <script>alert(1)</script>' });
   b.add('human-notified', { kind: 'idle', goalId: 'GOAL-B', note: 'quiet' });
   return p;
@@ -133,15 +140,15 @@ it('groups every status under exactly one holder', () => {
     'approved',
     'selected',
     'planned',
-    'ready',
     'executing',
     'blocked',
     'verified',
     'closed',
     'stopped',
+    'legacy',
   ];
   expect(Object.keys(HOLDER).sort()).toEqual([...statuses].sort());
-  expect(HOLDER.ready).toBe('controller');
+  expect(HOLDER.legacy).toBe('done');
   expect(HOLDER.verified).toBe('human');
   expect(HOLDER.planned).toBe('lead');
 });
@@ -188,24 +195,11 @@ it('serves detail with a paged timeline, newest first', async () => {
   p.close();
   const repo = new ReadOnlyJournal(p.home);
   const first = buildGoalDetail(repo, 'GOAL-B', { limit: 3 })!;
-  expect(first.timeline.events.map(item => item.type)).toEqual(['human-notified', 'blocked', 'execution-started']);
   expect(first.timeline.nextBefore).toBeDefined();
   const second = buildGoalDetail(repo, 'GOAL-B', { limit: 3, before: first.timeline.nextBefore })!;
   expect(second.timeline.events.map(item => item.type)).toContain('proposal-approved');
   expect(first.blocker).toMatchObject({ kind: 'technical' });
   expect(JSON.stringify(first)).toContain('<script>'); // data is passed through; the page must not interpret it
-});
-
-it('detects a running tick only from a lease held by a live process', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'apos-ui-lease-'));
-  dirs.push(home);
-  expect(tickRunning(home)).toBe(false);
-  writeFileSync(join(home, 'controller.lease'), JSON.stringify({ pid: process.pid, at }));
-  expect(tickRunning(home)).toBe(true);
-  writeFileSync(join(home, 'controller.lease'), JSON.stringify({ pid: 2_000_000_000, at }));
-  expect(tickRunning(home)).toBe(false);
-  writeFileSync(join(home, 'controller.lease'), '{torn');
-  expect(tickRunning(home)).toBe(false);
 });
 
 it('finds a gate log only by the hash the controller recorded', () => {
@@ -289,7 +283,7 @@ it('places agent-written text with textContent, never as markup', () => {
   expect(PAGE).not.toMatch(/\beval\(/);
 });
 
-it('measures wall time as the supervisor does: from the first owner start, to now while the Goal is on the clock', async () => {
+it('measures wall time from goal select, to now while the Goal is on the clock', async () => {
   const p = await seeded();
   const d = p.goal('GOAL-D');
   d.draft();
@@ -297,15 +291,14 @@ it('measures wall time as the supervisor does: from the first owner start, to no
   d.add('goal-selected');
   d.add('proposal-drafted', { ...proposal, goalId: 'GOAL-D' });
   d.add('proposal-approved');
-  d.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   p.close();
   const repo = new ReadOnlyJournal(p.home);
-  const started = Date.parse(repo.events('GOAL-D').find(item => item.type === 'execution-started')!.at);
+  const started = Date.parse(repo.events('GOAL-D').find(item => item.type === 'goal-selected')!.at);
   const goal = (minutes: number) =>
     buildSnapshot(repo, () => new Date(started + minutes * 60_000)).goals.find(item => item.id === 'GOAL-D')!;
   expect(goal(90).elapsedMinutes).toBe(90);
   expect(goal(1).elapsedMinutes).toBe(1);
-  expect(goal(90).attempts).toBe(1);
+  expect(goal(90).attempts).toBe(0);
   expect(buildSnapshot(repo).goals.find(item => item.id === 'GOAL-A')!.elapsedMinutes).toBe(0); // never started
 });
 
@@ -317,7 +310,6 @@ it('serves a gate log from the Goal artifact folder, and refuses one whose store
   d.add('goal-selected');
   d.add('proposal-drafted', { ...proposal, goalId: 'GOAL-D' });
   d.add('proposal-approved');
-  d.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   const inside = join(p.home, 'artifacts', 'GOAL-D', 'GATE-test', 'CHK-1-delivery-1.log');
   const outside = join(p.home, 'secret.txt');
   mkdirSync(join(inside, '..'), { recursive: true });
@@ -364,9 +356,9 @@ it('leaves out notices that are history or repeat the status, in the UI and in a
   closed.add('goal-selected');
   closed.add('proposal-drafted', { ...proposal, goalId: 'GOAL-X' });
   closed.add('proposal-approved');
-  closed.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   closed.add('human-notified', { kind: 'idle', goalId: 'GOAL-X', note: 'old' });
-  closed.add('verified');
+  for (const item of soloGreen()) closed.add(item.type, item.data);
+  closed.add('verified', { deliveryCommit: DELIVERY });
   closed.add('human-notified', { kind: 'awaiting-outcome', goalId: 'GOAL-X' });
   const open = p.goal('GOAL-Y');
   open.draft();
@@ -374,7 +366,6 @@ it('leaves out notices that are history or repeat the status, in the UI and in a
   open.add('goal-selected');
   open.add('proposal-drafted', { ...proposal, goalId: 'GOAL-Y' });
   open.add('proposal-approved');
-  open.add('execution-started', { runId: 'run_2', taskId: 't', dispatchId: 'd2', owner: 'worker', repoPath: p.dir });
   open.add('human-notified', { kind: 'idle', goalId: 'GOAL-Y', note: 'still quiet' });
   const done = p.goal('GOAL-Z');
   done.draft();
@@ -382,9 +373,9 @@ it('leaves out notices that are history or repeat the status, in the UI and in a
   done.add('goal-selected');
   done.add('proposal-drafted', { ...proposal, goalId: 'GOAL-Z' });
   done.add('proposal-approved');
-  done.add('execution-started', { runId: 'run_3', taskId: 't', dispatchId: 'd3', owner: 'worker', repoPath: p.dir });
   done.add('human-notified', { kind: 'idle', goalId: 'GOAL-Z', note: 'ancient' });
-  done.add('verified');
+  for (const item of soloGreen()) done.add(item.type, item.data);
+  done.add('verified', { deliveryCommit: DELIVERY });
   done.add('outcome-accepted');
   p.close();
   const repo = new ReadOnlyJournal(p.home);
@@ -428,9 +419,7 @@ it('tells the story of a Goal: what the Human gave, what the Lead decided, and w
     'repo trống, các mảng phụ thuộc chặt vào model chung',
   );
   g.add('proposal-approved');
-  g.add('execution-started', { runId: 'run_1', taskId: 't', dispatchId: 'd', owner: 'worker', repoPath: p.dir });
   g.add('decision-logged', { note: 'cookie session, not JWT' });
-  g.add('checkpointed', { phase: 'impl', progress: 'login route done', evidenceRefs: [] });
   g.add('blocked', { kind: 'technical', note: 'need a decision' });
   p.close();
   const story = buildStory(new ReadOnlyJournal(p.home), 'GOAL-S')!;
@@ -439,12 +428,11 @@ it('tells the story of a Goal: what the Human gave, what the Lead decided, and w
   expect(story.owners).toHaveLength(1);
   expect(story.owners[0].entries.map(item => `${item.kind}:${item.text}`)).toEqual([
     'decision:cookie session, not JWT',
-    'report:impl: login route done',
     'blocker:technical: need a decision',
   ]);
   const reply = route(p.home, new URL('/api/goals/GOAL-S/story', 'http://localhost'));
   expect(reply.status).toBe(200);
-  expect(JSON.parse(reply.body).owners[0].entries).toHaveLength(3);
+  expect(JSON.parse(reply.body).owners[0].entries).toHaveLength(2);
   expect(route(p.home, new URL('/api/goals/GOAL-NOPE/story', 'http://localhost')).status).toBe(404);
 });
 
@@ -465,4 +453,19 @@ it('splits a Multi-WP story per package and keeps Lead-level notes apart', async
   const story = buildStory(new ReadOnlyJournal(p.home), 'GOAL-M')!;
   expect(story.lead).toMatchObject({ mode: 'multi-wp', whySplit: 'two modules are independent' });
   expect(story.lead!.modeLabel).toMatch(/Chia nhiều/);
+});
+
+it('shows a Goal an older APOS recorded as read-only, and has no agent, terminal or token view left', () => {
+  const fixture = join(import.meta.dirname, '..', 'store', 'fixtures', 'replay', 'legacy-solo');
+  const snapshot = buildSnapshot(new ReadOnlyJournal(fixture));
+  expect(snapshot.goals.map(item => [item.id, item.status, item.legacy, item.legacyOutcome, item.holder])).toEqual([
+    ['GOAL-SMOKE-R', 'legacy', true, 'closed', 'done'],
+    ['GOAL-SMOKE-V2', 'legacy', true, 'closed', 'done'],
+  ]);
+  expect(snapshot).not.toHaveProperty('tickRunning');
+  expect(snapshot.inbox).toEqual([]);
+  expect(PAGE).toContain('chỉ đọc – APOS cũ');
+  for (const gone of ['telemetry', 'Telemetry', 'activity', 'Tokens', 'tick running', 'dispatches'])
+    expect(PAGE, gone).not.toContain(gone);
+  expect(route(fixture, new URL('/api/goals/GOAL-SMOKE-V2/activity/ctx_1', 'http://localhost')).status).toBe(404);
 });

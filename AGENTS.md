@@ -1,18 +1,19 @@
 # AGENTS.md
 
-Quy ước cho agent viết code trong APOS. Chi tiết và lý do: `docs/architecture/convention-refactor.md` (mục 5 và 6).
+Quy ước cho agent viết code trong APOS. Tóm tắt: `docs/architecture/conventions.md`. Lý do ban đầu (lịch sử): `docs/archive/architecture/convention-refactor-v2.md`.
 
 ## Hướng phụ thuộc
 
 ```
-domain  <-  ports  <-  store, runtime, app  <-  cli, ui
+domain  <-  ports  <-  store, app  <-  cli, ui
 ```
 
 - `domain` không import gì trong `src/`.
 - `ports` chỉ import `domain`.
-- `runtime` và `store` import `domain` và `ports`, không import `app`.
-- `app` import `domain`, `ports`, `store`, `runtime`. Phần nối dây nằm ở `cli/`.
-- `ui` import `domain`, `ports`, `store/readonly-journal`. Ngoại lệ có ghi lại (O10): `app/inbox` và `runtime/orca/parse.ts` (file runtime duy nhất ui được import, để lấy `worktreePath`).
+- `store` import `domain` và `ports`, không import `app`.
+- `app` import `domain`, `ports`, `store`. Phần nối dây nằm ở `cli/`.
+- `ui` import `domain`, `ports`, `store/readonly-journal`. Ngoại lệ có ghi lại: `app/inbox`.
+- Không có `runtime/` hay cổng runtime: APOS v3 không điều phối agent. Không thêm import `runtime/orca` hay `ports/runtime` (depcruise chặn).
 - Không có vòng import, trừ vòng chỉ có type trong `domain/`.
 
 Các luật này do dependency-cruiser ép (`.dependency-cruiser.cjs`).
@@ -21,14 +22,12 @@ Các luật này do dependency-cruiser ép (`.dependency-cruiser.cjs`).
 
 | Loại code | Chỗ đặt |
 |---|---|
-| Kiểu dữ liệu, zod contract, transitions, gate, packages, reviews | `src/domain/` |
-| Kiểu ref của runtime (`RuntimeRef`, `PackageRuntimeRef`, `RuntimeProfile`) | `src/domain/runtime-refs.ts` |
+| Kiểu dữ liệu, zod contract, transitions, gate, packages, reviews, tên sự kiện legacy | `src/domain/` |
 | `UserError` (sai input, sai điều kiện trước), `InvariantError` (vi phạm bất biến); chỉ cho code mới hoặc code đang sửa, không đổi hàng loạt `throw new Error` cũ (file đã có, chưa chỗ nào dùng) | `src/domain/errors.ts` |
-| Interface cổng (`RuntimeAdapter`, `PackageRuntime`, `CommitInspector`, `TelemetryProbe`) | `src/ports/` |
+| Interface cổng (`CommitInspector`, `GoalRepository`) | `src/ports/` |
 | Event log, journal, sqlite | `src/store/` |
-| Adapter agent, parse output Orca, git, brief, telemetry | `src/runtime/` |
-| Use case, supervisor, dựng event bằng `newEvent()` | `src/app/` |
-| Lệnh CLI, `openJournal`, `assertHuman` | `src/cli/` (entry point vẫn là `src/cli.ts`) |
+| Use case (gate, nộp gói, tích hợp, đóng Goal), dựng event bằng `newEvent()` | `src/app/` |
+| Lệnh CLI, `openJournal`, `assertHuman` / `confirmHuman` | `src/cli/` (entry point vẫn là `src/cli.ts`) |
 | Read model, server, page | `src/ui/` |
 | Test | cạnh code (`x.test.ts`); fixture dùng chung là `*.test-support.ts` |
 

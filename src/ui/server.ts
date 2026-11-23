@@ -4,7 +4,6 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { ReadOnlyJournal } from '../store/readonly-journal.js';
 import { buildGoalDetail, buildSnapshot, findGateLog } from './read-model.js';
-import { readActivity, defaultRoots, type Roots } from './activity.js';
 import { buildStory } from './story.js';
 import { PAGE } from './page.js';
 
@@ -33,7 +32,7 @@ function readCapped(path: string): string {
 }
 
 /** Read-only routes. Everything is looked up by id in what the controller recorded; no request names a path. */
-export function route(home: string, url: URL, roots: Roots = defaultRoots()): Reply {
+export function route(home: string, url: URL): Reply {
   const parts = url.pathname.split('/').filter(Boolean);
   if (url.pathname === '/') return { status: 200, type: 'text/html; charset=utf-8', body: PAGE };
   if (parts[0] !== 'api') return text(404, 'not found');
@@ -51,18 +50,6 @@ export function route(home: string, url: URL, roots: Roots = defaultRoots()): Re
     return json(200, buildGoalDetail(repo, goalId, { limit: Number.isFinite(limit) ? limit : 200, before }));
   }
   if (parts.length === 4 && parts[3] === 'story') return json(200, buildStory(repo, goalId));
-  if (parts.length === 5 && parts[3] === 'activity') {
-    if (!/^[A-Za-z0-9_-]{1,80}$/.test(parts[4])) return text(400, 'invalid dispatch id');
-    const afterParam = url.searchParams.get('after');
-    if (afterParam !== null && !/^[0-9]{1,9}$/.test(afterParam)) return text(400, 'invalid after');
-    const reply = readActivity(
-      repo.events(goalId),
-      parts[4],
-      afterParam === null ? undefined : Number(afterParam),
-      roots,
-    );
-    return reply ? json(200, reply) : text(404, 'unknown dispatch');
-  }
   if (parts.length === 5 && parts[3] === 'gate-log') {
     if (!/^[0-9a-f]{64}$/.test(parts[4])) return text(400, 'invalid log id');
     const ref = findGateLog(state, parts[4]);

@@ -137,3 +137,30 @@ it('imports an APOS v1 history kept in the repo, once, and skips one that no lon
   expect(opened.journal.importLegacy().imported).toEqual([]);
   opened.close();
 });
+
+it('refuses to append an orchestration event, or anything at all to a legacy Goal, and leaves the log alone', async () => {
+  const { draft, journal, close } = await project();
+  draft();
+  expect(() => journal.append({ id: 'EV-legacy', goalId: spec.id, type: 'lead-started' as GoalEventType, at })).toThrow(
+    /not an APOS v3 event/,
+  );
+  close();
+  // A log recorded by the old APOS replays, shows as legacy, and takes no new events.
+  const legacyHome = mkdtempSync(join(tmpdir(), 'apos-journal-legacy-'));
+  dirs.push(legacyHome);
+  const events = join(legacyHome, 'events');
+  mkdirSync(events, { recursive: true });
+  const fixtures = join(import.meta.dirname, 'fixtures', 'replay', 'lead', 'events');
+  writeFileSync(join(events, 'GOAL-001.jsonl'), readFileSync(join(fixtures, 'GOAL-001.jsonl')));
+  const repo = mkdtempSync(join(tmpdir(), 'apos-journal-legacy-repo-'));
+  dirs.push(repo);
+  execFileSync('git', ['init', '-q', repo]);
+  const opened = ProjectJournal.open(repo, legacyHome, newEvent);
+  const before = readFileSync(join(events, 'GOAL-001.jsonl'), 'utf8');
+  expect(opened.journal.getGoal('GOAL-001')?.status).toBe('legacy');
+  expect(() =>
+    opened.journal.append({ id: 'EV-new', goalId: 'GOAL-001', type: 'decision-logged', data: { note: 'x' }, at }),
+  ).toThrow(/legacy Goal.*read-only/);
+  expect(readFileSync(join(events, 'GOAL-001.jsonl'), 'utf8')).toBe(before);
+  opened.close();
+});

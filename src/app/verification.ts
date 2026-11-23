@@ -1,7 +1,7 @@
 import { newEvent } from './events.js';
 import type { Evidence, GoalId } from '../domain/contracts.js';
-import type { GoalEventType } from '../domain/transitions.js';
-import { requiresIndependentReview } from '../domain/reviews.js';
+import { closeProblems, type GoalEventType } from '../domain/transitions.js';
+import { UserError } from '../domain/errors.js';
 import { gateShortfalls } from '../domain/gate.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
@@ -34,6 +34,16 @@ export class VerificationService {
    */
   verify(goalId: GoalId, deliveryCommit?: string): VerificationResult {
     const state = this.store.getGoal(goalId);
+    if (
+      state?.status === 'verified' &&
+      state.verifiedCommit &&
+      (!deliveryCommit || deliveryCommit.toLowerCase() === state.verifiedCommit.toLowerCase())
+    )
+      return {
+        passed: true,
+        acceptanceIds: state.spec.acceptance.map(item => item.id),
+        deliveryCommit: state.verifiedCommit,
+      };
     if (!state || state.status !== 'executing') throw new Error('Goal must be executing to verify');
     const expected = state.proposal?.mode === 'multi-wp' ? state.integration?.commitRef : deliveryCommit;
     if (state.proposal?.mode === 'multi-wp' && !expected)
@@ -41,11 +51,6 @@ export class VerificationService {
     const problems = gateShortfalls(state.spec, state.gate, expected);
     if (problems.length) throw new Error(`Controller gate does not verify ${goalId}: ${problems.join('; ')}`);
     const gated = state.gate!.deliveryCommit;
-    if (requiresIndependentReview(state)) {
-      const review = [...state.reviews].reverse().find(item => item.subject === 'goal');
-      if (review?.result !== 'pass' || review.commitRef.toLowerCase() !== gated.toLowerCase())
-        throw new Error('Passing independent Goal review of the gated delivery commit required');
-    }
     this.record(goalId, 'verified', {
       acceptanceIds: state.spec.acceptance.map(item => item.id),
       gateId: state.gate!.gateId,
@@ -54,9 +59,14 @@ export class VerificationService {
     return { passed: true, acceptanceIds: state.spec.acceptance.map(item => item.id), deliveryCommit: gated };
   }
 
-  recordOutcome(goalId: GoalId, decision: 'close' | 'revise' | 'stop'): void {
+  recordOutcome(goalId: GoalId, decision: 'close' | 'revise' | 'stop', confirmation?: unknown): void {
     // Orphaned deferred requirements are not journaled: the inbox recomputes them from the Goal specs on every read.
+    if (decision === 'close') {
+      const state = this.store.getGoal(goalId);
+      const problems = state ? closeProblems(state) : ['Goal not found'];
+      if (problems.length) throw new UserError(problems.join('; '));
+    }
     const type = { close: 'outcome-accepted', revise: 'outcome-revised', stop: 'outcome-stopped' } as const;
-    this.record(goalId, type[decision]);
+    this.record(goalId, type[decision], confirmation ? { confirmation } : undefined);
   }
 }

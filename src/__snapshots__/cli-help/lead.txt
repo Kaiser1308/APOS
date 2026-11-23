@@ -4,15 +4,7 @@ Options:
   -h, --help             display help for command
 
 Commands:
-  recommend
-  start <id>             Human: ask the controller to dispatch the Lead of a
-                         selected Goal (goal select does this; use it to retry)
-  wake [options] <id>    Human: wake a Lead that ended its turn before its plan
-                         was accepted, on its own terminal
-  ack <id>               bot Lead: run first on every APOS wake; it tells APOS
-                         the wake reached this chat and records the chat's
-                         mailbox
   propose [options]
-  commit [options] <id>  Lead commits its plan; the controller checks it and
-                         dispatches
+  commit [options] <id>  Lead commits its plan; APOS machine-checks it. Delivery
+                         then goes through `apos package submit`
   help [command]         display help for command

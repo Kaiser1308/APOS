@@ -2,13 +2,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { runCli } from './cli.js';
 
 const GROUPS = [
-  'profile',
   'goal',
   'lead',
-  'execution',
   'package',
   'integration',
-  'controller',
   'gate',
   'review',
   'metrics',
@@ -46,4 +43,15 @@ it('pins the top-level help', async () => {
 
 it.each(GROUPS)('pins %s --help', async group => {
   await expect(await help([group])).toMatchFileSnapshot(`./__snapshots__/cli-help/${group}.txt`);
+});
+
+it('no longer offers any command that dispatches, wakes or watches an agent', async () => {
+  const root = await help([]);
+  for (const gone of ['controller', 'handoff', 'profile', 'execution'])
+    expect(root, gone).not.toMatch(new RegExp(`^  ${gone}\\b`, 'm'));
+  const lead = await help(['lead']);
+  for (const gone of ['start', 'wake', 'recommend', 'ack'])
+    expect(lead, gone).not.toMatch(new RegExp(`^  ${gone}\\b`, 'm'));
+  const goal = await help(['goal']);
+  expect(goal).not.toMatch(/^  wait\b/m);
 });

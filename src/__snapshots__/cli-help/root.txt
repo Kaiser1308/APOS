@@ -1,40 +1,32 @@
 Usage: apos [options] [command]
 
-Local AI Project Orchestration System
+Assurance layer for AI-built software: fixed checks on exact commits
 
 Options:
-  -V, --version               output the version number
-  --repo <path>               managed Git project (default: "/repo")
-  -h, --help                  display help for command
+  -V, --version    output the version number
+  --repo <path>    managed Git project (default: "/repo")
+  -h, --help       display help for command
 
 Commands:
-  init [options]              initialize .apos in a Git project
-  migrate                     import APOS v1 Goal histories from the repo into
-                              the controller log
-  profile                     which agent, model and effort each role runs with
-                              (<controller home>/runtime.json)
+  init [options]   initialize .apos in a Git project
+  migrate          import APOS v1 Goal histories from the repo into the
+                   controller log
   goal
-  plan [options]              show Goal plan and requirement coverage across the
-                              brief
+  plan [options]   show Goal plan and requirement coverage across the brief
   lead
-  execution
-  package
+  package          the Lead plans packages; delivery goes through `submit`
   integration
-  controller
-  gate                        controller-run checks on exact commits; owner
-                              claims are not evidence
+  gate             controller-run checks on exact commits; owner claims are not
+                   evidence
   review
   metrics
   evidence
   decision
   blocker
-  handoff [options] <goalId>  Human: move a stuck owner (for example out of
-                              quota) to a fresh agent on the same worktree; no
-                              attempt is spent
   outcome
-  inbox [options]             what needs the Human: notices, blocked Goals,
-                              verified Goals awaiting outcome
-  ui [options]                read-only web view of this project on 127.0.0.1;
-                              it never writes controller state
+  inbox [options]  what needs the Human: notices, blocked Goals, verified Goals
+                   awaiting outcome
+  ui [options]     read-only web view of this project on 127.0.0.1; it never
+                   writes controller state
   finding
-  help [command]              display help for command
+  help [command]   display help for command

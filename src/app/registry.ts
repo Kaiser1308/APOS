@@ -1,5 +1,5 @@
 import { newEvent } from './events.js';
-import type { GoalState } from '../domain/transitions.js';
+import { effectiveStatus } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
 export class GoalRegistryService {
@@ -28,36 +28,29 @@ export class GoalRegistryService {
     currentSourceDigest: ((goalId: string) => string | undefined) | undefined = this.store.currentSourceDigest?.bind(
       this.store,
     ),
+    confirmation?: unknown,
   ): void {
     this.assertAcyclic();
     const state = this.store.getGoal(goalId);
     if (currentSourceDigest && state && currentSourceDigest(goalId) !== state.spec.source.sha256)
       throw new Error(`Source snapshot for ${goalId} is missing or differs from the Goal sha256`);
-    this.store.append(newEvent(goalId, 'goal-approved', { appetite }));
+    this.store.append(newEvent(goalId, 'goal-approved', { appetite, confirmation }));
   }
 
-  recommend(): GoalState | undefined {
-    const countAccepted = (state: GoalState) =>
-      state.spec.requirements.filter(item => item.disposition === 'acceptance').length;
-    return this.store
-      .listGoals()
-      .filter(
-        state =>
-          state.status === 'approved' &&
-          state.spec.dependencies.every(id => this.store.getGoal(id)?.status === 'closed'),
-      )
-      .sort((a, b) => countAccepted(b) - countAccepted(a) || a.spec.priority - b.spec.priority)[0];
+  private isClosed(id: string): boolean {
+    const state = this.store.getGoal(id);
+    return state !== undefined && effectiveStatus(state) === 'closed';
   }
 
-  select(goalId: string): void {
+  select(goalId: string, confirmation?: unknown): void {
     const state = this.store.getGoal(goalId);
     if (!state) throw new Error(`Goal does not exist: ${goalId}`);
     if (state.status !== 'approved')
       throw new Error(
         `Approved Goal required: ${goalId} is ${state.status}${state.status === 'draft' ? ' (gate A first: apos goal approve)' : ''}`,
       );
-    const pending = state.spec.dependencies.filter(id => this.store.getGoal(id)?.status !== 'closed');
+    const pending = state.spec.dependencies.filter(id => !this.isClosed(id));
     if (pending.length) throw new Error(`Goal dependencies not closed: ${pending.join(', ')}`);
-    this.store.append(newEvent(goalId, 'goal-selected'));
+    this.store.append(newEvent(goalId, 'goal-selected', confirmation ? { confirmation } : undefined));
   }
 }

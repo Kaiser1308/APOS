@@ -19,6 +19,8 @@ import {
   type GateEnvironment,
   type GateReport,
 } from '../domain/gate.js';
+import { gateWarnings } from '../domain/reviews.js';
+import { UserError } from '../domain/errors.js';
 import { assertGitRoot } from '../store/project-history.js';
 import { GitCommitInspector } from './integration.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
@@ -99,16 +101,17 @@ export class GateService {
     );
   }
 
-  /** Runs the Goal checks a package's acceptance names, on the package head against its own base. */
-  runPackage(goalId: string, packageId: string, repoPath: string, head: string): GateReport {
+  /**
+   * Runs the Goal checks a package's acceptance names, on the submitted commit against the package base. Pure: it
+   * records nothing, so a gate that is interrupted leaves no trace and the package can simply be submitted again.
+   */
+  runPackage(goalId: string, packageId: string, repoPath: string, head: string, base: string): GateReport {
     const state = this.store.getGoal(goalId);
     const item = state?.packages?.[packageId];
-    if (!state || item?.status !== 'executing') throw new Error('Executing package required for package gate');
+    if (!state || !item) throw new UserError(`Unknown package ${packageId} of ${goalId}`);
+    if (this.digest(repoPath, goalId) !== state.spec.source.sha256)
+      throw new UserError('Source snapshot changed or missing since approval; revise the Goal before gating');
     const wanted = new Set(item.spec.acceptance.flatMap(criterion => criterion.checkIds ?? []));
-    const base = item.runtimeRef?.baseCommit;
-    if (!base) throw new Error('Package base commit unknown');
-    if (!this.inspector.contains(repoPath, base, head))
-      throw new Error('Package head does not descend from its base commit');
     const artifacts = join(this.artifactRoot, goalId, `${packageId}-${randomUUID()}`);
     mkdirSync(artifacts, { recursive: true });
     const checks: CheckResult[] = state.spec.checks
@@ -120,21 +123,21 @@ export class GateService {
         return this.evaluate(check, repoPath, head, baseRuns, artifacts);
       });
     const missingDependencies = item.spec.dependencies.filter(dep => {
-      const dependency = state.packages?.[dep];
-      const commit = dependency?.gate?.deliveryCommit ?? dependency?.evidence.at(-1)?.commitRef;
-      return dependency?.status !== 'verified' || !commit || !this.inspector.contains(repoPath, commit, head);
+      const commit = state.packages?.[dep]?.gate?.deliveryCommit;
+      return state.packages?.[dep]?.status !== 'green' || !commit || !this.inspector.contains(repoPath, commit, head);
     });
     if (missingDependencies.length)
       checks.push({
         checkId: 'APOS-DEPENDENCIES',
         status: 'fail',
-        reason: `delivery does not contain verified dependency commits: ${missingDependencies.join(', ')}`,
+        reason: `delivery does not contain green dependency commits: ${missingDependencies.join(', ')}`,
         base: [],
         delivery: [],
         newFailures: [],
       });
     const changedFiles = this.inspector.files(repoPath, head, base);
-    const guard = protectedCheck(goalId, changedFiles);
+    // APOS's own milestone commits are legitimate changes under .apos/; anything else there is not.
+    const guard = protectedCheck(goalId, untrustedProtectedFiles(this.store, goalId, repoPath, head, changedFiles));
     if (guard) checks.push(guard);
     const report: GateReport = {
       gateId: `GATE-${randomUUID()}`,
@@ -146,28 +149,13 @@ export class GateService {
       attemptKey: `${item.spec.id}@${item.spec.version}:${item.attempts}`,
       phase: 'delivery',
       changedFiles,
+      warnings: gateWarnings({ spec: state.spec, proposal: state.proposal, changedFiles }),
       environment: { platform: process.platform, shell: this.executor.shell, node: process.version },
       checks,
       result: summarizeGate(checks),
       at: this.now(),
     };
     writeFileSync(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
-    this.store.append(
-      newEvent(
-        goalId,
-        'package-gate-recorded',
-        {
-          packageId,
-          report,
-          signature: checks
-            .filter(c => c.status !== 'pass')
-            .map(c => `${c.checkId}[${c.newFailures.join(',')}]`)
-            .sort()
-            .join('|'),
-        },
-        this.now(),
-      ),
-    );
     return report;
   }
 
@@ -194,11 +182,7 @@ export class GateService {
       input.baseCommit.toLowerCase() !== state.proposal.baseCommit?.toLowerCase()
     )
       throw new Error('Multi-WP integration gate must use the proposal base commit');
-    const baseCommit =
-      input.baseCommit ??
-      (state.proposal?.mode === 'multi-wp'
-        ? state.proposal.baseCommit
-        : (state.runtimeRef?.baseCommit ?? state.proposal?.baseCommit));
+    const baseCommit = input.baseCommit ?? state.proposal?.baseCommit;
     if (!baseCommit) throw new Error('Base commit unknown; record it in the proposal or pass --base');
     for (const [label, ref] of [
       ['base', baseCommit],
@@ -246,6 +230,7 @@ export class GateService {
       attemptKey: attempt,
       phase,
       changedFiles,
+      warnings: phase === 'delivery' ? gateWarnings({ spec: state.spec, proposal: state.proposal, changedFiles }) : [],
       environment,
       checks,
       result: summarizeGate(checks),
@@ -256,11 +241,14 @@ export class GateService {
     return report;
   }
 
-  confirmManual(goalId: string, input: { checkId: string; deliveryCommit: string; by: string; note: string }): void {
+  confirmManual(
+    goalId: string,
+    input: { checkId: string; deliveryCommit: string; by: string; note: string; confirmation?: unknown },
+  ): void {
     const state = this.store.getGoal(goalId);
-    const owner = state?.runtimeRef?.owner;
-    if (owner && input.by.trim().toLowerCase() === owner.toLowerCase())
-      throw new Error('Manual check must be confirmed by someone other than the owner');
+    const submitters = Object.values(state?.packages ?? {}).map(item => item.submission?.by.trim().toLowerCase());
+    if (submitters.includes(input.by.trim().toLowerCase()))
+      throw new UserError('A manual check must be confirmed by someone other than whoever submitted the work');
     this.store.append(newEvent(goalId, 'check-confirmed', input, this.now()));
   }
 

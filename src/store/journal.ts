@@ -2,7 +2,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { applyEvent, type GoalEvent, type GoalEventType, type GoalState } from '../domain/transitions.js';
+import {
+  applyEvent,
+  isWritableEventType,
+  type GoalEvent,
+  type GoalEventType,
+  type GoalState,
+} from '../domain/transitions.js';
+import { UserError } from '../domain/errors.js';
 import { parseGoalSpec } from '../domain/contracts.js';
 import { sourceDigest } from '../domain/gate.js';
 import {
@@ -18,7 +25,7 @@ import { SqliteStore } from './sqlite.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
 /** Events after which the readable Goal record in the repo is refreshed and committed. */
-export const MILESTONES: ReadonlySet<GoalEventType> = new Set<GoalEventType>([
+export const MILESTONES: ReadonlySet<string> = new Set<GoalEventType>([
   'goal-approved',
   'proposal-approved',
   'verified',
@@ -107,12 +114,19 @@ export class ProjectJournal implements GoalRepository {
   private appendLocked(event: GoalEvent): void {
     this.rebuildIndex();
     if (this.store.hasEvent(event.id)) return;
+    if (!isWritableEventType(event.type))
+      throw new UserError(`${event.type} is not an APOS v3 event: APOS no longer runs agents`);
+    if (this.store.getGoal(event.goalId)?.status === 'legacy')
+      throw new UserError(
+        `${event.goalId} is a legacy Goal recorded by an older APOS that dispatched agents: it is read-only. Draft a new Goal to continue the work`,
+      );
     if (MILESTONES.has(event.type) && !this.createEvent)
       throw new Error('Controller event factory required to publish milestones');
     const next = applyEvent(this.store.getGoal(event.goalId), event);
     this.log.append(event);
     this.store.append(event);
-    if (MILESTONES.has(event.type)) this.publish(event.goalId, next, `apos: ${event.goalId} ${event.type}`);
+    if (MILESTONES.has(event.type) || (event.type === 'package-gate-recorded' && next.status === 'verified'))
+      this.publish(event.goalId, next, `apos: ${event.goalId} ${event.type}`);
   }
 
   /** Renders the readable Goal record from controller state. Appetite never leaves the controller. */

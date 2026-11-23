@@ -3,7 +3,7 @@ import { newEvent } from './events.js';
 import { validatePackageGraph } from '../domain/packages.js';
 import { assertGitRoot } from '../store/project-history.js';
 import { VerificationService } from './verification.js';
-import { requiresIndependentReview } from '../domain/reviews.js';
+import { UserError } from '../domain/errors.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 
@@ -62,35 +62,27 @@ export class IntegrationService {
   prepare(goalId: string, repoPath: string): { commits: string[]; conflicts: string[] } {
     const state = this.store.getGoal(goalId);
     if (!state?.proposal || state.proposal.mode !== 'multi-wp' || state.status !== 'executing')
-      throw new Error('Executing Multi-WP Goal required');
+      throw new UserError('Executing Multi-WP Goal required');
     const packages = Object.values(state.packages ?? {});
     validatePackageGraph(
       state.spec,
       state.proposal,
       packages.map(item => item.spec),
     );
-    if (!packages.every(item => item.status === 'verified'))
-      throw new Error('All packages must be verified before integration');
+    if (!packages.every(item => item.status === 'green'))
+      throw new UserError('All packages must be green before integration');
     const owners = new Map<string, Set<string>>();
     const commits = new Set<string>();
     for (const item of packages) {
-      const latest = new Map(item.evidence.map(evidence => [evidence.acceptanceId, evidence]));
-      for (const criterion of item.spec.acceptance) {
-        const evidence = latest.get(criterion.id);
-        if (
-          !evidence ||
-          evidence.result !== 'pass' ||
-          evidence.packageVersion !== item.spec.version ||
-          evidence.owner !== item.spec.owner
-        )
-          throw new Error(`Stale or missing package evidence: ${item.spec.id}`);
-        commits.add(evidence.commitRef);
-        if (!this.inspector.exists(repoPath, evidence.commitRef))
-          throw new Error(`Package commit missing: ${evidence.commitRef}`);
-        for (const file of this.inspector.files(repoPath, evidence.commitRef, item.runtimeRef?.baseCommit)) {
-          if (!owners.has(file)) owners.set(file, new Set());
-          owners.get(file)!.add(item.spec.id);
-        }
+      const gate = item.gate;
+      if (gate?.result !== 'green' || gate.goalVersion !== state.spec.version)
+        throw new UserError(`Stale or missing package gate: ${item.spec.id}`);
+      commits.add(gate.deliveryCommit);
+      if (!this.inspector.exists(repoPath, gate.deliveryCommit))
+        throw new UserError(`Package commit missing: ${gate.deliveryCommit}`);
+      for (const file of this.inspector.files(repoPath, gate.deliveryCommit, gate.baseCommit)) {
+        if (!owners.has(file)) owners.set(file, new Set());
+        owners.get(file)!.add(item.spec.id);
       }
     }
     return {
@@ -114,13 +106,6 @@ export class IntegrationService {
     const state = this.store.getGoal(goalId)!;
     if (state.gate?.deliveryCommit.toLowerCase() !== input.commitRef.toLowerCase() || state.gate.result !== 'green')
       throw new Error('Green controller gate on the integration commit required');
-    if (requiresIndependentReview(state)) {
-      const review = [...state.reviews].reverse().find(item => item.subject === 'goal');
-      if (review?.result !== 'pass' || review.commitRef !== input.commitRef)
-        throw new Error(
-          'Passing independent Goal review of integration commit required: the controller dispatches the reviewer once the integration gate is green and wakes the Lead with the verdict; run integration complete again after a pass',
-        );
-    }
     this.store.append(
       newEvent(goalId, 'integration-completed', {
         commitRef: input.commitRef,

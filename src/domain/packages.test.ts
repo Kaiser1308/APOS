@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertMultiWpPlannable, parseWorkPackage, validatePackageGraph } from './packages.js';
+import { parseWorkPackage, validatePackageGraph } from './packages.js';
 import { spec, proposal } from './fixtures.test-support.js';
 
 const a = {
@@ -57,15 +57,5 @@ describe('Work Package graph', () => {
   });
   it('rejects an empty package outcome', () => {
     expect(() => parseWorkPackage({ ...a, outcome: ' ' })).toThrow();
-  });
-});
-
-describe('Multi-WP plan with declared risks', () => {
-  it('is refused before any package runs, because no package reviewer exists', () => {
-    expect(() => assertMultiWpPlannable({ ...multi, risks: ['shared token contract'] })).toThrow(
-      /cannot declare risks/,
-    );
-    expect(() => assertMultiWpPlannable({ ...multi, risks: [] })).not.toThrow();
-    expect(() => assertMultiWpPlannable({ ...proposal, mode: 'solo-direct', risks: ['anything'] })).not.toThrow();
   });
 });

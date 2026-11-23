@@ -150,7 +150,9 @@ const proposalSchema = z
     baseCommit: commit.optional(),
     /** Hash of the source the Lead planned from; the controller refuses a plan made against another source. */
     sourceSha256: sha256.optional(),
-    estimatedCost: z.object({ spendUsd: z.number().nonnegative(), wallMinutes: z.number().positive() }).optional(),
+    estimatedCost: z
+      .object({ spendUsd: z.number().nonnegative().optional(), wallMinutes: z.number().positive() })
+      .optional(),
     /** Why one owner beats splitting, or why splitting beats one owner. */
     rationale: namedText.optional(),
     /** Why splitting beats one owner; required for Multi-WP. */
@@ -179,16 +181,19 @@ const proposalSchema = z
   });
 
 /**
- * Controller-only budget the Human approves with the Goal. It never appears in Goal documents or
- * briefs; owners see scope and acceptance, and are stopped honestly when a limit is hit.
+ * Controller-only budget the Human approves with the Goal: wall minutes from `goal select` to `verified`, and how
+ * many red gates one package may have. It never appears in Goal documents.
  */
-const appetiteSchema = z.object({
-  size: z.enum(['S', 'M', 'L']),
-  maxSpendUsd: z.number().positive(),
-  maxWallMinutes: z.number().int().positive(),
-  maxAttempts: z.number().int().min(1).max(10),
-  overrunPolicy: z.enum(['stop', 'ask']).default('ask'),
-});
+const appetiteSchema = z
+  .object({
+    size: z.enum(['S', 'M', 'L']),
+    maxWallMinutes: z.number().int().positive(),
+    maxAttempts: z.number().int().min(1).max(10),
+    overrun: z.enum(['stop', 'ask']).optional(),
+    /** The name an older APOS wrote; its `maxSpendUsd` is dropped, APOS cannot measure spend without running agents. */
+    overrunPolicy: z.enum(['stop', 'ask']).optional(),
+  })
+  .transform(({ overrunPolicy, overrun, ...rest }) => ({ ...rest, overrun: overrun ?? overrunPolicy ?? 'ask' }));
 export type Appetite = z.infer<typeof appetiteSchema>;
 export function parseAppetite(value: unknown): Appetite {
   return appetiteSchema.parse(value);

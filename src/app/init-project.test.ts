@@ -37,7 +37,7 @@ it('refuses skills that are missing or written for another APOS contract', async
   cpSync(BUNDLED_SKILLS, root, { recursive: true });
   expect(resolveSkills(root).roles.lead).toMatch(/apos-lead/);
   wf(j(root, 'apos-lead', 'SKILL.md'), ['---', 'name: apos-lead', 'apos-contract: 1', '---', 'old'].join('\n'));
-  expect(() => resolveSkills(root)).toThrow(/declares apos-contract 1; this APOS build needs 2/);
+  expect(() => resolveSkills(root)).toThrow(/declares apos-contract 1; this APOS build needs 3/);
   rm(j(root, 'apos-worker'), { recursive: true });
   md(j(root, 'apos-lead'), { recursive: true });
   expect(() => resolveSkills(root)).toThrow(/apos-contract 1|APOS skill missing/);

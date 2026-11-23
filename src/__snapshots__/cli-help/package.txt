@@ -1,24 +1,14 @@
 Usage: apos package [options] [command]
 
+the Lead plans packages; delivery goes through `submit`
+
 Options:
-  -h, --help                                                display help for command
+  -h, --help                             display help for command
 
 Commands:
-  answer [options] <goalId> <packageId>                     Lead: answer a Worker's question; the controller sends it on the package's Run at its next tick
   add [options]
   remove [options] <goalId> <packageId>
-  approve [options] <goalId> <packageId>
-  hold [options] <goalId> <packageId>
-  approval-policy [options] <goalId> <enabled>
-  decide-failure [options] <goalId> <packageId> <decision>
-  list <goalId>
-  ready <goalId>
-  dispatch <goalId>                                         the controller dispatches every ready package at its next tick; this lists them
-  reconcile <goalId>
-  evidence [options] <goalId>
-  verify <goalId> <packageId>
   revise [options] <goalId>
-  block [options] <goalId> <packageId>
-  unblock [options] <goalId> <packageId>
-  resume <goalId> <packageId>
-  help [command]                                            display help for command
+  submit [options] <goalId> <packageId>  Lead: gate this commit now; exits 0 green, 1 red, 3 needs a Human or could not be verified
+  list <goalId>
+  help [command]                         display help for command

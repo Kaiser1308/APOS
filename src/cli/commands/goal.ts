@@ -1,40 +1,16 @@
-import type { Command } from 'commander';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { newEvent } from '../../app/events.js';
-import { buildInbox } from '../../app/inbox.js';
-import {
-  controllerActive,
-  itemCursorId,
-  parseDurationMs,
-  parseTargetStatuses,
-  readOnlyRepo,
-  watchEvents,
-} from '../../app/wait.js';
-import { parseAppetite } from '../../domain/contracts.js';
+import { Option, type Command } from 'commander';
 import { UserError } from '../../domain/errors.js';
+import { readFileSync } from 'node:fs';
+import { newEvent } from '../../app/events.js';
+import { parseAppetite } from '../../domain/contracts.js';
 import { sourceDigest } from '../../domain/gate.js';
 import { buildPlan } from '../../domain/plan.js';
-import { assertExecutionSettled } from '../../app/replan.js';
 import { GoalRegistryService } from '../../app/registry.js';
-import { describeProfiles } from '../../runtime/brief.js';
-import { controllerHome } from '../../store/event-log.js';
+import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
 
 export function registerGoal(ctx: CliContext): void {
-  const {
-    program,
-    options,
-    write,
-    runtime,
-    repo,
-    home,
-    withJournal,
-    withJournalAsync,
-    assertHuman,
-    goalWithSource,
-    requestDispatch,
-  } = ctx;
+  const { program, write, withJournal, withJournalAsync, assertHuman, goalWithSource } = ctx;
   const goal = program.command('goal');
   goal
     .command('create')
@@ -59,50 +35,65 @@ export function registerGoal(ctx: CliContext): void {
   const appetiteOptions = <T extends Command>(command: T): T =>
     command
       .requiredOption('--size <S|M|L>')
-      .requiredOption('--max-spend <usd>')
       .requiredOption('--max-minutes <n>')
       .requiredOption('--max-attempts <n>')
-      .option('--overrun <stop|ask>', 'what to do when a limit is hit', 'ask') as T;
-  type AppetiteFlags = { size: string; maxSpend: string; maxMinutes: string; maxAttempts: string; overrun: string };
-  const appetiteOf = (flags: AppetiteFlags) => ({
-    size: flags.size,
-    maxSpendUsd: Number(flags.maxSpend),
-    maxWallMinutes: Number(flags.maxMinutes),
-    maxAttempts: Number(flags.maxAttempts),
-    overrunPolicy: flags.overrun,
-  });
+      .option('--overrun <stop|ask>', 'what to do when a limit is hit', 'ask')
+      .option(ON_BEHALF_FLAGS, ON_BEHALF_HELP)
+      .addOption(new Option('--max-spend <usd>').hideHelp()) as T;
+  type AppetiteFlags = {
+    size: string;
+    maxSpend?: string;
+    maxMinutes: string;
+    maxAttempts: string;
+    overrun: string;
+    onBehalf?: string;
+  };
+  const appetiteOf = (flags: AppetiteFlags) => {
+    if (flags.maxSpend !== undefined)
+      throw new UserError(
+        '--max-spend no longer exists: APOS does not run agents, so it cannot measure spend. Bound the work with --max-minutes and --max-attempts',
+      );
+    return {
+      size: flags.size,
+      maxWallMinutes: Number(flags.maxMinutes),
+      maxAttempts: Number(flags.maxAttempts),
+      overrun: flags.overrun,
+    };
+  };
   appetiteOptions(goal.command('approve').argument('<id>')).action((id: string, flags: AppetiteFlags) =>
-    withJournal(journal => {
-      assertHuman(journal, 'goal approve');
-      new GoalRegistryService(journal).approve(id, parseAppetite(appetiteOf(flags)));
+    withJournalAsync(async journal => {
+      const appetite = parseAppetite(appetiteOf(flags));
+      const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
+      new GoalRegistryService(journal).approve(id, appetite, undefined, confirmation);
       write(`Approved ${id}`);
     }),
   );
   appetiteOptions(goal.command('appetite').argument('<id>'))
     .requiredOption('--reason <text>')
     .action((id: string, flags: AppetiteFlags & { reason: string }) =>
-      withJournal(journal => {
-        assertHuman(journal, 'goal appetite');
+      withJournalAsync(async journal => {
+        const appetite = parseAppetite(appetiteOf(flags));
+        const confirmation = await assertHuman('goal appetite', id, flags.onBehalf);
         journal.append(
-          newEvent(id, 'appetite-set', { appetite: parseAppetite(appetiteOf(flags)), reason: flags.reason }),
+          newEvent(id, 'appetite-set', {
+            appetite,
+            reason: flags.reason,
+            confirmation,
+          }),
         );
         write(`Appetite for ${id} updated`);
       }),
     );
-  // Gate B. Selecting a Goal asks the controller to dispatch its Lead, which plans and, in Solo, delivers in the same session.
+  // Gate B: the Human picks which approved Goal is worked next. Nothing is started; the Lead plans on its own.
   goal
     .command('select')
     .argument('<id>')
-    .action((id: string) =>
-      withJournal(journal => {
-        assertHuman(journal, 'goal select');
-        new GoalRegistryService(journal).select(id);
+    .option(ON_BEHALF_FLAGS, ON_BEHALF_HELP)
+    .action((id: string, flags: { onBehalf?: string }) =>
+      withJournalAsync(async journal => {
+        const confirmation = await assertHuman('goal select', id, flags.onBehalf);
+        new GoalRegistryService(journal).select(id, confirmation);
         write(`Selected ${id}`);
-        const lead = describeProfiles(home()).lead;
-        write(
-          `Lead runs on ${lead.agent}${lead.model ? ` model=${lead.model}` : ''}${lead.effort ? ` effort=${lead.effort}` : ''} (${lead.source}); change it first with \`apos profile set lead --agent <id> --model <id>\`, or move a running Lead with \`apos handoff ${id}\`.`,
-        );
-        requestDispatch(journal, id, { kind: 'lead-start' });
       }),
     );
   goal
@@ -116,55 +107,10 @@ export function registerGoal(ctx: CliContext): void {
         const current = journal.getGoal(revised.id);
         if (!current || revised.version <= current.spec.version)
           throw new Error('Goal revision must advance the current version');
-        await assertExecutionSettled(current, runtime, { includeLead: true });
         journal.appendWithSource(newEvent(revised.id, 'goal-revised', revised), text);
         write(`Revised ${revised.id} v${revised.version}; Human approval required`);
       }),
     );
-  goal
-    .command('wait')
-    .argument('<id>')
-    .requiredOption('--until <states>', 'comma-separated target Goal statuses')
-    .option('--timeout <dur>', 'max time to wait (e.g. 30s, 5m)', '5m')
-    .action(async (id: string, flags: { until: string; timeout?: string }) => {
-      if (!existsSync(join(repo(), '.apos', 'project.yaml'))) throw new Error('Run apos init first');
-      const homeDir = options.home ?? controllerHome(repo());
-      const targets = parseTargetStatuses(flags.until);
-      const timeoutMs = parseDurationMs(flags.timeout);
-      const initialRepo = readOnlyRepo(homeDir);
-      if (!initialRepo.getGoal(id)) throw new UserError(`Goal does not exist: ${id}`);
-      const seenNotices = new Set(
-        buildInbox(initialRepo)
-          .filter(item => item.goalId === id && item.kind === 'notice')
-          .map(itemCursorId),
-      );
-      const check = () => {
-        const currentRepo = readOnlyRepo(homeDir);
-        const state = currentRepo.getGoal(id);
-        if (!state) return undefined;
-        const notice = buildInbox(currentRepo).find(
-          item => item.goalId === id && item.kind === 'notice' && !seenNotices.has(itemCursorId(item)),
-        );
-        if (targets.has(state.status) || notice) return { status: state.status, notice };
-        return undefined;
-      };
-      let hit = check();
-      if (!hit) {
-        if (!controllerActive(homeDir))
-          write(
-            'warning: no active controller watch detected (no tick in the last 2 min); run `apos controller watch` so Goals can advance.',
-          );
-        hit = await watchEvents(homeDir, timeoutMs, check);
-      }
-      if (!hit) {
-        const state = readOnlyRepo(homeDir).getGoal(id);
-        write(`timeout after ${flags.timeout ?? '5m'}: ${id}:${state?.status ?? 'unknown'}`);
-        process.exitCode = 2;
-        return;
-      }
-      process.exitCode = 0;
-      write(`${id}\t${hit.status}${hit.notice ? `\tnotice\t${hit.notice.detail}` : ''}`);
-    });
   program
     .command('plan')
     .description('show Goal plan and requirement coverage across the brief')

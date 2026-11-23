@@ -1,105 +1,19 @@
 import { newEvent } from '../../app/events.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { HandoffTarget } from '../../domain/transitions.js';
 import { MergeService } from '../../app/merge.js';
-import {
-  buildHumanInbox,
-  controllerActive,
-  filterInboxSince,
-  parseDurationMs,
-  readOnlyRepo,
-  watchEvents,
-} from '../../app/wait.js';
+import { buildHumanInbox, filterInboxSince, parseDurationMs, readOnlyRepo, watchEvents } from '../../app/wait.js';
 import { DEFAULT_UI_PORT, startUi } from '../../ui/server.js';
 import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
 import { controllerHome } from '../../store/event-log.js';
+import { closeProblems } from '../../domain/transitions.js';
 import { UserError } from '../../domain/errors.js';
-import type { Role } from '../../domain/runtime-refs.js';
+import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
 
 export function registerOutcome(ctx: CliContext): void {
-  const {
-    program,
-    options,
-    write,
-    writeError,
-    runtime,
-    repo,
-    withJournal,
-    withJournalAsync,
-    assertHuman,
-    applyProfile,
-    requestDispatch,
-  } = ctx;
-  program
-    .command('handoff')
-    .argument('<goalId>')
-    .description(
-      'Human: move a stuck owner (for example out of quota) to a fresh agent on the same worktree; no attempt is spent',
-    )
-    .option(
-      '--to-bot <name>',
-      'give the Lead role to this Orca bot (name or id); it coordinates through APOS commands and never codes',
-    )
-    .option('--to-apos', 'give the Lead role back from its bot to a fresh APOS-dispatched Lead')
-    .option('--by <name>', 'who decided a Lead transfer', 'human')
-    .option('--package <id>', 'the Worker of this package instead of the Lead')
-    .option('--reviewer', 'the reviewer instead of the Lead')
-    .option('--agent <id>', 'also make this agent the profile of that role (as `profile set`)')
-    .option('--model <id>')
-    .option('--effort <level>', 'needs --model')
-    .action(
-      (
-        goalId: string,
-        flags: {
-          package?: string;
-          reviewer?: boolean;
-          agent?: string;
-          model?: string;
-          effort?: string;
-          toBot?: string;
-          toApos?: boolean;
-          by: string;
-        },
-      ) =>
-        withJournal(journal => {
-          assertHuman(journal, 'handoff');
-          if (flags.toBot || flags.toApos) {
-            if ([flags.toBot, flags.toApos, flags.package, flags.reviewer].filter(Boolean).length > 1)
-              throw new UserError('Pass one of --to-bot, --to-apos, --package or --reviewer');
-            if (!flags.by.trim()) throw new UserError('--by needs a name');
-            if ((flags.model || flags.effort) && !flags.agent) throw new UserError('--model and --effort need --agent');
-            if (flags.toBot) {
-              if (flags.agent) throw new UserError('--agent does not apply to a bot');
-              // Read-only, so a wrong name is refused now rather than at the controller's tick.
-              if (!runtime.findBot) throw new UserError('Configured runtime cannot reach Orca bots');
-              const bot = runtime.findBot(flags.toBot);
-              if (!bot) throw new UserError(`No Orca bot ${flags.toBot} on this computer (see \`orca bot list\`)`);
-              requestDispatch(journal, goalId, { kind: 'lead-to-bot', bot: bot.id, by: flags.by });
-              return;
-            }
-            if (flags.agent) applyProfile(['lead'], { agent: flags.agent, model: flags.model, effort: flags.effort });
-            requestDispatch(journal, goalId, { kind: 'lead-to-apos', by: flags.by });
-            return;
-          }
-          if (flags.package && flags.reviewer) throw new Error('Pass --package or --reviewer, not both');
-          if ((flags.model || flags.effort) && !flags.agent) throw new Error('--model and --effort need --agent');
-          const target: Exclude<HandoffTarget, { kind: 'bot' }> = flags.package
-            ? { kind: 'package', packageId: flags.package }
-            : flags.reviewer
-              ? { kind: 'reviewer' }
-              : { kind: 'lead' };
-          const role: Role = target.kind === 'package' ? 'worker' : target.kind === 'reviewer' ? 'reviewer' : 'lead';
-          // Written now: the controller reads the role profile when it starts the new agent.
-          if (flags.agent) applyProfile([role], { agent: flags.agent, model: flags.model, effort: flags.effort });
-          if (target.kind === 'package' && !journal.getGoal(goalId)?.packages?.[target.packageId])
-            throw new UserError(`${goalId} has no package ${target.packageId}`);
-          requestDispatch(journal, goalId, { kind: 'handoff', target });
-        }),
-    );
-
+  const { program, options, write, repo, withJournal, withJournalAsync, assertHuman } = ctx;
   const outcome = program.command('outcome');
   // Gate D: the Human reads the Verification Report, decides the outcome and, only here, whether to merge.
   for (const decision of ['close', 'revise', 'stop'] as const) {
@@ -108,12 +22,16 @@ export function registerOutcome(ctx: CliContext): void {
       command
         .option('--merge-to <branch>', 'authorize and perform one merge of the gated commit')
         .option('--by <name>', 'who decided', 'human');
-    command.action((id: string, flags: { mergeTo?: string; by?: string }) =>
+    command.option(ON_BEHALF_FLAGS, ON_BEHALF_HELP);
+    command.action((id: string, flags: { mergeTo?: string; by?: string; onBehalf?: string }) =>
       withJournalAsync(async journal => {
-        assertHuman(journal, `outcome ${decision}`);
+        const confirmation = await assertHuman(`outcome ${decision}`, id, flags.onBehalf);
         const state = journal.getGoal(id);
         if (decision === 'close') {
           if (state?.status !== 'verified') throw new Error('Verified Goal required before closing');
+          // Before any merge: a close that is going to be refused must not have merged anything first.
+          const problems = closeProblems(state);
+          if (problems.length) throw new UserError(problems.join('; '));
           if (flags.mergeTo) {
             const merges = new MergeService(journal);
             merges.authorize(id, flags.mergeTo, flags.by ?? 'human');
@@ -136,10 +54,8 @@ export function registerOutcome(ctx: CliContext): void {
             if (report.result !== 'green')
               throw new UserError(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
           }
-          if (runtime.releaseWorker)
-            for (const dispatchId of Object.keys(state.settlements ?? {})) await runtime.releaseWorker(dispatchId);
         }
-        new VerificationService(journal).recordOutcome(id, decision);
+        new VerificationService(journal).recordOutcome(id, decision, confirmation);
         write(`${decision} ${id}`);
       }),
     );
@@ -170,10 +86,6 @@ export function registerOutcome(ctx: CliContext): void {
       };
       let hit = check();
       if (!hit && flags.wait) {
-        if (!controllerActive(homeDir))
-          writeError(
-            'warning: no active controller watch detected (no tick in the last 2 min); run `apos controller watch` so Goals can advance.',
-          );
         hit = await watchEvents(homeDir, timeoutMs, check);
       }
       if (!hit && flags.wait) {

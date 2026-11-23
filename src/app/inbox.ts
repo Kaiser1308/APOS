@@ -1,5 +1,5 @@
 import { orphanRequirements } from '../domain/plan.js';
-import type { GoalState } from '../domain/transitions.js';
+import { effectiveStatus, type GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
 export type InboxKind = 'needs-decision' | 'awaiting-outcome' | 'notice';
@@ -40,29 +40,51 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
         at: lastOf('verified') ?? events.at(-1)?.at,
       });
     // A notice about a closed or stopped Goal is history, and the supervisor's `awaiting-outcome` notice repeats the verified status item above.
-    if (state.status === 'closed' || state.status === 'stopped') continue;
+    // An archived (legacy) Goal is read-only: its old notices are history, not work.
+    if (['closed', 'stopped', 'legacy'].includes(effectiveStatus(state)) || state.status === 'legacy') continue;
+    const warnings = [
+      ...new Set(
+        [state.gate, ...Object.values(state.packages ?? {}).map(item => item.gate)].flatMap(
+          gate => gate?.warnings ?? [],
+        ),
+      ),
+    ];
+    if (warnings.length)
+      items.push({
+        goalId,
+        kind: 'notice',
+        detail: JSON.stringify({ kind: 'attention', warnings }),
+        at: events.at(-1)?.at,
+      });
+    for (const [packageId, item] of Object.entries(state.packages ?? {})) {
+      if (item.status !== 'needs-human' || !item.gate) continue;
+      const commit = item.gate.deliveryCommit;
+      const reasons = item.gate.checks
+        .filter(check => check.status !== 'pass')
+        .map(check =>
+          check.status === 'manual-pending'
+            ? (state.manualConfirmations ?? []).some(c => c.checkId === check.checkId && c.deliveryCommit === commit)
+              ? `manual check ${check.checkId} is confirmed on ${commit}: submit again`
+              : `manual check ${check.checkId} awaits confirmation on ${commit} (apos gate confirm), then submit again`
+            : `${check.checkId} ${check.status}: ${check.reason}`,
+        );
+      items.push({
+        goalId,
+        kind: 'needs-decision',
+        detail: JSON.stringify({ why: 'package-needs-human', packageId, reasons }),
+        at: item.gate.at,
+      });
+    }
     const answered = new Set(
       events
         .filter(item => item.type === 'decision-logged')
         .map(item => (item.data as { answers?: string } | null)?.answers)
         .filter(Boolean),
     );
-    const handedOff = new Set(
-      events
-        .filter(item => item.type === 'owner-handed-off')
-        .map(item => (item.data as { from?: string } | null)?.from)
-        .filter((id): id is string => Boolean(id)),
-    );
     for (const notice of events.filter(item => item.type === 'human-notified')) {
-      const data = notice.data as { kind?: unknown; messageId?: string; dispatchId?: string } | null;
+      const data = notice.data as { kind?: unknown; messageId?: string } | null;
       // A Lead question the Human has already answered is history.
       if (data?.kind === 'lead-question' && data.messageId && answered.has(data.messageId)) continue;
-      if (
-        typeof data?.dispatchId === 'string' &&
-        ['owner-idle', 'lead-idle', 'agent-exhausted', 'stalled'].includes(String(data.kind ?? '')) &&
-        (handedOff.has(data.dispatchId) || Boolean(state.settlements?.[data.dispatchId]))
-      )
-        continue;
       if (state.status === 'verified' && (notice.data as { kind?: unknown } | null)?.kind === 'awaiting-outcome')
         continue;
       // A manual-check notice is a question about one commit: it ends once every check it lists is confirmed there.

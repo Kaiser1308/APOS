@@ -34,7 +34,7 @@ export default tseslint.config(
     },
   },
   {
-    // Ngoại lệ vĩnh viễn: một reducer, xem docs/architecture/convention-refactor.md O8.
+    // Ngoại lệ vĩnh viễn: một reducer, xem docs/archive/architecture/convention-refactor-v2.md O8.
     files: ['src/domain/transitions.ts'],
     rules: { 'max-lines': 'off' },
   },

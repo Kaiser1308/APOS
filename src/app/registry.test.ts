@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal, approval } from '../domain/fixtures.test-support.js';
+import { spec, proposal, approval, soloGreen, DELIVERY } from '../domain/fixtures.test-support.js';
 import { GoalRegistryService } from './registry.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -17,7 +17,7 @@ const fixture = () => {
   return SqliteStore.open(join(dir, 'state.sqlite'));
 };
 
-it('recommends and selects only Goals whose dependencies have closed', () => {
+it('selects only Goals whose dependencies have closed', () => {
   const store = fixture();
   let n = 0;
   const add = (goalId: string, type: GoalEventType, data?: unknown) =>
@@ -28,15 +28,13 @@ it('recommends and selects only Goals whose dependencies have closed', () => {
   const registry = new GoalRegistryService(store);
   registry.approve(spec.id, approval.appetite);
   registry.approve(second.id, approval.appetite);
-  expect(registry.recommend()?.spec.id).toBe(spec.id);
   expect(() => registry.select(second.id)).toThrow(/dependencies not closed/);
   registry.select(spec.id);
   add(spec.id, 'proposal-drafted', proposal);
   add(spec.id, 'proposal-approved');
-  add(spec.id, 'execution-started', { runId: 'run_1' });
-  add(spec.id, 'verified');
+  for (const item of soloGreen()) add(spec.id, item.type, item.data);
+  add(spec.id, 'verified', { deliveryCommit: DELIVERY });
   add(spec.id, 'outcome-accepted');
-  expect(registry.recommend()?.spec.id).toBe(second.id);
   registry.select(second.id);
   expect(store.getGoal(second.id)?.selected).toBe(true);
   store.close();

@@ -4,11 +4,11 @@ import { ReviewService } from '../../app/review.js';
 import { MetricsService } from '../../app/metrics.js';
 import { VerificationService } from '../../app/verification.js';
 import { GateService } from '../../app/gate-service.js';
-import { UserError } from '../../domain/errors.js';
+import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
 
 export function registerChecks(ctx: CliContext): void {
-  const { program, options, write, repo, withJournal, assertHuman, readJsonFile } = ctx;
+  const { program, options, write, repo, withJournal, withJournalAsync, assertHuman, readJsonFile } = ctx;
   const gate = program
     .command('gate')
     .description('controller-run checks on exact commits; owner claims are not evidence');
@@ -17,15 +17,10 @@ export function registerChecks(ctx: CliContext): void {
     .argument('<goalId>')
     .requiredOption('--commit <sha>', 'delivery or integration commit')
     .option('--base <sha>', 'override the proposal base commit')
-    .action((goalId: string, { commit, base }: { commit: string; base?: string }) =>
-      withJournal(journal => {
-        if (base !== undefined) assertHuman(journal, 'gate run --base');
-        const leadBot = journal.getGoal(goalId)?.leadBot;
-        // A bot Lead asks for its gate with a recorded reason, so the request itself is an event.
-        if (leadBot && ctx.runtime.callerBot?.()?.id === leadBot.id)
-          throw new UserError(
-            `bot ${leadBot.name}: use apos integration gate ${goalId} --commit <sha> --reason <text>`,
-          );
+    .option(ON_BEHALF_FLAGS, `only with --base: ${ON_BEHALF_HELP}`)
+    .action((goalId: string, { commit, base, onBehalf }: { commit: string; base?: string; onBehalf?: string }) =>
+      withJournalAsync(async journal => {
+        if (base !== undefined) await assertHuman('gate run --base', goalId, onBehalf);
         const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).run(goalId, repo(), {
           deliveryCommit: commit,
           baseCommit: base,
@@ -52,26 +47,34 @@ export function registerChecks(ctx: CliContext): void {
     .requiredOption('--commit <sha>')
     .requiredOption('--by <name>')
     .requiredOption('--note <text>')
-    .action((goalId: string, checkId: string, { commit, by, note }: { commit: string; by: string; note: string }) =>
-      withJournal(journal => {
-        assertHuman(journal, 'gate confirm');
-        new GateService(journal, { inspector: options.inspector, ...options.gate }).confirmManual(goalId, {
-          checkId,
-          deliveryCommit: commit,
-          by,
-          note,
-        });
-        write(`Confirmed ${checkId} on ${commit}`);
-      }),
+    .option(ON_BEHALF_FLAGS, ON_BEHALF_HELP)
+    .action(
+      (
+        goalId: string,
+        checkId: string,
+        { commit, by, note, onBehalf }: { commit: string; by: string; note: string; onBehalf?: string },
+      ) =>
+        withJournalAsync(async journal => {
+          const confirmation = await assertHuman('gate confirm', goalId, onBehalf);
+          new GateService(journal, { inspector: options.inspector, ...options.gate }).confirmManual(goalId, {
+            checkId,
+            deliveryCommit: commit,
+            by,
+            note,
+            confirmation,
+          });
+          write(`Confirmed ${checkId} on ${commit}`);
+        }),
     );
   const review = program.command('review');
   review
     .command('submit')
     .argument('<goalId>')
     .requiredOption('--file <json>')
-    .action((goalId: string, { file }: { file: string }) =>
-      withJournal(journal => {
-        assertHuman(journal, 'review submit'); // the controller dispatches and reads reviewers itself; no agent may post a verdict
+    .option(ON_BEHALF_FLAGS, ON_BEHALF_HELP)
+    .action((goalId: string, { file, onBehalf }: { file: string; onBehalf?: string }) =>
+      withJournalAsync(async journal => {
+        await assertHuman('review submit', goalId, onBehalf);
         const result = new ReviewService(journal).submit(goalId, readJsonFile(file));
         write(`Reviewed ${result.subject}${result.packageId ? ` ${result.packageId}` : ''}: ${result.result}`);
       }),
@@ -129,10 +132,11 @@ export function registerChecks(ctx: CliContext): void {
     .command('resolve')
     .argument('<id>')
     .requiredOption('--note <text>')
-    .action((id: string, { note }: { note: string }) =>
-      withJournal(journal => {
+    .option(ON_BEHALF_FLAGS, ON_BEHALF_HELP)
+    .action((id: string, { note, onBehalf }: { note: string; onBehalf?: string }) =>
+      withJournalAsync(async journal => {
         if (!note.trim()) throw new Error('Resolution note required');
-        assertHuman(journal, 'blocker resolve');
+        await assertHuman('blocker resolve', id, onBehalf);
         journal.append(newEvent(id, 'decision-logged', { note }));
         journal.append(newEvent(id, 'unblocked'));
         write(`Unblocked ${id}`);

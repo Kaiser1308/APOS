@@ -97,19 +97,61 @@
       "dependencies": [],
       "priority": 1
     },
-    "status": "executing",
+    "status": "legacy",
     "selected": true,
     "evidence": [],
-    "packages": {},
+    "packages": {
+      "WP-MAIN": {
+        "spec": {
+          "id": "WP-MAIN",
+          "goalId": "GOAL-SMOKE-V2",
+          "goalVersion": 1,
+          "version": 1,
+          "owner": "lead",
+          "outcome": "math.js exports a correct add(a, b)",
+          "scope": [
+            "math.js"
+          ],
+          "exclusions": [
+            "other operations"
+          ],
+          "dependencies": [],
+          "interfaces": [
+            "EXEC-SMOKE@v1"
+          ],
+          "acceptance": [
+            {
+              "id": "AC-1",
+              "text": "add sums numbers, including floats within 1e-9",
+              "goalAcceptanceId": "AC-1",
+              "checkIds": [
+                "CHK-1"
+              ]
+            },
+            {
+              "id": "AC-2",
+              "text": "non-number input raises TypeError",
+              "goalAcceptanceId": "AC-2",
+              "checkIds": [
+                "CHK-1"
+              ]
+            }
+          ],
+          "integration": "Solo: the package is the whole Goal"
+        },
+        "status": "pending",
+        "attempts": 0
+      }
+    },
     "reviews": [],
     "approvedGoalVersion": 1,
     "appetite": {
       "size": "S",
-      "maxSpendUsd": 5,
       "maxWallMinutes": 60,
       "maxAttempts": 3,
-      "overrunPolicy": "ask"
+      "overrun": "ask"
     },
+    "selectedAt": "2026-11-08T00:58:35.772Z",
     "proposal": {
       "id": "EXEC-SMOKE",
       "version": 1,
@@ -134,58 +176,6 @@
       "verificationStrategy": "controller runs node harness.js on the delivery commit"
     },
     "proposalApprovedVersion": 1,
-    "settlements": {
-      "ctx_c8a721fe6170": "completed"
-    },
-    "soloAttempts": 1,
-    "runtimeRef": {
-      "runId": "run_2887dc016b38",
-      "taskId": "task_61cc17e81c4b",
-      "dispatchId": "ctx_c8a721fe6170",
-      "owner": "lead",
-      "repoPath": "/fixture/claude/f955c312cacd8afc/c9650458-39e8-4897-bb69-6c63979e2a01/scratchpad/apos-smoke-repo",
-      "terminal": "term_448bcef0-d577-4bcf-81cd-07b75e0ab1ee",
-      "worktreeId": "7c69b6db-2562-438f-82f5-94fdeda0161b::/fixture/orca/workspaces/apos-smoke-repo/apos-goal-smoke-v2-3f694317",
-      "baseCommit": "1dec825ae593100cced484364cae2332af99e7e7",
-      "requested": {
-        "agent": "codex",
-        "model": "gpt-6.1-terra"
-      }
-    },
-    "resumeIntent": "9dc10965-a056-4cc2-b2b0-49162e8d5f9c",
-    "checkpoint": {
-      "phase": "controller finding",
-      "progress": "No delivery report committed at .apos/goals/GOAL-SMOKE-V2/evidence/solo-a1.md on e7976fed910c812a5bd7549ed3c6601e08d780df.",
-      "evidenceRefs": [],
-      "goalId": "GOAL-SMOKE-V2",
-      "attempt": 2
-    },
-    "manualConfirmations": [],
-    "telemetry": [
-      {
-        "dispatchId": "ctx_c8a721fe6170",
-        "role": "lead",
-        "requestedModel": "gpt-6.1-terra",
-        "launchedModel": "gpt-6.1-terra",
-        "usage": {
-          "inputTokens": 277849,
-          "cachedInputTokens": 243200,
-          "outputTokens": 2826,
-          "sessions": 1,
-          "model": "gpt-6.1-terra"
-        },
-        "wallMs": 1074330
-      }
-    ],
-    "findings": [
-      {
-        "kind": "patch",
-        "by": "controller",
-        "attempt": 1,
-        "note": "No delivery report committed at .apos/goals/GOAL-SMOKE-V2/evidence/solo-a1.md on e7976fed910c812a5bd7549ed3c6601e08d780df.",
-        "signature": "no-report",
-        "commit": "e7976fed910c812a5bd7549ed3c6601e08d780df"
-      }
-    ]
+    "manualConfirmations": []
   }
 ]

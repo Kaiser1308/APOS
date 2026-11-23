@@ -51,7 +51,7 @@
       "dependencies": [],
       "priority": 1
     },
-    "status": "executing",
+    "status": "legacy",
     "selected": true,
     "evidence": [],
     "packages": {},
@@ -59,75 +59,10 @@
     "approvedGoalVersion": 1,
     "appetite": {
       "size": "S",
-      "maxSpendUsd": 5,
       "maxWallMinutes": 60,
       "maxAttempts": 2,
-      "overrunPolicy": "ask"
+      "overrun": "ask"
     },
-    "lead": {
-      "ref": {
-        "runId": "run_lead",
-        "taskId": "task_lead",
-        "dispatchId": "lead_1",
-        "owner": "lead",
-        "repoPath": "/fixture/apos-lead-cli-zWZ30X",
-        "terminal": "term_lead",
-        "worktreeId": "repo::/fixture/lead-wt",
-        "baseCommit": "b042172761c147b994e7dfc4f7c721e27a6de1e3",
-        "requested": {
-          "agent": "codex",
-          "model": "gpt-6.1-terra"
-        }
-      },
-      "current": "lead_1"
-    },
-    "leadTerminal": {
-      "terminal": "term_lead",
-      "worktree": "id:repo::/fixture/lead-wt",
-      "runId": "run_lead"
-    },
-    "wokenFor": [],
-    "proposal": {
-      "id": "EXEC-001",
-      "version": 1,
-      "goalId": "GOAL-001",
-      "goalVersion": 1,
-      "mode": "solo-direct",
-      "approach": "reuse API",
-      "risks": [],
-      "baseCommit": "b042172761c147b994e7dfc4f7c721e27a6de1e3",
-      "sourceSha256": "fc943f3dbcc91b0228c9da8e9336da14ed1d72be3136f8d9f0c71e4acd4bf37c",
-      "estimatedCost": {
-        "spendUsd": 5,
-        "wallMinutes": 60
-      },
-      "splitRationale": "scanner and history change separate modules",
-      "sharedPaths": [],
-      "acceptanceMapping": [
-        {
-          "acceptanceId": "AC-1",
-          "verification": "test"
-        }
-      ],
-      "verificationStrategy": "integration test"
-    },
-    "proposalApprovedVersion": 1,
-    "settlements": {},
-    "soloAttempts": 1,
-    "runtimeRef": {
-      "runId": "run_lead",
-      "taskId": "task_lead",
-      "dispatchId": "lead_1",
-      "owner": "lead",
-      "repoPath": "/fixture/apos-lead-cli-zWZ30X",
-      "terminal": "term_lead",
-      "worktreeId": "repo::/fixture/lead-wt",
-      "baseCommit": "b042172761c147b994e7dfc4f7c721e27a6de1e3",
-      "requested": {
-        "agent": "codex",
-        "model": "gpt-6.1-terra"
-      }
-    },
-    "manualConfirmations": []
+    "selectedAt": "2026-11-14T12:28:35.436Z"
   }
 ]

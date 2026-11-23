@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteStore } from '../store/sqlite.js';
-import { spec, proposal, gateReport, DELIVERY, approval } from '../domain/fixtures.test-support.js';
+import { spec, proposal, gateReport, DELIVERY, BASE, approval } from '../domain/fixtures.test-support.js';
 import { VerificationService } from './verification.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -32,8 +32,12 @@ const executing = () => {
   add('goal-selected');
   add('proposal-drafted', proposal);
   add('proposal-approved');
-  add('execution-started', { runId: 'run_1' });
-  return { store, add };
+  /** The Solo package is submitted and its gate comes back green, as `apos package submit` records it. */
+  const green = (commit = DELIVERY) => {
+    add('package-submitted', { packageId: 'WP-MAIN', version: 1, commit, base: BASE, by: 'lead' });
+    add('package-gate-recorded', { packageId: 'WP-MAIN', report: gateReport(commit) });
+  };
+  return { store, add, green };
 };
 const pass = {
   acceptanceId: 'AC-1',
@@ -67,35 +71,32 @@ describe('verification gate', () => {
     add('gate-recorded', gateReport(DELIVERY, 'unverifiable'));
     expect(() => new VerificationService(store).verify(spec.id)).toThrow(/unverifiable/);
   });
-  it('drops the gate when the owner is resumed for another attempt', () => {
+  it('drops the gate when the Lead revises its plan', () => {
     const { store, add } = executing();
     add('gate-recorded', gateReport(DELIVERY));
-    add('checkpointed', { phase: 'repair', progress: 'fix', evidenceRefs: [] });
-    add('resume-intended', 'key-2');
-    add('runtime-resumed', { runId: 'run_1', dispatchId: 'ctx_2' });
-    expect(() => new VerificationService(store).verify(spec.id)).toThrow(/no controller gate/);
+    add('proposal-revised', { ...proposal, version: 2 });
+    expect(() => new VerificationService(store).verify(spec.id)).toThrow(/Goal must be executing/);
+    expect(store.getGoal(spec.id)?.gate).toBeUndefined();
   });
-  it('rejects a gate that finishes after the owner was resumed, because it judged the earlier attempt', () => {
+  it('rejects a gate that finishes after its package moved on, because it judged an earlier attempt', () => {
     const { add } = executing();
-    const stale = gateReport(DELIVERY);
-    add('checkpointed', { phase: 'repair', progress: 'fix', evidenceRefs: [] });
-    add('resume-intended', 'key-2');
-    add('runtime-resumed', { runId: 'run_1', dispatchId: 'ctx_2' });
-    expect(() => add('gate-recorded', stale)).toThrow(/earlier owner attempt/);
+    const stale = gateReport(DELIVERY, 'green', spec, 'WP-MAIN@1:1');
+    expect(() => add('gate-recorded', stale)).toThrow(/earlier package attempt/);
   });
   it('keeps verified technical delivery open until Human outcome acceptance', () => {
-    const { store, add } = executing();
+    const { store, green } = executing();
     const service = new VerificationService(store);
-    add('gate-recorded', gateReport(DELIVERY));
+    green();
+    // The green gate of the one Solo package verified the Goal; verifying again changes nothing.
+    expect(store.getGoal(spec.id)?.status).toBe('verified');
     expect(service.verify(spec.id, DELIVERY).passed).toBe(true);
     expect(store.getGoal(spec.id)?.status).toBe('verified');
     service.recordOutcome(spec.id, 'close');
     expect(store.getGoal(spec.id)?.status).toBe('closed');
   });
   it('does not infer merge permission from a green gate or verification', () => {
-    const { store, add } = executing();
-    add('gate-recorded', gateReport(DELIVERY));
-    new VerificationService(store).verify(spec.id);
+    const { store, add, green } = executing();
+    green();
     expect(store.getGoal(spec.id)?.mergeAuthorization).toBeUndefined();
     expect(() => add('merge-completed', { sourceRef: DELIVERY, targetBranch: 'main', mergeCommit: DELIVERY })).toThrow(
       /Human merge authorization/,

@@ -29,10 +29,12 @@ export type GateReport = {
   sourceSha256: string;
   baseCommit: string;
   deliveryCommit: string;
-  /** Owner attempt the gate was started for; a gate that finishes after a resume is rejected. */
+  /** Package attempt(s) the gate was started for; a gate that finishes after one moved on is rejected. */
   attemptKey: string;
-  /** Files changed from base to delivery; drives the review requirement. */
+  /** Files changed from base to delivery. */
   changedFiles?: string[];
+  /** Things in the diff that deserve a human look (changed tests, shared paths, build files); they do not block. */
+  warnings?: string[];
   /** `post-merge` reruns the checks on the merge commit at the target branch. */
   phase?: 'delivery' | 'post-merge';
   environment: GateEnvironment;
@@ -47,13 +49,12 @@ export function sourceDigest(text: string): string {
   return createHash('sha256').update(text.replace(/\r\n/g, '\n'), 'utf8').digest('hex');
 }
 
-/** Identifies the owner attempt(s) whose delivery a gate judges: Solo dispatch + attempt, or every package's. */
+/** Identifies the package attempts a Goal gate judges: a gate that finishes after one of them moved on is stale. */
 export function attemptKey(state: GoalState): string {
-  const solo = state.runtimeRef;
-  const packages = Object.values(state.packages ?? {})
-    .map(item => `${item.spec.id}@${item.spec.version}:${item.attempts}:${item.runtimeRef?.dispatchId ?? '-'}`)
-    .sort();
-  return [`solo:${solo?.dispatchId ?? '-'}:${state.soloAttempts ?? 0}`, ...packages].join('|');
+  return Object.values(state.packages ?? {})
+    .map(item => `${item.spec.id}@${item.spec.version}:${item.attempts}`)
+    .sort()
+    .join('|');
 }
 
 export function extractFailures(output: string, pattern: string | undefined): string[] {
@@ -132,7 +133,7 @@ export function evaluateManualCheck(
 /**
  * Files under `.apos/` are the controller's contract and skills; a delivery may add only its own
  * evidence and review files. Anything else in the diff fails the gate, so an owner cannot rewrite the
- * skills, Goal documents or sources that briefs, reviewers and future dispatches trust.
+ * skills, Goal documents or sources that the Lead and reviewers trust.
  */
 export function protectedChanges(goalId: string, changedFiles: string[]): string[] {
   return changedFiles.filter(

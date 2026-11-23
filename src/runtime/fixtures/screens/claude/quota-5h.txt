@@ -1,2 +1,0 @@
-[user] Read the brief and deliver.
-[assistant] You've hit your 5-hour limit · resets 12:20pm (Asia/Ho_Chi_Minh)

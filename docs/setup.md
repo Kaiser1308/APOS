@@ -6,6 +6,8 @@ Setup files use YAML. Existing setup files containing JSON remain readable becau
 
 ## The steps
 
+`apos init` comes first: it creates `.apos/project.yaml` (empty setup), installs the role skills, and writes a managed block into `AGENTS.md` (plus `@AGENTS.md` in `CLAUDE.md`) that points agents at the setup and the rules of the gate. The block sits between `<!-- apos:begin ... -->` and `<!-- apos:end -->`; `init` replaces only that part on a rerun. `apos init --no-agents-md` skips both files.
+
 ```
 apos setup draft     # Lead: write a draft from the catalog (not committed)
   edit, then commit .apos/project.yaml

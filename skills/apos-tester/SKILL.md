@@ -19,4 +19,6 @@ You write the tests that prove one Goal. You are not the agent who will write th
 
 9. An AI tool that writes tests for you is a helper, not a source of truth. Its tests come to APOS through the same doors as yours (`tests submit`, or `tests revise` for a locked suite) and are judged the same way: they must load, be red for the right reason and be stable over two runs. What the tool says about its own tests counts for nothing.
 
+10. A test that reproduces a bug is an ordinary acceptance test: it calls the declared entry, is red on the current code for the right reason, is locked by `tests submit`, and goes green only with the fix. Reading logs and reproducing the bug by hand need no Goal; the fix does.
+
 Never run a Human command (`goal approve`, `goal select`, `outcome close|revise|stop`, `gate confirm`, `setup approve`). Never pass `--on-behalf` unless the Human has clearly agreed to exactly that command somewhere else.

@@ -115,7 +115,9 @@ npm run build
 node dist/cli.js --repo /path/to/project init
 ```
 
-`init` commits `.apos/project.yaml`, copies of the role skills under `.apos/skills/` (`apos-core` as `_core/execute.md`, plus `pm`, `lead`, `worker`, `reviewer`) and entrypoint copies under `.claude/skills/` and `.agents/skills/`. `init` refuses a missing skill or one written for another contract version (`apos-contract: 3`).
+To get a shared `apos` command instead of `node dist/cli.js`, run `npm run build && npm link` once (it works through the symlink `npm link` and `npm install -g` create).
+
+`init` commits `.apos/project.yaml`, copies of the role skills under `.apos/skills/` (`apos-core` as `_core/execute.md`, plus `pm`, `lead`, `worker`, `reviewer`) and entrypoint copies under `.claude/skills/` and `.agents/skills/`. `init` also writes a short block, between `<!-- apos:begin ... -->` and `<!-- apos:end -->`, into `AGENTS.md` (created if missing) so that every agent of the project knows it must go through APOS: Goals and roles, done only when `apos package submit` is green, no edits to `.apos/` or locked tests, no Human commands. Running `init` again replaces only the text between the markers; the rest of the file is kept byte for byte. `CLAUDE.md` is created with `@AGENTS.md`; an existing one without that line gets a marked block holding it, and one that already imports `AGENTS.md` is left alone. Both files go into the same commit (a file with uncommitted edits of yours is written but left for you to commit). Pass `--no-agents-md` to skip both. `init` refuses a missing skill or one written for another contract version (`apos-contract: 3`).
 
 **Skills: two copies.** `skills/` in this repo is the stable copy and the default. A copy under development can be tried with `init --skills <dir>` or `APOS_SKILLS`. To bring one over:
 
@@ -364,7 +366,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 
 | Command | Purpose |
 | --- | --- |
-| `init [--skills <dir>]` | Initialize `.apos` in a Git project. |
+| `init [--skills <dir>] [--no-agents-md]` | Initialize `.apos` in a Git project, and tell its agents (`AGENTS.md`, `CLAUDE.md`) that it uses APOS. |
 | `migrate` | Import APOS v1 Goal histories into the controller log. |
 | `setup draft [--part <name>=<dir>[:<stack>]]... [--force]` | Write a draft `.apos/project.yaml` from the tool catalog (not committed). |
 | `setup probe [--commit <rev>]` | Run every tool of the committed setup in clean worktrees and record the result. |

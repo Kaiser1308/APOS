@@ -1,10 +1,11 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { yamlCodec, type SetupCodec } from '../domain/setup-codec.js';
 import { assertGitRoot } from '../store/project-history.js';
+import { writeAgentFiles } from './agents-md.js';
 
 /** The skill/controller contract this build implements; every APOS skill declares it in frontmatter. */
 export const APOS_CONTRACT = 3;
@@ -42,7 +43,12 @@ export function resolveSkills(skillsRoot: string = process.env.APOS_SKILLS || BU
   };
 }
 
-export async function initProject(repoPath: string, skillsRoot?: string, codec: SetupCodec = yamlCodec): Promise<void> {
+export async function initProject(
+  repoPath: string,
+  skillsRoot?: string,
+  codec: SetupCodec = yamlCodec,
+  options: { agentsMd?: boolean } = {},
+): Promise<void> {
   const repo = assertGitRoot(repoPath);
   const skills = resolveSkills(skillsRoot);
   const dir = join(repo, '.apos');
@@ -73,6 +79,31 @@ export async function initProject(repoPath: string, skillsRoot?: string, codec: 
       mkdirSync(join(target, '..'), { recursive: true });
       writeFileSync(target, content, 'utf8');
       files.push(target);
+    }
+  }
+  if (options.agentsMd !== false) {
+    // The user's own uncommitted edits (or deletion) of these files are theirs to commit, not ours to sweep in.
+    const realRepo = realpathSync(repo);
+    const inRepo = (path: string) => join(repo, relative(realRepo, path));
+    const target = (path: string) => (existsSync(path) ? inRepo(realpathSync(path)) : path);
+    const inside = (path: string) => !relative(repo, path).startsWith('..');
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+    const dirty = (path: string) => git('status', '--porcelain', '--', relative(repo, path)).trim() !== '';
+    const ignored = (path: string) => {
+      try {
+        git('check-ignore', '-q', '--', relative(repo, path));
+        return true;
+      } catch {
+        return false; // exit 1: not ignored
+      }
+    };
+    const names = ['AGENTS.md', 'CLAUDE.md'].map(name => join(repo, name));
+    const before = names
+      .filter(path => [path, target(path)].some(p => inside(p) && dirty(p)))
+      .flatMap(path => [path, target(path)]);
+    for (const real of writeAgentFiles(repo)) {
+      const path = inRepo(real);
+      if (inside(path) && !ignored(path) && !before.includes(path)) files.push(path);
     }
   }
   const paths = files.map(path => relative(repo, path));

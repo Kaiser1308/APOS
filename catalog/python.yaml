@@ -1,7 +1,7 @@
 # APOS tool catalog. See docs/catalog.md before changing commands.
 stack: python
 notes:
-  - "verified: pytest 9.0.2 (-o junit_family=xunit1 gives the file attribute; runOne by node id \"file::Class::name\"). Not verified: ruff (--output-format sarif), mypy, bandit, mutmut 2.x (export-cicd-stats writes mutmut-cicd-stats.json; the score is killed / total)."
+  - 'verified: pytest 9.0.2 (-o junit_family=xunit1 gives the file attribute; runOne by node id "file::Class::name"). Not verified: ruff (--output-format sarif), mypy, bandit, mutmut 2.x (export-cicd-stats writes mutmut-cicd-stats.json; the score is killed / total).'
 detect:
   files:
     - pyproject.toml

@@ -9,6 +9,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symli
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse, stringify } from 'yaml';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -115,12 +116,12 @@ try {
   apos(0, 'draft the setup from the catalog', 'setup', 'draft');
   // The machine has no linter or integration of its own to probe: keep the tools the example uses, add its benchmark.
   const setupFile = join(repo, '.apos', 'project.yaml');
-  const setup = JSON.parse(readFileSync(setupFile, 'utf8'));
+  const setup = parse(readFileSync(setupFile, 'utf8'));
   const app = setup.parts.app;
   delete app.layers.L0;
   const benchTool = { ...demo.bench, command: demo.bench.command.replace(/^python /, `${python} `) };
   app.layers.L5 = [benchTool];
-  writeFileSync(setupFile, `${JSON.stringify(setup, null, 2)}\n`);
+  writeFileSync(setupFile, stringify(setup));
   const base = commit('setup');
   apos(0, 'probe every tool of the setup in a clean worktree', 'setup', 'probe', '--commit', base);
   apos(0, 'the Human approves the probed setup', 'setup', 'approve', '--commit', base, ...human);

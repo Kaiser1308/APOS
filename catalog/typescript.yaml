@@ -1,7 +1,7 @@
 # APOS tool catalog. See docs/catalog.md before changing commands.
 stack: typescript
 notes:
-  - "verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc, Stryker (the mutation score is computed from reports/mutation/mutation.json; needs @stryker-mutator/core and the vitest runner in the project)."
+  - 'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc, Stryker (the mutation score is computed from reports/mutation/mutation.json; needs @stryker-mutator/core and the vitest runner in the project).'
 detect:
   files:
     - package.json

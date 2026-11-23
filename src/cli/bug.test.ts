@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { goalKind } from '../domain/contracts.js';
 import { applyEvent, type GoalEvent, type GoalState } from '../domain/transitions.js';
 import { spec, sourceText } from '../domain/fixtures.test-support.js';
+import { buildSnapshot } from '../ui/read-model.js';
+import { ReadOnlyJournal } from '../store/readonly-journal.js';
 import { bugArgs, project, removeTemp, temp } from './bug.test-support.js';
 
 const saved = process.env.APOS_HOME;
@@ -80,6 +82,25 @@ describe('apos bug open', () => {
     await expect(
       p.invoke('goal', 'revise', '--file', join(p.dir, 'rev.json'), '--source', join(p.dir, 'brief.md')),
     ).rejects.toThrow();
+  });
+});
+
+describe('a bug waiting for approval', () => {
+  it('is in apos inbox, in inbox --json and in the UI snapshot, with the command that approves it', async () => {
+    const p = await project({ withSetup: true });
+    await p.invoke('bug', 'open', 'x', ...bugArgs);
+    p.out.length = 0;
+    await p.invoke('inbox');
+    expect(p.out.join('\n')).toContain('apos bug approve GOAL-BUG-001');
+    p.out.length = 0;
+    await p.invoke('inbox', '--json');
+    expect(p.out.join('\n')).toContain('apos bug approve GOAL-BUG-001');
+    const snapshot = buildSnapshot(new ReadOnlyJournal(p.home));
+    expect(snapshot.inbox.map(item => item.detail)).toContain('gates A and B in one go: apos bug approve GOAL-BUG-001');
+    await p.invoke('bug', 'approve', 'GOAL-BUG-001', '--on-behalf', 'x');
+    p.out.length = 0;
+    await p.invoke('inbox');
+    expect(p.out.join('\n')).not.toContain('GOAL-BUG-001');
   });
 });
 

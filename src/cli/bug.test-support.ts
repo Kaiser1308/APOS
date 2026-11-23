@@ -80,6 +80,7 @@ export async function project(options: { withSetup?: boolean; parts?: string[] }
   };
   return {
     dir,
+    home,
     git,
     invoke,
     out,

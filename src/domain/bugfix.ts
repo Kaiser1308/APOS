@@ -147,3 +147,9 @@ export function bugfixProposal(input: {
     verificationStrategy: 'the locked reproduction test, then the Goal check and the layers of the stage',
   });
 }
+
+/** What the Human's inbox says about a Goal in draft: a bug is approved in one go, any other Goal through gate A. */
+export const draftGateDetail = (goal: GoalSpec): string =>
+  goal.kind === 'bugfix'
+    ? `gates A and B in one go: apos bug approve ${goal.id}`
+    : 'gate A: approve the Goal and its appetite';

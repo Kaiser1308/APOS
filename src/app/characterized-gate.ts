@@ -21,13 +21,20 @@ export function coverageOfRefactor(
   inspector?: CommitInspector,
 ): Coverage {
   const paths = state.spec.kind === 'refactor' ? (state.spec.paths ?? []) : [];
-  return refactorCoverage({
-    paths,
-    files: base ? filesAt(repo, base) : [],
-    characterized: characterizations(goals).filter(
-      item => !inspector || !base || inspector.contains(repo, item.lock.commit, base),
-    ),
-  });
+  const held = characterizations(goals).filter(
+    item => !inspector || !base || inspector.contains(repo, item.lock.commit, base),
+  );
+  const coverage = refactorCoverage({ paths, files: base ? filesAt(repo, base) : [], characterized: held });
+  // The oldest lock first: where two Goals locked the same file the newest version is the one a delivery must hold.
+  if (inspector)
+    coverage.sources.sort((a, b) =>
+      inspector.contains(repo, a.lock.commit, b.lock.commit)
+        ? -1
+        : inspector.contains(repo, b.lock.commit, a.lock.commit)
+          ? 1
+          : 0,
+    );
+  return coverage;
 }
 
 /** The check of `APOS-CHARACTERIZED` on a delivery, from the two runs of the layers the captured tests live in. */

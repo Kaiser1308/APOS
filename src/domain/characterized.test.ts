@@ -92,6 +92,7 @@ describe('refactorScopeCheck', () => {
 });
 
 describe('two characterize Goals that locked the same file (Codex review of #45)', () => {
+  // `sources` run from the oldest lock to the newest.
   const later = {
     goalId: 'GOAL-B',
     covers: ['legacy/**'],
@@ -104,21 +105,23 @@ describe('two characterize Goals that locked the same file (Codex review of #45)
   };
   const both = { ...input, sources: [source, later] };
   const all = { ...green, 'app.L2::t3': 'pass' } as Record<string, 'pass' | 'fail' | 'error' | 'skip'>;
-  it('accepts the file as the later Goal left it, when every captured test still passes', () => {
+  it('holds the file as the newest lock left it, which also holds the older tests', () => {
     const check = characterizedCheck({ ...both, deliveryFiles: { 'tests/test_a.py': 'h2' }, delivery: all, base: all });
     expect(check).toMatchObject({ status: 'pass', preserved: { tests: 3, from: ['GOAL-A', 'GOAL-B'] } });
   });
-  it('is still red for a version no lock recorded, and for one that loses a captured test', () => {
+  it('is red for the older version of the file even when every test id still passes: the newer assertions are lost', () => {
+    const rolledBack = characterizedCheck({
+      ...both,
+      deliveryFiles: { 'tests/test_a.py': 'h1' },
+      delivery: all,
+      base: all,
+    });
+    expect(rolledBack.status).toBe('fail');
+    expect(rolledBack.reason).toContain('locked test modified: tests/test_a.py');
+  });
+  it('is red for a version no lock recorded', () => {
     expect(
       characterizedCheck({ ...both, deliveryFiles: { 'tests/test_a.py': 'h3' }, delivery: all, base: all }).status,
     ).toBe('fail');
-    const lost = characterizedCheck({
-      ...both,
-      deliveryFiles: { 'tests/test_a.py': 'h1' },
-      delivery: green,
-      base: all,
-    });
-    expect(lost.status).toBe('fail');
-    expect(lost.reason).toContain('t3');
   });
 });

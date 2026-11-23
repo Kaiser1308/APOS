@@ -358,3 +358,55 @@ describe('a bugfix Goal in the table', () => {
     expect(renderAssuranceText(buildAssuranceReport(base))).not.toMatch(/Lỗi|duyệt gộp/);
   });
 });
+
+describe('the table of a Goal that removes a feature', () => {
+  const removing = (extra: Partial<GoalState> = {}): GoalState => ({
+    ...base,
+    spec: {
+      ...spec,
+      acceptance: [
+        {
+          ...spec.acceptance[0]!,
+          proof: 'removed',
+          removesTests: ['app.L1::tests.old', 'app.L2::tests.flow::applies'],
+        },
+      ],
+    },
+    testLock: {
+      commit: 'c'.repeat(40),
+      files: {},
+      asserts: {},
+      map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L2', testIds: ['tests.nocoupon::absent'] }],
+      by: 't',
+    },
+    ...extra,
+  });
+  const inventory = check('APOS-INVENTORY', 'pass', {
+    removal: {
+      tests: ['app.L1::tests.old::a', 'app.L1::tests.old::b', 'app.L2::tests.flow::applies'],
+      locked: [{ goalId: 'GOAL-OLD', tests: ['app.L2::tests.flow::applies'] }],
+    },
+  });
+
+  it('says which test proves the feature gone, red where and green where, and how many tests went (and whose they were)', () => {
+    const state = removing({
+      gate: { ...gate(undefined, [inventory]), result: 'green', deliveryCommit: 'd'.repeat(40) },
+    });
+    const text = renderAssuranceText(buildAssuranceReport(state));
+    expect(text).toContain(
+      'Xoá tính năng      AC-1: test app.L2::tests.nocoupon::absent đỏ trên ccccccc, xanh trên ddddddd; xoá đúng 3 test đã khai (1 test đã khoá của GOAL-OLD)',
+    );
+  });
+  it('omits the locked part when no test of another Goal went', () => {
+    const quiet = check('APOS-INVENTORY', 'pass', {
+      removal: { tests: ['app.L1::tests.old::a', 'app.L1::tests.old::b'], locked: [] },
+    });
+    const state = removing({ gate: { ...gate(undefined, [quiet]), result: 'green', deliveryCommit: 'd'.repeat(40) } });
+    expect(renderAssuranceText(buildAssuranceReport(state))).toMatch(/xoá đúng 2 test đã khai\n/);
+  });
+  it('does not claim it before a green gate has judged the delivery', () => {
+    const text = renderAssuranceText(buildAssuranceReport(removing()));
+    expect(text).toContain('Xoá tính năng      AC-1: chưa chứng minh');
+    expect(text).toContain('khai xoá 2 mục');
+  });
+});

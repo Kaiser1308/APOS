@@ -10,7 +10,8 @@ const normalPath = (path: string): string => path.replaceAll('\\', '/').replace(
 
 /**
  * The identity of a finding that survives edits which only move lines: the SARIF `partialFingerprints` when the tool
- * writes them, else the rule, the path and a hash of the message. The line number is never part of it.
+ * writes them (with the rule and the path they belong to), else the rule, the path and a hash of the message. The line
+ * number is never part of it.
  */
 export function findingFingerprint(input: {
   ruleId: string;
@@ -19,7 +20,9 @@ export function findingFingerprint(input: {
   partial?: Record<string, string>;
 }): string {
   const keys = Object.keys(input.partial ?? {}).sort();
-  if (keys.length) return `fp:${keys.map(key => `${key}=${input.partial![key]}`).join(',')}`;
+  // A partial fingerprint is only unique within a rule and a file (two rules on one line share a line hash), so both come with it.
+  if (keys.length)
+    return `fp:${input.ruleId}@${input.file === undefined ? '' : normalPath(input.file)}:${keys.map(key => `${key}=${input.partial![key]}`).join(',')}`;
   const body = [input.ruleId, input.file === undefined ? '' : normalPath(input.file), sha(input.message ?? '')].join(
     '\n',
   );

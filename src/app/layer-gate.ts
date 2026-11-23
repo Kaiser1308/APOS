@@ -2,7 +2,14 @@ import { loadFailure } from '../domain/results/load-errors.js';
 import { MUTATION_FLAG } from '../domain/goal-flags.js';
 import { floorReductions } from '../domain/exceptions.js';
 import type { CheckResult, LayerPlanRecord } from '../domain/gate.js';
-import { baseDisagreement, judgeFindings, judgeMetric, judgeTests, type Verdict } from '../domain/layer-verdict.js';
+import {
+  baseDisagreement,
+  lostTests,
+  judgeFindings,
+  judgeMetric,
+  judgeTests,
+  type Verdict,
+} from '../domain/layer-verdict.js';
 import { planLayers, skippedLayers, type LayerRun, type PlanInput, type Stage } from '../domain/layer-plan.js';
 import { proofDemands, stricter, type FailOn, type ProofDemand } from '../domain/proof-tools.js';
 import type { LayerSpec, ProjectSetup } from '../domain/project-setup.js';
@@ -317,6 +324,13 @@ export class LayerGate {
       .filter(entry => entry.part === run.part && entry.layer === run.layer && answersFor(entry.acceptanceId))
       .flatMap(entry => entry.testIds)
       .filter(id => !shared || !owned || owned.has(id));
+    // A maintenance Goal answers for the tests it had: one the delivery no longer runs (gone, or skipped) is lost coverage.
+    const lost = maintenance && atBase && head[0] ? lostTests(atBase.tests, head[0]) : [];
+    if (lost.length)
+      return result(checkId, {
+        status: 'fail',
+        reason: `${label}: ${lost.length} test(s) of the base are not run any more: ${lost.slice(0, 5).join(', ')}${lost.length > 5 ? ', ...' : ''}`,
+      });
     const verdict = judgeTests({
       label,
       head,

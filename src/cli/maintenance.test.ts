@@ -279,6 +279,18 @@ describe('the gate of a maintenance Goal', () => {
     expect(p.state('GOAL-MAINT-001')!.packages?.['WP-MAIN']?.attempts).toBe(0);
   });
 
+  it('is red when the upgrade makes a test of the base disappear or skip, and names it', async () => {
+    const p = await prepare();
+    const gone = p.commitFiles('drops a test', { 'deps.json': manifest({ fmt: '1.1.0', drop: 'legacy' }) });
+    const first = await submit(p, gone);
+    expect(first.code).toBe(1);
+    expect(first.text).toMatch(/1 test\(s\) of the base are not run any more: s::legacy/);
+    const skipped = p.commitFiles('skips a test', { 'deps.json': manifest({ fmt: '1.1.0', skip: 'fmt-api' }) });
+    const second = await submit(p, skipped);
+    expect(second.code).toBe(1);
+    expect(second.text).toMatch(/not run any more: s::fmt-api/);
+  });
+
   it('is unverifiable when the base reports tests that never loaded, not red for the failures the delivery shows', async () => {
     const p = await maintProject({ legacy: true });
     p.commitFiles('the base tests do not load', { 'deps.json': manifest({ fmt: '1.0.0', collect: 'yes' }) });

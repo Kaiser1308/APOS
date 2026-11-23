@@ -106,7 +106,7 @@ describe('apos-json', () => {
       return got.kind === 'findings' ? got.findings.map(item => item.fingerprint) : [];
     };
     expect(prints(sarif('"partialFingerprints":{"primaryLocationLineHash":"abc"},', 1))).toEqual([
-      'fp:primaryLocationLineHash=abc',
+      'fp:r@a.js:primaryLocationLineHash=abc',
     ]);
     expect(prints(sarif('', 1))).toEqual(prints(sarif('', 99)));
   });

@@ -22,6 +22,17 @@ function disagreement(runs: TestOutcome[][]): string[] {
   return sorted(differing);
 }
 
+/**
+ * The tests of the base that the delivery no longer runs: gone from its report, or skipped now though they ran on the base.
+ * A dependency upgrade that makes a test vanish has not kept the tests green, it has stopped asking.
+ */
+export function lostTests(base: TestOutcome[], head: TestOutcome[]): string[] {
+  const now = new Map(head.map(test => [test.id, test.status]));
+  return sorted(
+    base.filter(test => test.status !== 'skip' && (now.get(test.id) ?? 'skip') === 'skip').map(test => test.id),
+  );
+}
+
 /** The ids whose status differs between two runs of the same layer on the same commit. */
 export const baseDisagreement = (first: TestOutcome[], second: TestOutcome[]): string[] =>
   disagreement([first, second]);

@@ -16,12 +16,13 @@ if (process.env.APOS_FLAKY) {
   fs.writeFileSync(file, String(n + 1));
   flip = n % 2 === 1;
 }
-const cases = [
+let cases = [
   ['fmt-api', deps.fmt.startsWith('2.') ? 'fmt 2 renamed format()' : ''],
   ['legacy', fs.existsSync('legacy.flag') ? 'known defect' : ''],
   ['flaky', flip ? 'flipped' : ''],
 ];
-const xml = cases.map(([name, bad]) => '<testcase classname="s" name="' + name + '">' + (deps.collect ? '<error message="collection error"/>' : bad ? '<failure message="' + bad + '"/>' : '') + '</testcase>').join('');
+if (deps.drop) cases = cases.filter(([name]) => name !== deps.drop);
+const xml = cases.map(([name, bad]) => '<testcase classname="s" name="' + name + '">' + (deps.skip === name ? '<skipped/>' : deps.collect ? '<error message="collection error"/>' : bad ? '<failure message="' + bad + '"/>' : '') + '</testcase>').join('');
 fs.writeFileSync(process.argv[2], '<testsuite name="s">' + xml + '</testsuite>');
 if (process.env.APOS_EXIT_ON) {
   const file = process.env.APOS_EXIT_ON.split(':')[0];

@@ -19,9 +19,15 @@ describe('findingFingerprint', () => {
     expect(a).not.toBe(findingFingerprint({ ruleId: 'r', file: 'src/a.ts', message: 'other' }));
   });
   it('prefers the SARIF partialFingerprints, in key order', () => {
-    const one = findingFingerprint({ ruleId: 'r', partial: { b: '2', a: '1' } });
-    expect(one).toBe('fp:a=1,b=2');
-    expect(one).toBe(findingFingerprint({ ruleId: 'other', file: 'x', message: 'y', partial: { a: '1', b: '2' } }));
+    const one = findingFingerprint({ ruleId: 'r', file: 'a.js', partial: { b: '2', a: '1' } });
+    expect(one).toBe('fp:r@a.js:a=1,b=2');
+    expect(one).toBe(findingFingerprint({ ruleId: 'r', file: './a.js', message: 'y', partial: { a: '1', b: '2' } }));
+  });
+  it('does not let two rules, or two files, share a partial fingerprint', () => {
+    const partial = { primaryLocationLineHash: 'same' };
+    const base = findingFingerprint({ ruleId: 'r', file: 'a.js', partial });
+    expect(base).not.toBe(findingFingerprint({ ruleId: 'other', file: 'a.js', partial }));
+    expect(base).not.toBe(findingFingerprint({ ruleId: 'r', file: 'b.js', partial }));
   });
 });
 

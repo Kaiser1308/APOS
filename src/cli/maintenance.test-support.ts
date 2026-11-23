@@ -21,7 +21,7 @@ const cases = [
   ['legacy', fs.existsSync('legacy.flag') ? 'known defect' : ''],
   ['flaky', flip ? 'flipped' : ''],
 ];
-const xml = cases.map(([name, bad]) => '<testcase classname="s" name="' + name + '">' + (bad ? '<failure message="' + bad + '"/>' : '') + '</testcase>').join('');
+const xml = cases.map(([name, bad]) => '<testcase classname="s" name="' + name + '">' + (deps.collect ? '<error message="collection error"/>' : bad ? '<failure message="' + bad + '"/>' : '') + '</testcase>').join('');
 fs.writeFileSync(process.argv[2], '<testsuite name="s">' + xml + '</testsuite>');
 if (process.env.APOS_EXIT_ON) {
   const file = process.env.APOS_EXIT_ON.split(':')[0];
@@ -64,6 +64,7 @@ export async function maintProject(
     needsHuman?: string[];
     legacy?: boolean;
     manifests?: boolean;
+    floor?: Record<string, string[]>;
     deps?: Record<string, string>;
   } = {},
 ) {
@@ -85,6 +86,7 @@ export async function maintProject(
     '.apos/project.yaml',
     jsonCodec.stringify({
       schemaVersion: 2,
+      ...(options.floor ? { floor: options.floor } : {}),
       parts: {
         app: {
           root: '.',

@@ -1,3 +1,4 @@
+import { loadFailure } from '../domain/results/load-errors.js';
 import { MUTATION_FLAG } from '../domain/goal-flags.js';
 import { floorReductions } from '../domain/exceptions.js';
 import type { CheckResult, LayerPlanRecord } from '../domain/gate.js';
@@ -12,7 +13,7 @@ import type { GoalState } from '../domain/transitions.js';
 import { sourceFilesOf } from './source-files.js';
 import { notRunnable, reportExitProblem, type ToolRunner } from './layer-runner.js';
 import { maintenanceScan, sameProject } from './maintenance-gate.js';
-import { securityCheck } from '../domain/maintenance.js';
+import { scanTools, securityCheck } from '../domain/maintenance.js';
 
 export type LayerGateDeps = {
   runner: ToolRunner;
@@ -77,7 +78,13 @@ export class LayerGate {
       packageLayers: this.packageLayers(state, input.stage, input.scope),
       goalFlags: goalFlagsOf(state),
       reductions: floorReductions(state, input.scope, input.stage),
-      requiredTools: [...demands.keys()],
+      // A security Goal is proved by the scan whatever the floor of a stage says: the close stage runs it too.
+      requiredTools: [
+        ...demands.keys(),
+        ...(state.spec.kind === 'maintenance' && state.spec.security?.length
+          ? scanTools(setup, state.spec.part).map(item => item.key)
+          : []),
+      ],
     };
     const runs = planLayers(plan);
     const checks = runs
@@ -282,6 +289,14 @@ export class LayerGate {
       );
     if (maintenance && atBase) {
       const again = runner.layerTests(input.base!, run.part, root, run.layer, [tool]);
+      // A base whose tests never loaded (a collection or import error) is no yardstick either, however readable its report.
+      const patterns = setup.parts[run.part]?.tests?.loadErrorPatterns;
+      const notLoaded = [atBase.tests, again.tests].map(tests => loadFailure(tests, patterns)).find(Boolean);
+      if (notLoaded)
+        return unverifiable(
+          checkId,
+          `${label}: the base did not load its tests (${notLoaded}), so there is nothing to compare with`,
+        );
       const unreadable = [...again.problems, ...again.processFailures];
       const split = unreadable.length ? [] : baseDisagreement(atBase.tests, again.tests);
       if (unreadable.length || split.length)

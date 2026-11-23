@@ -279,6 +279,29 @@ describe('the gate of a maintenance Goal', () => {
     expect(p.state('GOAL-MAINT-001')!.packages?.['WP-MAIN']?.attempts).toBe(0);
   });
 
+  it('is unverifiable when the base reports tests that never loaded, not red for the failures the delivery shows', async () => {
+    const p = await maintProject({ legacy: true });
+    p.commitFiles('the base tests do not load', { 'deps.json': manifest({ fmt: '1.0.0', collect: 'yes' }) });
+    await p.invoke('maintenance', 'open', 'Bump fmt');
+    await p.invoke('maintenance', 'approve', 'GOAL-MAINT-001', '--on-behalf', 'item 1');
+    await p.invoke('lead', 'propose', '--maintenance', '--goal', 'GOAL-MAINT-001');
+    await p.invoke('lead', 'commit', 'GOAL-MAINT-001');
+    const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });
+    const got = await submit(p, sha);
+    expect(got.code).toBe(3);
+    expect(got.text).toMatch(/the base did not load its tests/);
+    expect(p.state('GOAL-MAINT-001')!.packages?.['WP-MAIN']?.attempts).toBe(0);
+  });
+
+  it('closes a security Goal even when the floor of the close stage has no L5: the finding needs the scan', async () => {
+    const p = await prepare({ floor: { close: ['L1'] } }, ['--security', 'CVE-FMT-1']);
+    const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });
+    expect((await submit(p, sha)).code).toBe(0);
+    await p.invoke('outcome', 'close', 'GOAL-MAINT-001', '--on-behalf', 'item 1');
+    expect(p.state('GOAL-MAINT-001')!.status).toBe('closed');
+    expect(p.state('GOAL-MAINT-001')!.closeGate?.checks.map(check => check.checkId)).toContain('APOS-SECURITY');
+  });
+
   it('is unverifiable when the second run on the base exits badly with the same tests passing', async () => {
     const p = await prepare();
     const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });

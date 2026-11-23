@@ -40,19 +40,29 @@ export function bugSourceText(report: BugReport): string {
   return `${lines.join('\n')}\n`;
 }
 
+export type BugCheck = { command: string; format?: 'junit'; report?: string };
+
 /**
  * The check a bug Goal is delivered against, taken from the approved setup: the acceptance tool of the part, else its
  * unit tool. Only a tool that reads as pass or fail from the exit code or a JUnit report can stand in for a check.
+ * A tool runs in the part's root and a Goal check at the top of the checkout, so the command moves into the root and a
+ * report path (relative to the root for a tool, to the checkout for a check) is prefixed with it.
  */
-export function bugCheckFromSetup(setup: ProjectSetup, part: string): { command: string; format?: 'junit' } {
-  const layers = setup.parts[part]?.layers ?? {};
+export function bugCheckFromSetup(setup: ProjectSetup, part: string): BugCheck {
+  const where = setup.parts[part];
+  const layers = where?.layers ?? {};
   const usable = (tool: LayerSpec) => (tool.when ?? 'always') === 'always' && ['exit', 'junit'].includes(tool.format);
   const tool = [...(layers.L2 ?? []), ...(layers.L1 ?? [])].find(usable);
   if (!tool)
     throw new UserError(
       `the setup has no L1 or L2 tool for part "${part}" that reports pass or fail: add one to the setup and approve it, then open the bug again`,
     );
-  return { command: tool.command, ...(tool.format === 'junit' ? { format: 'junit' as const } : {}) };
+  const root = where?.root ?? '.';
+  return {
+    command: root === '.' ? tool.command : `cd "${root}" && ${tool.command}`,
+    ...(tool.format === 'junit' ? { format: 'junit' as const } : {}),
+    ...(tool.report ? { report: root === '.' ? tool.report : `${root}/${tool.report}` } : {}),
+  };
 }
 
 /** The part a bug lives in: the one asked for, or the setup's only part. */
@@ -67,12 +77,7 @@ export function bugPart(setup: ProjectSetup, asked?: string): string {
 }
 
 /** The Goal of a bug report: one requirement, one red-green criterion, one check, a scope the hint or the part names. */
-export function bugGoalSpec(input: {
-  id: string;
-  report: BugReport;
-  check: { command: string; format?: 'junit' };
-  now: string;
-}): GoalSpec {
+export function bugGoalSpec(input: { id: string; report: BugReport; check: BugCheck; now: string }): GoalSpec {
   const { id, report, check } = input;
   const text = bugSourceText(report);
   return parseGoalSpec({
@@ -103,6 +108,7 @@ export function bugGoalSpec(input: {
         command: check.command,
         expect: 'pass',
         ...(check.format ? { format: check.format } : {}),
+        ...(check.report ? { report: check.report } : {}),
       },
     ],
   });

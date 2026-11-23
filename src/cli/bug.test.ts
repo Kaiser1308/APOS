@@ -51,6 +51,7 @@ describe('apos bug open', () => {
     await expect(p.invoke('bug', 'open', 'x', ...bugArgs)).rejects.toThrow(/--part/);
     await p.invoke('bug', 'open', 'x', ...bugArgs, '--part', 'web');
     expect(p.state('GOAL-BUG-001')!.spec.part).toBe('web');
+    expect(p.state('GOAL-BUG-001')!.spec.checks[0]).toMatchObject({ command: 'cd "web" && node report.js {report}' });
   });
 
   it('does not take ordinary Goal ids', async () => {

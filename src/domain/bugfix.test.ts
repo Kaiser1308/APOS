@@ -45,6 +45,24 @@ describe('bug Goal', () => {
     expect(bugCheckFromSetup(setup({ app: part({ L1: [l1] }) }), 'app')).toEqual({ command: 'pytest -q' });
     expect(() => bugCheckFromSetup(setup({ app: part({ L5: [l1] }) }), 'app')).toThrow(/no L1 or L2 tool/);
   });
+  it('runs the check in the root of the part and keeps a report path, as the tool would', () => {
+    const web = {
+      root: 'web',
+      layers: { L2: [{ id: 'a', command: 'mvn test', format: 'junit', report: 'target/surefire-reports/TEST-*.xml' }] },
+    };
+    expect(bugCheckFromSetup(setup({ web }), 'web')).toEqual({
+      command: 'cd "web" && mvn test',
+      format: 'junit',
+      report: 'web/target/surefire-reports/TEST-*.xml',
+    });
+    const spec = bugGoalSpec({
+      id: 'GOAL-BUG-001',
+      report,
+      check: bugCheckFromSetup(setup({ web }), 'web'),
+      now: '2026-11-23T00:00:00.000Z',
+    });
+    expect(spec.checks[0]).toMatchObject({ report: 'web/target/surefire-reports/TEST-*.xml' });
+  });
   it('needs --part when the setup has several parts', () => {
     const two = setup({ api: part({}), web: { ...part({}), root: 'web' } });
     expect(() => bugPart(two, undefined)).toThrow(/--part/);

@@ -3,6 +3,7 @@ import { GoalRegistryService } from '../../app/registry.js';
 import {
   BUG_APPETITE,
   BUG_APPROVE_VIA,
+  type BugCheck,
   bugCheckFromSetup,
   bugGoalSpec,
   bugPart,
@@ -42,7 +43,7 @@ export function registerBug(ctx: CliContext): void {
           const version = journal.setupHistory().approvals.at(-1)?.version;
           const setup = pinnedSetupOf(ctx, journal, version);
           let part = flags.part;
-          let check: { command: string; format?: 'junit' };
+          let check: BugCheck;
           if (setup) {
             if (flags.check)
               throw new UserError(

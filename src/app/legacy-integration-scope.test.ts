@@ -99,6 +99,27 @@ describe('layerChecks of a legacy Goal at the integrate and close stages', () =>
     expect(check?.reason).toContain('src/legacy.txt');
   }, 120_000);
 
+  it('is red for a characterize Goal whose integration commit rewrites a captured test that still passes', async () => {
+    const p = await testingProject({ goal: characterize, files });
+    const lock = p.commit(
+      {
+        'tests/acceptance/calc.t': 'case total pass\n',
+        [`.apos/goals/${p.goalId}/tests.json`]: mapFor(p.goalId, ['tests.acceptance.calc::total']),
+      },
+      'capture',
+    );
+    expect(await p.service.submit(p.goalId, lock, 'tester')).toMatchObject({ ok: true });
+    const input = { stage: 'close' as const, scope: p.goalId, base: lock, changed: [] };
+    const locked = (head: string) =>
+      service(p)
+        .layerChecks(p.state(), { ...input, head })
+        .checks.find(check => check.checkId === 'APOS-LOCKED');
+    expect(locked(lock)).toMatchObject({ status: 'pass' });
+    const rewritten = p.commit({ 'tests/acceptance/calc.t': 'case total pass\ncase extra pass\n' }, 'rewrite the test');
+    expect(locked(rewritten)).toMatchObject({ status: 'fail' });
+    expect(locked(rewritten)?.reason).toContain('locked test modified: tests/acceptance/calc.t');
+  }, 120_000);
+
   it('adds nothing for an ordinary Goal', async () => {
     const p = await testingProject({ files });
     const ran = service(p).layerChecks(p.state(), {

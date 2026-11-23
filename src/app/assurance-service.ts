@@ -108,6 +108,27 @@ export class AssuranceService {
     }
     if (state.spec.kind === 'characterize' && input.base)
       checks.push(characterizeScopeCheck({ repo: this.deps.repo, setup, base: input.base, head: input.head }));
+    // What a characterize Goal locked stays as it was locked at these stages too: the integration commit cannot rewrite a captured test.
+    if (state.spec.kind === 'characterize' && lock) {
+      const wanted = new Map<string, { part: string; layer: LayerId }>();
+      for (const entry of lock.map)
+        wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
+      const delivery = this.runTests(setup, wanted, input.head);
+      checks.push(
+        lockedTestsCheck({
+          lock,
+          deliveryFiles: Object.fromEntries(
+            Object.keys(lock.files).map(path => {
+              const content = fileAt(this.deps.repo, input.head, path);
+              return [path, content ? sha256Of(content) : undefined];
+            }),
+          ),
+          delivery: delivery.set,
+          runProblems: delivery.problems,
+          criteria: lock.map.map(entry => entry.acceptanceId),
+        }),
+      );
+    }
     return checks;
   }
 

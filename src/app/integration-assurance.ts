@@ -132,10 +132,16 @@ export function integrationChecks(
   const packages = Object.values(state.packages ?? {});
   const needsHuman = Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman));
   const judged = new Set(judgedByAPackage(repo, state, input));
+  // Infrastructure the tester locked, held byte for byte, is APOS-INFRA's to judge (it came with the lock commit).
+  const heldInfra = Object.entries(lock?.infra ?? {}).flatMap(([path, hash]) => {
+    const now = fileAt(repo, input.head, path);
+    return now && sha256Of(now) === hash ? [path] : [];
+  });
   const locked = new Set([
     ...Object.keys(lock?.files ?? {}),
     ...reviews.flatMap(review => Object.keys(review.files)),
     ...unchangedPackageReviewFiles(repo, state, input.head),
+    ...heldInfra,
   ]);
   // Tester-owned files (the lock commit's) are APOS-LOCKED's to judge, not sensitive-file decisions of a package.
   const sensitive = input.changed.filter(
@@ -156,6 +162,7 @@ export function integrationChecks(
       ...Object.keys(lock?.files ?? {}),
       ...reviews.flatMap(review => Object.keys(review.files)),
       ...unchangedPackageReviewFiles(repo, state, input.head),
+      ...heldInfra,
     ],
   });
   checks.push(

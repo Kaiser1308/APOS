@@ -93,6 +93,34 @@ describe('the integration gate runs the package checks on the integration commit
     expect(check(p.run(head), 'APOS-INFRA')).toMatchObject({ status: 'needs-human' });
   }, 120_000);
 
+  it('leaves test infrastructure the tester locked, byte for byte, out of the scope check', async () => {
+    const p = await project();
+    const head = p.commit({ 'tests/infra.cfg': 'tester config\n', 'src/impl.txt': 'add\n' }, 'integration');
+    const base = p.state();
+    const state: GoalState = {
+      ...base,
+      testLock: {
+        ...base.testLock!,
+        infra: { 'tests/infra.cfg': sha256Of(fileAt(p.dir, head, 'tests/infra.cfg')!) },
+      },
+    };
+    const assurance = new AssuranceService({
+      repo: p.dir,
+      runner: p.runner,
+      inspector: new GitCommitInspector(),
+      loadSetup: p.loadSetup,
+    });
+    const checks = assurance.layerChecks(state, {
+      stage: 'integrate',
+      scope: p.goalId,
+      head,
+      base: p.base,
+      changed: ['tests/infra.cfg', 'src/impl.txt'],
+    }).checks;
+    expect(check(checks, 'APOS-INFRA')).toMatchObject({ status: 'pass' });
+    expect(check(checks, 'APOS-SCOPE')).toMatchObject({ status: 'pass' });
+  }, 120_000);
+
   it('is red for a file outside the packages and the plan paths, naming it', async () => {
     const p = await project({ paths: ['src/impl.txt'] });
     const head = p.commit({ 'src/impl.txt': 'add\n', 'src/a/x.txt': 'a\n', 'docs/rogue.md': 'x\n' }, 'integration');

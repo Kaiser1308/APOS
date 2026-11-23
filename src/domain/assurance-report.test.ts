@@ -261,3 +261,37 @@ describe('renderAssuranceText', () => {
     `);
   });
 });
+
+describe('mutation in the table', () => {
+  const setup = parseSetupObject({
+    schemaVersion: 2,
+    parts: {
+      app: {
+        root: '.',
+        layers: {
+          L1: [{ id: 'pytest', command: 'pytest', format: 'junit' }],
+          L5: [{ id: 'mutate', command: 'x', format: 'metric', metric: 'mutationScore', when: 'flag:mutation' }],
+        },
+      },
+    },
+  });
+  const parsed = setup.version === 2 ? setup.setup : undefined;
+
+  it('says mutation is off when the setup has the tool and the Goal has no flag', () => {
+    const text = renderAssuranceText(buildAssuranceReport(base, parsed));
+    expect(text).toContain('mutation tắt (Goal không gắn cờ)');
+  });
+  it('does not say so when the Goal carries the flag (in its document or from the approval), and lists the layer', () => {
+    for (const goal of [
+      { ...base, spec: { ...spec, flags: ['mutation'] } },
+      { ...base, flags: ['mutation'] },
+    ]) {
+      const text = renderAssuranceText(buildAssuranceReport(goal, parsed));
+      expect(text).not.toContain('mutation tắt');
+      expect(text).toContain('L5 mutate');
+    }
+  });
+  it('says nothing when the setup has no mutation tool', () => {
+    expect(renderAssuranceText(buildAssuranceReport(base))).not.toContain('mutation');
+  });
+});

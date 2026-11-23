@@ -293,6 +293,57 @@ describe('layers at the submit stage', () => {
     expect(checkOf(p, 'app.L0.bench').status).toBe('pass');
   }, 120_000);
 
+  const MUTATE = `
+const fs = require('fs');
+const [out, counter, changed] = process.argv.slice(2);
+const values = fs.readFileSync('src/bench.txt', 'utf8').trim().split(',').map(Number);
+const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
+fs.writeFileSync(counter, String(n + 1));
+// 0 unless the changed source is handed over and no test or APOS file with it: {changed} leaves those out.
+const files = changed.split(',');
+const ok = files.includes('src/stub.txt') && !files.some(file => file.startsWith('tests/') || file.startsWith('.apos/'));
+fs.writeFileSync(out, JSON.stringify({ mutationScore: ok ? values[n % values.length] : 0 }));
+`;
+  const mutationTool = () => ({
+    id: 'mutate',
+    command: `node mutate.js {report} ${counterFile()} "{changed}"`,
+    format: 'metric',
+    metric: 'mutationScore',
+    when: 'flag:mutation',
+  });
+  const mutating = (top: object = {}, flags: string[] = ['mutation']) =>
+    project({
+      layers: { L0: [mutationTool()] },
+      files: { 'mutate.js': MUTATE },
+      goal: { ...spec, flags, checks: [{ ...spec.checks[0]!, command: 'node -e "process.exit(0)"' }] },
+      top,
+    });
+  it('mutation: the tool a Goal flag switches on measures the changed source twice, against the floor of 70', async () => {
+    const p = await mutating();
+    expect((await p.submit(p.commit({ ...work, 'src/bench.txt': '80,80' }))).result).toBe('green');
+    expect(checkOf(p, 'app.L0.mutate')).toMatchObject({ status: 'pass', metric: { name: 'mutationScore', value: 80 } });
+  }, 120_000);
+  it('mutation: a score under the floor is red; the setup can raise the floor, not the Goal lower it', async () => {
+    const low = await mutating();
+    const red = await low.submit(low.commit({ ...work, 'src/bench.txt': '60,60' }));
+    expect(red.result).toBe('red');
+    expect(red.reasons.join('\n')).toContain('mutationScore >= 70 does not hold: measured 60, 60');
+    const strict = await mutating({ mutation: { minScore: 85 } });
+    const still = await strict.submit(strict.commit({ ...work, 'src/bench.txt': '80,80' }));
+    expect(still.reasons.join('\n')).toContain('mutationScore >= 85 does not hold');
+  }, 240_000);
+  it('mutation: two runs more than a point apart are unverifiable, not red and not green', async () => {
+    const p = await mutating();
+    const got = await p.submit(p.commit({ ...work, 'src/bench.txt': '70,72' }));
+    expect(got.result).toBe('unverifiable');
+    expect(got.reasons.join('\n')).toContain('differs by more than 1 point between two runs (70, 72)');
+  }, 120_000);
+  it('mutation: a Goal without the flag does not run the tool at all', async () => {
+    const p = await mutating({}, []);
+    expect((await p.submit(p.commit({ ...work, 'src/bench.txt': '10,10' }))).result).toBe('green');
+    expect(checkOf(p, 'app.L0.mutate')).toBeUndefined();
+  }, 120_000);
+
   it('runs a test layer as many times as the setup says, and flaky results are unverifiable', async () => {
     const counter = counterFile();
     const flaky = `

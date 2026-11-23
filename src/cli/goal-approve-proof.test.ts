@@ -57,7 +57,7 @@ async function approving(goal: object, setup: object | undefined) {
   writeFileSync(join(dir, 'brief.md'), sourceText);
   writeFileSync(join(dir, 'goal.json'), JSON.stringify(goal));
   await invoke('goal', 'create', '--file', join(dir, 'goal.json'), '--source', join(dir, 'brief.md'));
-  return () =>
+  const approve = (...extra: string[]) =>
     invoke(
       'goal',
       'approve',
@@ -70,7 +70,17 @@ async function approving(goal: object, setup: object | undefined) {
       '3',
       '--on-behalf',
       't',
+      ...extra,
     );
+  const state = () => {
+    const { journal, close } = ProjectJournal.open(dir, home, newEvent);
+    try {
+      return journal.getGoal(spec.id);
+    } finally {
+      close();
+    }
+  };
+  return Object.assign(approve, { state });
 }
 
 it('refuses a benchmark criterion whose tool is not in the pinned setup, naming the criterion and the tool', async () => {
@@ -91,4 +101,24 @@ it('approves when the tool is there', async () => {
     setupDoc([{ id: 'bench', command: 'node b.js {report}', format: 'metric', metric: 'p95_ms' }]),
   );
   await expect(approve()).resolves.toBeUndefined();
+});
+
+const mutate = {
+  id: 'mutate',
+  command: 'x {changed}',
+  format: 'metric',
+  metric: 'mutationScore',
+  when: 'flag:mutation',
+};
+
+it('refuses --flag mutation when the pinned setup has no tool that a mutation flag switches on', async () => {
+  const approve = await approving(spec, setupDoc([]));
+  await expect(approve('--flag', 'mutation')).rejects.toThrow(/the setup has no tool that says `when: flag:mutation`/);
+  await expect(approve('--flag', 'not a word')).rejects.toThrow(/a flag is a word/);
+});
+
+it('approves with --flag mutation when the setup has the tool, and keeps the flag with the Goal', async () => {
+  const approve = await approving(spec, setupDoc([mutate]));
+  await approve('--flag', 'mutation', '--flag', 'perf');
+  expect(approve.state()).toMatchObject({ status: 'approved', flags: ['mutation', 'perf'] });
 });

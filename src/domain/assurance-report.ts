@@ -5,6 +5,7 @@ import { reviewOverrideBy } from './review-tests.js';
 import { proofDemands } from './proof-tools.js';
 import type { ProjectSetup } from './project-setup.js';
 import { acceptanceProof } from './test-plan.js';
+import { goalFlagsOf, MUTATION_FLAG } from './goal-flags.js';
 import type { GoalState } from './transitions.js';
 
 export type LayerStatus = 'pass' | 'fail' | 'unverifiable' | 'reduced' | 'not-run';
@@ -158,7 +159,7 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
       setup,
       stage: 'close',
       changed: state.gate?.changedFiles ?? [],
-      goalFlags: state.spec.flags ?? [],
+      goalFlags: goalFlagsOf(state),
       reductions: [],
       requiredTools: proofDemands(state.spec).map(item => item.tool),
     };
@@ -180,6 +181,10 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
     off.add(
       `test chỉ gọi qua cửa: ${part}${setup?.parts[part]?.stack ? ` (${setup.parts[part]!.stack})` : ''} chưa kiểm (danh mục chưa có luật)`,
     );
+  const hasMutationTool = Object.values(setup?.parts ?? {}).some(part =>
+    Object.values(part.layers).some(tools => tools?.some(tool => tool.when === `flag:${MUTATION_FLAG}`)),
+  );
+  if (hasMutationTool && !goalFlagsOf(state).includes(MUTATION_FLAG)) off.add('mutation tắt (Goal không gắn cờ)');
   if (state.setupVersion === undefined) off.add('mọi bảo đảm theo setup tắt: Goal không có setup');
   else if (!state.testLock)
     off.add('khoá test: tắt (setup không khai tests.paths, hoặc Goal không có tiêu chí cần test)');

@@ -32,8 +32,10 @@ function looksLikeProject(catalog: CatalogEntry[], dir: string): string[] {
 function partFrom(entry: CatalogEntry, root: string): PartSetup {
   const layers: PartSetup['layers'] = {};
   for (const layer of LAYER_IDS) {
-    const first = layer === 'L6' ? undefined : entry.layers[layer]?.[0];
-    if (first) layers[layer] = [first];
+    const tools = layer === 'L6' ? [] : (entry.layers[layer] ?? []);
+    const first = tools[0];
+    // The first tool of a layer, and every tool a Goal flag switches on (mutation): it costs nothing until a Goal asks for it.
+    if (first) layers[layer] = [first, ...tools.slice(1).filter(tool => tool.when && tool.when !== 'always')];
   }
   return {
     root,

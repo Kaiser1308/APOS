@@ -12,11 +12,6 @@ const STAGES = ['submit', 'integrate', 'close'] as const;
 
 const layerId = z.enum(LAYER_IDS);
 const layerSpec = catalogToolSchema.extend({
-  /** `always` (default) or `flag:<name>`: the layer runs only when the Goal carries that flag. */
-  when: z
-    .string()
-    .regex(/^(always|flag:[A-Za-z][A-Za-z0-9_-]*)$/, 'when must be "always" or "flag:<name>"')
-    .optional(),
   /**
    * How often a test layer runs on the delivery before it is judged (default 1), or a `metric` is measured (default 3).
    * Runs that disagree make the layer `unverifiable`.

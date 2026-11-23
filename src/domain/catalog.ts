@@ -12,6 +12,7 @@ export const TOOL_FORMATS = [...RESULT_FORMATS, 'exit'] as const;
  * One command that produces a standard report. `{report}` in `command` is replaced by a path APOS provides.
  * `runOne` runs a single test (needed to prove a test can be run alone): `{id}` is the whole test id
  * (`<classname>::<name>`), `{classname}` and `{name}` its two halves, split at the first `::`.
+ * `{changed}` is the source files changed from the base, comma-separated (for a tool that mutates only new code).
  */
 export const catalogToolSchema = z.object({
   id: z.string().trim().min(1),
@@ -21,6 +22,11 @@ export const catalogToolSchema = z.object({
   /** Exit codes accepted when a report-producing tool has a meaningful report despite a nonzero exit. */
   reportExitCodes: z.array(z.number().int()).min(1).optional(),
   metric: z.string().trim().min(1).optional(),
+  /** `always` (default) or `flag:<name>`: the tool runs only when the Goal carries that flag (mutation: `flag:mutation`). */
+  when: z
+    .string()
+    .regex(/^(always|flag:[A-Za-z][A-Za-z0-9_-]*)$/, 'when must be "always" or "flag:<name>"')
+    .optional(),
   runOne: z
     .string()
     .trim()

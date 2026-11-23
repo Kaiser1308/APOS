@@ -373,7 +373,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `goal create --file <json> --source <path> [--origin <text>]` | Draft a Goal bound to a source snapshot. |
 | `goal list` | List Goals, their status and the setup version they are pinned to. |
 | `plan [--source <path>] [--json]` | Show the multi-Goal plan (including sketch and deferred Goals) and requirement coverage (`covered`, `planned`, `deferred`, `orphan`, `out-of-scope`). |
-| `goal approve <id> --size <S\|M\|L> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>] [--setup-version <n\|latest>]` | **Gate A (H).** Pins the latest approved setup (or the version given). |
+| `goal approve <id> --size <S\|M\|L> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>] [--setup-version <n\|latest>] [--flag <name>]...` | **Gate A (H).** Pins the latest approved setup (or the version given). `--flag mutation` switches the setup's mutation tool on for this Goal (see [Mutation](#mutation)). |
 | `goal appetite <id> --reason <text> [--size <S\|M\|L>] [--max-minutes <n>] [--max-attempts <n>] [--overrun <stop\|ask>]` | **H.** Change the budget, not the scope. |
 | `goal select <id>` | **Gate B (H).** Records the choice; starts nothing. |
 | `goal revise --file <json> --source <path> [--origin <text>]` | New Goal version; needs re-approval. |
@@ -417,6 +417,15 @@ APOS runs the tests the commit adds, in the layers of their part:
 - **Every test green**: advice, nothing is blocked.
 
 `apos review note` records a remark with no test; it is advice. For a Multi-WP Goal, `apos review block <goalId> --integration --commit <sha>` does the same to the integration commit. A Lead who does not accept a block approves `apos exception approve <goalId> --kind review-overridden --ref <package>:<review sha> --reason <text> --by agent:<name>`; the delivery that was blocked can then be submitted again, and the assurance table says `review bị bỏ qua: <ids>, duyệt bởi <by>`.
+
+## Mutation
+
+Mutation testing is the second net under the assertion count: it changes the code a delivery added and checks that the tests notice. It runs only for a Goal approved with `--flag mutation`, at the **close** stage (a Lead can pull it into `submit` with `layers`). The catalog ships a tool for TypeScript (Stryker) and Python (mutmut), each a `metric` tool in L5 with `when: flag:mutation`; `goal approve --flag mutation` is refused when the pinned setup has no such tool.
+
+- `{changed}` in the tool's command is the source files the delivery changed from the plan's base, comma-separated, tests left out: only new code is mutated. With no source file changed there is nothing to mutate, and the layer is `unverifiable`.
+- The floor is `mutation.minScore` in the setup (70 when the setup says nothing). A `benchmark` criterion of the Goal on the same tool can only raise it: every threshold must hold.
+- The tool runs twice. Two scores that differ by more than one point, or a run that fails or leaves no report, make the layer `unverifiable`: neither red nor green.
+- The assurance table shows the score (`mutationScore 82`), or `mutation tắt (Goal không gắn cờ)` when the setup has the tool and the Goal has no flag.
 
 ## Old logs (legacy Goals)
 
@@ -466,4 +475,4 @@ Phase 1 (this version) removed the orchestration layer and put `package submit`,
 2. ~~Result formats, a tool catalogue and a project setup with draft, probe and approve~~ (done: see [Project setup](#project-setup)). 
 3. ~~Locking the acceptance tests before the code is written, red-for-the-right-reason checks, test inventory and scope guards~~ (done: see [Locked tests](#locked-tests)).
 4. ~~Test layers L0 to L6 per stage, non-functional proofs and a per-Goal table of what the machine proves and what you confirmed by hand~~ (done: see [Layers by stage](#layers-by-stage) and [The assurance table](#the-assurance-table)).
-5. Reviews and AI tools that can block only with a red test (done: see [Reviews](#reviews)), and mutation testing.
+5. Reviews and AI tools that can block only with a red test (done: see [Reviews](#reviews)) and mutation testing (done: see [Mutation](#mutation)).

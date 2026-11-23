@@ -228,7 +228,7 @@ export function openProject(stack: Stack, cleanup: string[]) {
   };
 
   /** Draft, then edit as the scenario needs: no linters, benchmark and scan tools, an e2e tool on `system`. */
-  const setUp = async () => {
+  const setUp = async (edit?: (app: { layers: Record<string, unknown[]> }) => void) => {
     commit(stack.files, 'project');
     stack.prepare?.(dir);
     await invoke('init');
@@ -251,6 +251,7 @@ export function openProject(stack: Stack, cleanup: string[]) {
       },
       { id: 'scan', command: 'node scripts/scan.cjs {report}', format: 'sarif' },
     ] as never;
+    edit?.(app as { layers: Record<string, unknown[]> });
     setup.system = { L4: [{ id: 'e2e', command: stack.setup.l4, format: 'junit' }] };
     setup.triggers = [{ when: { changed: ['src/ui/**'] }, at: 'submit', run: ['system.L4'] }];
     const base = commit({ '.apos/project.yaml': yamlCodec.stringify(setup) }, 'setup');

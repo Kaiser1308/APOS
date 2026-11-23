@@ -38,3 +38,5 @@ ln -s <apos>/node_modules node_modules   # or npm install
 git init -q && git add -A && git commit -qm base
 git apply ../path/to/examples/ts-orders/steps/01-tests-and-stub.patch && npx vitest run
 ```
+
+Two notes. `ts-orders/repo/package-lock.json` is a stub with no packages: the demo links the APOS checkout's `node_modules` into the copy, and APOS only does that when the lock file is the same on both sides; run `npm install` in a copy of your own to get a real one. And run the example from a copy outside the APOS checkout (the demo does): vitest would otherwise pick up the `vitest.config.ts` of the repository above it.

@@ -30,6 +30,7 @@ export class GoalRegistryService {
     ),
     confirmation?: unknown,
     setupVersion?: number,
+    flags: string[] = [],
   ): void {
     this.assertAcyclic();
     const state = this.store.getGoal(goalId);
@@ -40,6 +41,7 @@ export class GoalRegistryService {
         appetite,
         confirmation,
         ...(setupVersion === undefined ? {} : { setupVersion }),
+        ...(flags.length ? { flags } : {}),
       }),
     );
   }

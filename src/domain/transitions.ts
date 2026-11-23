@@ -12,6 +12,7 @@ import { parseWorkPackage, validatePackageGraph, type WorkPackageSpec } from './
 import { parseReview, type ReviewRecord } from './reviews.js';
 import { applyIntegrationGateRequest } from './integration-gate.js';
 import { applyException, type ExceptionRecord } from './exceptions.js';
+import { FLAG_PATTERN } from './goal-flags.js';
 import { applyReviewBlocked, type ReviewTestLock } from './review-tests.js';
 import { applyTestLockEvent, type TestLock, type TestRevisionPending } from './test-lock.js';
 import { LEGACY_EVENT_TYPES, type LegacyEventType } from './legacy-events.js';
@@ -120,6 +121,8 @@ export type GoalState = {
   approvedGoalVersion?: number;
   /** The approved setup version this Goal was pinned to at `goal approve`; absent = no setup, guarantees that depend on one are off. */
   setupVersion?: number;
+  /** Flags the Human added at `goal approve --flag` (`mutation`): they come on top of the ones in the Goal document. */
+  flags?: string[];
   selected: boolean;
   /** When `goal select` happened: the time budget runs from here to `verified`. */
   selectedAt?: string;
@@ -318,15 +321,22 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.status === 'draft', 'Goal not awaiting approval');
       const blockers = goalApprovalBlockers(state.spec);
       requireThat(!blockers.length, `Goal not approvable: ${blockers.join('; ')}`);
-      const data = event.data as { appetite?: unknown; setupVersion?: unknown } | undefined;
+      const data = event.data as { appetite?: unknown; setupVersion?: unknown; flags?: unknown } | undefined;
       requireThat(data?.appetite, 'Goal approval must include the Human-approved appetite');
       const setupVersion = data?.setupVersion;
       requireThat(
         setupVersion === undefined || (Number.isInteger(setupVersion) && (setupVersion as number) > 0),
         'Goal approval setupVersion must be a positive integer',
       );
+      const flags = data?.flags;
+      requireThat(
+        flags === undefined ||
+          (Array.isArray(flags) && flags.every(flag => typeof flag === 'string' && FLAG_PATTERN.test(flag))),
+        'Goal approval flags must be words',
+      );
       return {
         ...state,
+        ...(Array.isArray(flags) && flags.length ? { flags: flags as string[] } : {}),
         status: 'approved',
         approvedGoalVersion: state.spec.version,
         appetite: parseAppetite(data?.appetite),

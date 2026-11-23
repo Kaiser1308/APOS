@@ -13,6 +13,9 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | Gate `unverifiable` (flaky, hung, baseline cannot run) | never green | `verification.test.ts` › rejects an unverifiable gate; `gate.test.ts` (domain) › is unverifiable when repeated runs disagree or a run times out |
 | Wrong log / artifact | the gate writes its own logs and hashes them outside the repo; owner artifacts are never read as proof | `gate-service.test.ts` › goes green … with logs hashed outside the repo |
 | An AI tool wired into the setup that gives a different answer each run | the probe fails (`flaky`), the setup cannot be approved; a stable one passes | `setup-probe.test.ts` › fails an AI tool that writes different tests every time it runs, and passes one that is stable |
+| Mutation score under the floor, or under a Goal criterion that raises it | the close stage is red, the message gives both thresholds and the scores | `mutation-flow.test.ts` |
+| Mutation runs that give scores more than 1 point apart, or a run that fails or leaves no report | `unverifiable`, never green | `mutation-flow.test.ts`; `layer-gate.test.ts` |
+| `goal approve --flag mutation` on a setup without a mutation tool | refused, nothing written | `goal-approve-proof.test.ts` |
 | Stale commit: gate on X, verify or merge of Y | refused | `verification.test.ts` › rejects a green gate that ran on a different commit; `merge.test.ts` › merges only the gated commit |
 | A gate that finishes after its package moved on | rejected | `verification.test.ts` › rejects a gate that finishes after its package moved on |
 | Plan revised after a gate | the gate is dropped | `verification.test.ts` › drops the gate when the Lead revises its plan |

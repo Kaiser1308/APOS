@@ -92,6 +92,18 @@ A missing, empty or broken report is `unverifiable`, never "0 tests, green".
 Commands that Gradle or Maven run need care: Gradle skips an up-to-date `test`, so the shipped commands use `cleanTest test`; both write a directory of XML files, so they set `report` to a glob.
 
 
+## Mutation
+
+A tool with `"when": "flag:mutation"`, `"format": "metric"` and a `metric` path (`mutationScore`) is the mutation tool of its stack: it runs at the close stage for a Goal approved with `--flag mutation`, and the core reads only the number. `{changed}` in its command is the changed source files, comma-separated, so only new code is mutated. The score is on a 0 to 100 scale; the floor is `mutation.minScore` of the setup (70).
+
+| Stack | Tool | How the score is made |
+| --- | --- | --- |
+| typescript | Stryker (`npx stryker run --mutate`) | the JSON reporter writes `reports/mutation/mutation.json`; a one-line `node -e` turns it into `killed + timeout` over the mutants that ran |
+| python | mutmut 2.x | `mutmut export-cicd-stats` writes `mutmut-cicd-stats.json`; a one-line `python -c` turns it into `killed / total` |
+| java | PIT | not shipped: PIT writes XML with no score. Write a small script that runs it and writes `{"mutationScore": n}`, and use the script as the command (see [Adding a stack or a tool](#adding-a-stack-or-a-tool)) |
+
+Neither shipped command has been run on a real project here (see `notes`): the probe is what proves them, and it runs the tool once on one source file of the part.
+
 ## AI tools
 
 An AI tool (a model that writes tests, hunts for bugs or reviews a diff) is never a judge: APOS trusts only a command that runs the same way every time and a report it can read. So an AI tool enters the system through the doors that already exist, and nothing it says gets a vote:

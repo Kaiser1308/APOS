@@ -28,9 +28,9 @@ layers:
       command: pytest tests/acceptance --junitxml={report}
       format: junit
       runOne: 'pytest tests/acceptance -k "{name}" --junitxml={report}'
-assertPatterns: ['^\\s*assert\\b']
+assertPatterns: ['^\s*assert\b']
 notImplementedPatterns: [NotImplementedError]
-forbid: ['@pytest\\.mark\\.(?:skip|skipif|xfail)']
+forbid: ['@pytest\.mark\.(?:skip|skipif|xfail)']
 needsHuman: [pyproject.toml, .github/**]
 ```
 
@@ -56,6 +56,7 @@ needsHuman: [pyproject.toml, .github/**]
 | `command` | Run in the part's directory, in a clean worktree. `{report}` is replaced with a path APOS provides. |
 | `format` | `junit`, `sarif`, `metric`, `apos-json`, or `exit`. |
 | `report` | Where the report is when the command does not use `{report}`: a path or glob relative to the part. Every file the glob matches is read and merged; no file means the report is unreadable. |
+| `reportExitCodes` | Optional exit codes accepted when reading a `sarif` or `metric` report (default `[0]`). The report still decides findings or threshold status. Set this for tools that intentionally return a nonzero status while writing a usable report. |
 | `metric` | For `format: metric`: dotted path to the number (e.g. `metrics.mutationScore`). Omit when the file is one number. |
 | `runOne` | Runs a single test, needed to prove a test can run alone; see below. |
 

@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { parse as parseYaml } from 'yaml';
 import { catalogEntrySchema, catalogToolSchema } from './catalog.js';
 import { STACKS } from './catalog-stacks.test-support.js';
 import { parseSetupObject } from './project-setup.js';
 
 describe('first-wave catalog content', () => {
+  it('uses regex escapes that work when copied from the YAML catalog example', () => {
+    const docs = readFileSync(new URL('../../docs/catalog.md', import.meta.url), 'utf8');
+    const example = docs.split('```yaml\n')[1]?.split('\n```')[0];
+    expect(example).toBeDefined();
+    const parsed = parseYaml(example!) as { assertPatterns: string[]; forbid: string[] };
+    expect(parsed.assertPatterns.some(pattern => new RegExp(pattern).test('    assert total == 1'))).toBe(true);
+    expect(parsed.forbid.some(pattern => new RegExp(pattern).test('@pytest.mark.skip'))).toBe(true);
+  });
+
   it('has the four stacks, each valid against the schema', () => {
     expect(STACKS.map(entry => entry.stack)).toEqual(['typescript', 'python', 'java-gradle', 'java-maven']);
     for (const entry of STACKS) expect(catalogEntrySchema.safeParse(entry).success, entry.stack).toBe(true);
@@ -87,6 +98,10 @@ describe('catalog schema', () => {
     expect(catalogToolSchema.safeParse({ ...tool, runOne: 'vitest' }).success).toBe(false);
     expect(catalogToolSchema.safeParse({ ...tool, runOne: 'vitest -t {name}' }).success).toBe(true);
     expect(catalogToolSchema.safeParse({ ...tool, format: 'tap' }).success).toBe(false);
+  });
+  it('retains explicitly allowed exit codes for report-producing tools', () => {
+    const tool = { id: 'scan', command: 'scan --sarif {report}', format: 'sarif' as const, reportExitCodes: [2] };
+    expect(catalogToolSchema.parse(tool).reportExitCodes).toEqual([2]);
   });
 });
 

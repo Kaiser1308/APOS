@@ -132,6 +132,8 @@ export class LayerGate {
     const { exec, report } = this.deps.runner.run(head, tool, tool.command, root);
     const problem = notRunnable(exec);
     if (problem) return unverifiable(checkId, `${label}: ${problem}: ${tool.command}`);
+    const exitProblem = reportExitProblem(exec.exitCode, tool.reportExitCodes);
+    if (exitProblem) return result(checkId, { status: 'fail', reason: `${label}: ${exitProblem}` });
     if (report?.kind !== 'findings')
       return unverifiable(
         checkId,
@@ -168,6 +170,8 @@ export class LayerGate {
         const { exec, report } = this.deps.runner.run(head, measured, tool.command, root);
         const problem = notRunnable(exec);
         if (problem) return unverifiable(id, `${label}: ${problem}: ${tool.command}`);
+        const exitProblem = reportExitProblem(exec.exitCode, tool.reportExitCodes);
+        if (exitProblem) return result(id, { status: 'fail', reason: `${label}: ${exitProblem}` });
         if (report?.kind !== 'metric')
           return unverifiable(
             id,
@@ -229,4 +233,10 @@ export class LayerGate {
     });
     return result(checkId, verdict, { newFailures: verdict.newFailures });
   }
+}
+
+function reportExitProblem(exitCode: number | null, accepted: number[] | undefined): string | undefined {
+  const allowed = accepted ?? [0];
+  if (exitCode !== null && allowed.includes(exitCode)) return undefined;
+  return `command exited ${exitCode ?? 'without an exit code'}; accepted report exit codes: ${allowed.join(', ')}`;
 }

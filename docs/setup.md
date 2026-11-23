@@ -63,6 +63,8 @@ tests: { paths: ["tests/**", "**/test_*.py"],      # globs relative to the part'
 
 A tool is a [catalog tool](catalog.md#a-tool) plus `when` (`always`, or `flag:<name>` for a Goal flag), `runs`, `failOn` and `threshold` (below). A trigger's `run` entries are `<part>.<layer>` or `system.<layer>` and must name a layer the setup defines. "system" is not a part name.
 
+For `sarif` and `metric` tools, `reportExitCodes` optionally lists accepted process exit codes (default `[0]`). APOS still judges the report's findings or metric threshold; a nonzero code outside this list fails the check even when the report looks clean.
+
 ## Layers by stage
 
 What the gate runs is decided by stage: `submit` (`package submit`), `integrate` (`integration gate`, Multi-WP) and `close` (`outcome close`). See [Layers by stage](../README.md#layers-by-stage) for the whole picture; this is the setup side.

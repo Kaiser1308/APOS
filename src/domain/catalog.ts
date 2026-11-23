@@ -18,6 +18,8 @@ export const catalogToolSchema = z.object({
   command: z.string().trim().min(1),
   format: z.enum(TOOL_FORMATS),
   report: z.string().trim().min(1).optional(),
+  /** Exit codes accepted when a report-producing tool has a meaningful report despite a nonzero exit. */
+  reportExitCodes: z.array(z.number().int()).min(1).optional(),
   metric: z.string().trim().min(1).optional(),
   runOne: z
     .string()

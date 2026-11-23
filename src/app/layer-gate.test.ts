@@ -26,6 +26,15 @@ const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
 fs.writeFileSync(counter, String(n + 1));
 fs.writeFileSync(out, JSON.stringify({ p95_ms: values[n % values.length], throughput: 2000 }));
 `;
+const REPORT_THEN_EXIT = `
+const fs = require('fs');
+const [out, format, exitCode] = process.argv.slice(2);
+const report = format === 'sarif'
+  ? { runs: [{ tool: { driver: { name: 'scan' } }, results: [] }] }
+  : { p95_ms: 150 };
+fs.writeFileSync(out, JSON.stringify(report));
+process.exitCode = Number(exitCode ?? 2);
+`;
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -128,6 +137,33 @@ describe('layers at the submit stage', () => {
     expect(result.reasons.join('\n')).toContain('1 finding(s) at error or above');
   }, 240_000);
 
+  it('an unsuccessful SARIF command fails even when its report has no findings', async () => {
+    const p = await project({
+      layers: { L0: [{ id: 'scan', command: 'node report-then-exit.js {report} sarif', format: 'sarif' }] },
+      files: { 'report-then-exit.js': REPORT_THEN_EXIT },
+    });
+    const result = await p.submit(p.commit(work));
+    expect(result.result).toBe('red');
+    expect(checkOf(p, 'app.L0.scan')).toMatchObject({
+      status: 'fail',
+      reason: expect.stringContaining('command exited 2'),
+    });
+  }, 120_000);
+
+  it('judges a SARIF report when its nonzero exit code is explicitly accepted', async () => {
+    const p = await project({
+      layers: {
+        L0: [
+          { id: 'scan', command: 'node report-then-exit.js {report} sarif 2', format: 'sarif', reportExitCodes: [2] },
+        ],
+      },
+      files: { 'report-then-exit.js': REPORT_THEN_EXIT },
+    });
+    const result = await p.submit(p.commit(work));
+    expect(result.result).toBe('green');
+    expect(checkOf(p, 'app.L0.scan').status).toBe('pass');
+  }, 120_000);
+
   it('with two tools in one layer a locked test that vanishes from its own tool is red, whatever the other tool reports', async () => {
     const second = { id: 'extra', command: 'node runner.js {report} tests/extra', format: 'junit' };
     const first = setupDocument.parts.app.layers.L2[0]!;
@@ -211,6 +247,50 @@ describe('layers at the submit stage', () => {
     const mixed = await p.submit(p.commit({ ...work, 'src/bench.txt': '150,250,160' }));
     expect(mixed.result).toBe('unverifiable');
     expect(mixed.reasons.join('\n')).toContain('runs disagree around the threshold (150, 250, 160)');
+  }, 120_000);
+
+  it('an unsuccessful metric command fails even when its measurement is within threshold', async () => {
+    const p = await project({
+      layers: {
+        L0: [
+          {
+            id: 'bench',
+            command: 'node report-then-exit.js {report} metric',
+            format: 'metric',
+            metric: 'p95_ms',
+            threshold: { op: '<', value: 200 },
+          },
+        ],
+      },
+      files: { 'report-then-exit.js': REPORT_THEN_EXIT },
+    });
+    const result = await p.submit(p.commit(work));
+    expect(result.result).toBe('red');
+    expect(checkOf(p, 'app.L0.bench')).toMatchObject({
+      status: 'fail',
+      reason: expect.stringContaining('command exited 2'),
+    });
+  }, 120_000);
+
+  it('judges a metric report when its nonzero exit code is explicitly accepted', async () => {
+    const p = await project({
+      layers: {
+        L0: [
+          {
+            id: 'bench',
+            command: 'node report-then-exit.js {report} metric 2',
+            format: 'metric',
+            metric: 'p95_ms',
+            reportExitCodes: [2],
+            threshold: { op: '<', value: 200 },
+          },
+        ],
+      },
+      files: { 'report-then-exit.js': REPORT_THEN_EXIT },
+    });
+    const result = await p.submit(p.commit(work));
+    expect(result.result).toBe('green');
+    expect(checkOf(p, 'app.L0.bench').status).toBe('pass');
   }, 120_000);
 
   it('runs a test layer as many times as the setup says, and flaky results are unverifiable', async () => {

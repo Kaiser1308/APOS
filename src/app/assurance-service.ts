@@ -75,6 +75,7 @@ export class AssuranceService {
     // The scope the Human approved with a legacy Goal binds the integration commit and the close stage like a package.
     if (input.stage !== 'submit') ran.checks = [...ran.checks, ...this.legacyChecks(state, input)];
     if (input.stage !== 'integrate') return ran;
+    ran.checks = [...ran.checks, ...this.integrationChecks(state, input)];
     // A review of the integration commit locks its tests into every later integration commit, like a package's.
     const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
     const setup = this.deps.loadSetup(state);
@@ -109,7 +110,8 @@ export class AssuranceService {
     if (state.spec.kind === 'characterize' && input.base)
       checks.push(characterizeScopeCheck({ repo: this.deps.repo, setup, base: input.base, head: input.head }));
     // What a characterize Goal locked stays as it was locked at these stages too: the integration commit cannot rewrite a captured test.
-    if (state.spec.kind === 'characterize' && lock) {
+    // (At the integrate stage `integrationChecks` runs the same locked-tests check for every Goal.)
+    if (state.spec.kind === 'characterize' && lock && input.stage !== 'integrate') {
       const wanted = new Map<string, { part: string; layer: LayerId }>();
       for (const entry of lock.map)
         wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
@@ -129,6 +131,80 @@ export class AssuranceService {
         }),
       );
     }
+    return checks;
+  }
+
+  /**
+   * What a package gate judges, asked of the integration commit too: the locked tests are untouched and pass (the Goal
+   * answers for all of them), test infrastructure is as locked, no test that ran at the base is lost, and every changed
+   * file is inside the paths of the green packages or the plan's own `paths` (the integration files it declares).
+   */
+  private integrationChecks(state: GoalState, input: LayerGateInput): CheckResult[] {
+    const setup = this.deps.loadSetup(state);
+    if (!setup || !input.base) return [];
+    const { repo } = this.deps;
+    const lock = state.testLock;
+    const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
+    const wanted = new Map<string, { part: string; layer: LayerId }>();
+    for (const [part, where] of Object.entries(setup.parts))
+      if (where.layers.L1?.length) wanted.set(`${part}.L1`, { part, layer: 'L1' });
+    for (const entry of lock?.map ?? [])
+      wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
+    const delivery = this.runTests(setup, wanted, input.head);
+    const atBase = this.runTests(setup, wanted, input.base);
+    const checks: CheckResult[] = [];
+    if (lock)
+      checks.push(
+        lockedTestsCheck({
+          lock,
+          deliveryFiles: Object.fromEntries(
+            Object.keys(lock.files).map(path => {
+              const content = fileAt(repo, input.head, path);
+              return [path, content ? sha256Of(content) : undefined];
+            }),
+          ),
+          delivery: delivery.set,
+          runProblems: delivery.problems,
+          criteria: lock.map.map(entry => entry.acceptanceId),
+        }),
+      );
+    const problems = [...delivery.problems, ...atBase.problems];
+    checks.push(
+      problems.length
+        ? unverifiable(INVENTORY_CHECK, `the layers did not run: ${problems.join('; ')}`)
+        : inventoryCheck({
+            base: atBase.set,
+            delivery: delivery.set,
+            addedLines: addedLines(repo, input.base, input.head),
+            forbid: Object.values(setup.parts).flatMap(part => part.forbid),
+          }),
+    );
+    if (lock?.infra) {
+      const globs = Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.tests?.infra ?? []));
+      const now: Record<string, string> = {};
+      for (const file of filesAt(repo, input.head))
+        if (matchesAny(file, globs)) {
+          const content = fileAt(repo, input.head, file);
+          if (content) now[file] = sha256Of(content);
+        }
+      checks.push(infraCheck({ lockInfra: lock.infra, delivery: now }));
+    }
+    const packages = Object.values(state.packages ?? {});
+    const needsHuman = Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman));
+    const judged = new Set(this.judgedByAPackage(state, input));
+    checks.push(
+      scopeCheck({
+        // A sensitive file a package gate judged (same bytes) was decided there; any other one falls to the paths.
+        changed: input.changed.filter(file => !(judged.has(file) && matchesAny(file, needsHuman))),
+        paths: [
+          ...packages.flatMap(item => [...(item.spec.paths ?? []), ...(item.spec.stubPaths ?? [])]),
+          ...(state.proposal?.paths ?? []),
+          ...(state.proposal?.stubPaths ?? []),
+        ],
+        needsHuman: [],
+        lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
+      }),
+    );
     return checks;
   }
 

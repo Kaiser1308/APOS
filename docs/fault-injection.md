@@ -171,6 +171,7 @@ APOS v2 started, resumed, woke and watched agents through Orca (`controller watc
 | A SARIF finding below `failOn` (focus 4) | not red; the count is on the table | `layer-gate.test.ts` › a SARIF finding below failOn is not red, but its count is kept; `assurance-report.test.ts` › shows what a SARIF layer found below the blocking level |
 | A SARIF finding at `failOn` or above | red, names the rule and file | `layer-gate.test.ts` › a SARIF finding at the blocking level is red |
 | The integration gate of a Multi-WP Goal runs no layer (focus 5) | it runs the integrate stage on the integration commit; a broken L3 test is red and named | `layers-multi.test.ts` (real pytest and vitest) |
+| The integration commit of a Multi-WP Goal edits or deletes a locked test, changes test infrastructure, drops a test, or touches a file no package or plan path covers | red (`APOS-LOCKED`, `APOS-INFRA` needs a decision, `APOS-INVENTORY`, `APOS-SCOPE` naming the file); a refactor's captured tests must pass there too | `integration-gate-checks.test.ts` |
 | A package is judged on the locked tests of another package | each package answers only for its own criteria; the Goal for all at integrate and close | `layers-multi.test.ts` |
 | A setup threshold looser than the Goal's | the Goal's holds; both must hold | `layer-gate.test.ts` › a setup threshold cannot loosen the Goal |
 | A benchmark or scan criterion names a tool the pinned setup lacks or has with another format | `goal approve` refuses, naming criterion and tool | `goal-approve-proof.test.ts` |

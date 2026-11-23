@@ -56,6 +56,21 @@ describe('demo-goal.mjs', () => {
   );
 
   it.skipIf(!(hasPytest && hasPython))(
+    'py-legacy: a repo with no tests approved as low assurance, behaviour captured, a refactor held to it',
+    () => {
+      const done = spawnSync(process.execPath, [script, 'py-legacy'], { encoding: 'utf8' });
+      expect(done.stderr).toBe('');
+      expect(done.stdout).toContain('every step ended as expected');
+      expect(done.stdout).toContain('--baseline-missing');
+      expect(done.stdout).toContain('chụp hành vi phải xanh trên code như hiện tại');
+      expect(done.stdout).toContain('APOS-CHARACTERIZED fail');
+      expect(done.stdout).toContain('giữ nguyên hành vi: 4 test chụp từ GOAL-001');
+      expect(done.status).toBe(0);
+    },
+    600_000,
+  );
+
+  it.skipIf(!(hasPytest && hasPython))(
     'py-parking: the same story with pytest',
     () => {
       const done = spawnSync(process.execPath, [script, 'py-parking'], { encoding: 'utf8' });

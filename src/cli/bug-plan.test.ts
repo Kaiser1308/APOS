@@ -61,9 +61,9 @@ describe('apos lead propose --bugfix', () => {
     writeFileSync(join(p.dir, 'brief.md'), sourceText);
     await p.invoke('goal', 'create', '--file', join(p.dir, 'goal.json'), '--source', join(p.dir, 'brief.md'));
     await expect(p.invoke('lead', 'propose', '--bugfix', '--goal', 'GOAL-001')).rejects.toThrow(/not a bugfix Goal/);
-    await expect(p.invoke('lead', 'propose')).rejects.toThrow(/either --file/);
+    await expect(p.invoke('lead', 'propose')).rejects.toThrow(/Give one of --file/);
     await expect(p.invoke('lead', 'propose', '--file', 'x.json', '--bugfix', '--goal', 'GOAL-001')).rejects.toThrow(
-      /either --file/,
+      /Give one of --file/,
     );
   });
 });

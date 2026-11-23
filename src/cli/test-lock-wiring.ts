@@ -31,6 +31,7 @@ export function assuranceService(ctx: CliContext, journal: ProjectJournal, goalI
     runner: runnerFor(ctx, journal, goalId, 'gate-runs'),
     inspector: ctx.options.inspector ?? new GitCommitInspector(),
     loadSetup: state => pinnedSetupOf(ctx, journal, state.setupVersion),
+    goals: () => journal.listGoals(),
   });
 }
 

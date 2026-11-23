@@ -32,6 +32,7 @@ export class GoalRegistryService {
     setupVersion?: number,
     flags: string[] = [],
     via?: string,
+    baselineMissing: string[] = [],
   ): void {
     this.assertAcyclic();
     const state = this.store.getGoal(goalId);
@@ -44,6 +45,7 @@ export class GoalRegistryService {
         ...(setupVersion === undefined ? {} : { setupVersion }),
         ...(flags.length ? { flags } : {}),
         ...(via ? { via } : {}),
+        ...(baselineMissing.length ? { baselineMissing } : {}),
       }),
     );
   }

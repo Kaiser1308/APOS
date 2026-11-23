@@ -5,6 +5,8 @@ import type { GoalState } from '../domain/transitions.js';
 export function lockSummary(state: GoalState): string[] {
   const lock = state.testLock;
   if (!lock) {
+    if (state.spec.kind === 'refactor')
+      return ['không có khoá test riêng: các test đã chụp của Goal characterize là bằng chứng (dòng "Giữ hành vi")'];
     if (state.status === 'testing') return ['chưa có khoá test: đang chờ tester nộp (apos tests submit)'];
     return [
       state.setupVersion === undefined

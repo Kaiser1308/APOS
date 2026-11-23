@@ -28,6 +28,8 @@ export type CheckResult = {
   findings?: { blocking: number; lower: number };
   /** A metric layer: the measured value (the median of the runs). */
   metric?: { name: string; value: number };
+  /** A refactor: how many captured tests it kept green, and which characterize Goals they come from. */
+  preserved?: { tests: number; from: string[] };
 };
 /** What a gate decided to run at its stage: kept with the report so the assurance table can be rebuilt from the log. */
 export type LayerPlanRecord = {

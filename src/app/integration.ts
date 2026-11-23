@@ -21,9 +21,13 @@ export class GitCommitInspector implements CommitInspector {
     if (!/^[0-9a-fA-F]{40,64}$/.test(ref)) throw new Error('Full commit hash required');
     if (baseCommit) {
       if (!/^[0-9a-fA-F]{40,64}$/.test(baseCommit)) throw new Error('Full package base commit required');
-      return execFileSync('git', ['-C', assertGitRoot(repoPath), 'diff', '--name-only', baseCommit, ref], {
-        encoding: 'utf8',
-      })
+      return execFileSync(
+        'git',
+        ['-C', assertGitRoot(repoPath), 'diff', '--name-only', '--no-renames', baseCommit, ref],
+        {
+          encoding: 'utf8',
+        },
+      )
         .split(/\r?\n/)
         .filter(Boolean);
     }

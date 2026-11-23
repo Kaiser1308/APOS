@@ -1,0 +1,27 @@
+{
+  "id": "GOAL-002",
+  "version": 1,
+  "kind": "refactor",
+  "paths": [
+    "*.py"
+  ],
+  "outcome": "pricing.py is split into small steps and behaves exactly as before",
+  "requirements": [
+    {
+      "id": "R-1",
+      "sourceSpan": "paragraph 1",
+      "text": "quote is split into small named steps",
+      "disposition": "acceptance"
+    },
+    {
+      "id": "R-2",
+      "sourceSpan": "paragraph 2",
+      "text": "Behaviour does not change",
+      "disposition": "acceptance"
+    }
+  ],
+  "scope": [
+    "*.py"
+  ],
+  "priority": 1
+}

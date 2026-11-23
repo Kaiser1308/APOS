@@ -126,6 +126,8 @@ export function judgeSuite(input: {
   patterns: Record<string, Patterns>;
   /** A bugfix test is red because the bug is there: one that is green does not reproduce it. */
   bugfix?: boolean;
+  /** A characterize test captures what the code does: it must be green on it as it is. */
+  characterize?: boolean;
 }): string[] {
   const problems: string[] = [];
   const loadBroken = new Set<string>();
@@ -156,7 +158,12 @@ export function judgeSuite(input: {
       if (matchesAnyPattern(test.message, input.patterns[entry.part]?.loadError ?? [])) continue;
       if (test.status === 'skip') problems.push(`${label}: skipped`);
       else if (proof === 'stays-green') {
-        if (test.status !== 'pass') problems.push(`${label}: a stays-green test must pass, it is ${test.status}`);
+        if (test.status !== 'pass')
+          problems.push(
+            input.characterize
+              ? `${label}: chụp hành vi phải xanh trên code như hiện tại: the test is ${test.status}. Describe what the code does today, odd behaviour included; a wrong-looking result is a note for a later \`apos bug\`, not a failing test`
+              : `${label}: a stays-green test must pass, it is ${test.status}`,
+          );
       } else if (test.status === 'pass')
         problems.push(
           input.bugfix

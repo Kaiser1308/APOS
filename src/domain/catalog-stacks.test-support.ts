@@ -13,7 +13,7 @@ export const STACKS: CatalogEntry[] = [
   {
     stack: 'typescript',
     notes: [
-      'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc, Stryker (the mutation score is computed from reports/mutation/mutation.json; needs @stryker-mutator/core and the vitest runner in the project).',
+      'verified: vitest 4.1.12 (--reporter=default --reporter=junit --outputFile.junit, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc, Stryker (the mutation score is computed from reports/mutation/mutation.json; needs @stryker-mutator/core and the vitest runner in the project).',
     ],
     detect: { files: ['package.json'], contains: { 'package.json': '"vitest"' } },
     layers: {
@@ -31,14 +31,14 @@ export const STACKS: CatalogEntry[] = [
         {
           id: 'vitest',
           command:
-            'npx vitest run --reporter=junit --outputFile={report} --exclude "**/*.{acceptance,integration}.test.ts"',
+            'npx vitest run --reporter=default --reporter=junit --outputFile.junit={report} --exclude "**/*.{acceptance,integration}.test.ts"',
           format: 'junit',
         },
       ],
       L2: [
         {
           id: 'vitest-acceptance',
-          command: 'npx vitest run acceptance.test --reporter=junit --outputFile={report}',
+          command: 'npx vitest run acceptance.test --reporter=default --reporter=junit --outputFile.junit={report}',
           format: 'junit',
           runOne: 'npx vitest run "{classname}" --reporter=junit --outputFile={report} -t "^{name|spaced|regex}$"',
         },
@@ -46,7 +46,7 @@ export const STACKS: CatalogEntry[] = [
       L3: [
         {
           id: 'vitest-integration',
-          command: 'npx vitest run integration.test --reporter=junit --outputFile={report}',
+          command: 'npx vitest run integration.test --reporter=default --reporter=junit --outputFile.junit={report}',
           format: 'junit',
           runOne: 'npx vitest run "{classname}" --reporter=junit --outputFile={report} -t "^{name|spaced|regex}$"',
         },
@@ -69,7 +69,12 @@ export const STACKS: CatalogEntry[] = [
       'Failed to resolve import',
       'SyntaxError',
       'Transform failed',
+      'Unhandled Error',
     ],
+    // vitest exits 1 for a lot of reasons (a globalSetup that throws leaves the same empty junit report), so only its own words
+    // count. The commands above add the default reporter next to the junit one because the junit reporter alone prints nothing.
+    noTestsExitCodes: [],
+    noTestsPatterns: ['No test files found'],
     testPaths: ['**/*.test.ts', '**/*.spec.ts', 'tests/**'],
     testInfra: [
       'vitest.config.*',
@@ -162,6 +167,9 @@ export const STACKS: CatalogEntry[] = [
       'ModuleNotFoundError',
       'SyntaxError',
     ],
+    // pytest exits 5 when it collects nothing; exit 4 (a path that does not exist) is a usage error and stays a failure, so no output pattern.
+    noTestsExitCodes: [5],
+    noTestsPatterns: [],
     testPaths: ['tests/**', '**/test_*.py', '**/*_test.py'],
     testInfra: ['**/conftest.py', 'pytest.ini', 'tox.ini', 'setup.cfg', 'pyproject.toml', '**/__init__.py'],
     assertPatterns: [
@@ -242,6 +250,8 @@ export const STACKS: CatalogEntry[] = [
       'NoClassDefFoundError',
       'ExceptionInInitializerError',
     ],
+    noTestsExitCodes: [],
+    noTestsPatterns: [],
     testPaths: ['src/test/**'],
     testInfra: ['src/test/resources/**', 'build.gradle*', 'settings.gradle*'],
     assertPatterns: [
@@ -301,6 +311,8 @@ export const STACKS: CatalogEntry[] = [
       'NoClassDefFoundError',
       'ExceptionInInitializerError',
     ],
+    noTestsExitCodes: [],
+    noTestsPatterns: [],
     testPaths: ['src/test/**'],
     testInfra: ['src/test/resources/**', 'pom.xml', '**/pom.xml'],
     assertPatterns: [

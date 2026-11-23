@@ -9,6 +9,8 @@ const probeResult = z.object({
   layer: z.string().min(1),
   tool: z.string().min(1),
   ok: z.boolean(),
+  /** `no-tests`: the tool ran and said there is no test (a repo with no baseline). It is ok, but only a Human may accept it. */
+  outcome: z.enum(['no-tests']).optional(),
   reason: z.string(),
 });
 export type ProbeResult = z.infer<typeof probeResult>;
@@ -19,8 +21,14 @@ const approvedData = z.object({
   sha256,
   commit,
   confirmation: z.object({ by: z.enum(['human', 'on-behalf']), onBehalf: z.string().min(1).optional() }),
+  /** `baseline-missing`: approved although the repo has no tests in `baselineMissing` (`<part>.<layer>`): every Goal pinned to it is low assurance. */
+  assurance: z.literal('baseline-missing').optional(),
+  baselineMissing: z.array(z.string().min(1)).min(1).optional(),
 });
 export type SetupProbed = z.infer<typeof probedData>;
+/** The layers a probe found without tests, as `<part>.<layer>`. */
+export const layersWithoutTests = (probe: Pick<SetupProbed, 'results'>): string[] =>
+  probe.results.filter(item => item.outcome === 'no-tests').map(item => `${item.part}.${item.layer}`);
 export type SetupApproved = z.infer<typeof approvedData>;
 
 export const PROJECT_EVENT_TYPES = ['setup-probed', 'setup-approved'] as const;
@@ -46,6 +54,15 @@ export function applyProjectEvent(history: SetupHistory, event: ProjectEvent): S
       if (!probe?.ok)
         throw new InvariantError(
           `setup ${data.sha256.slice(0, 12)} was approved without a passing probe at ${data.commit.slice(0, 12)}`,
+        );
+      const missing = layersWithoutTests(probe);
+      if (missing.length && data.assurance !== 'baseline-missing')
+        throw new InvariantError(
+          `setup ${data.sha256.slice(0, 12)} was probed with no tests in ${missing.join(', ')} but approved without the baseline-missing label`,
+        );
+      if (data.assurance === 'baseline-missing' && !missing.length)
+        throw new InvariantError(
+          `setup ${data.sha256.slice(0, 12)} is labelled baseline-missing but its probe found tests`,
         );
       const expected = history.approvals.length + 1;
       if (data.version !== expected)

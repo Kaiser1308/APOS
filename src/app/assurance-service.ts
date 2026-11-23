@@ -22,6 +22,8 @@ import { fileAt, filesAt, sha256Of } from './git-files.js';
 import type { ToolRunner } from './layer-runner.js';
 import type { LayerId } from '../domain/layers.js';
 import { LayerGate, type LayerGateInput } from './layer-gate.js';
+import { refactorScopeCheck } from '../domain/characterized.js';
+import { characterizeScopeCheck, characterizedResult, coverageOfRefactor } from './characterized-gate.js';
 
 export type AssuranceDeps = {
   repo: string;
@@ -29,6 +31,8 @@ export type AssuranceDeps = {
   inspector: CommitInspector;
   /** The setup the Goal is pinned to, or undefined when it has none (then nothing here applies). */
   loadSetup: (state: GoalState) => ProjectSetup | undefined;
+  /** Every Goal of the project, for a refactor to find the characterize Goals it leans on. */
+  goals?: () => GoalState[];
 };
 
 /** Lines a diff adds, outside `.apos/`, without the `+` marker. */
@@ -67,6 +71,9 @@ export class AssuranceService {
   /** The layers the stage plans (floor, Lead's, triggers, criteria), run and judged. Empty for a Goal without a setup. */
   layerChecks(state: GoalState, input: LayerGateInput): ReturnType<LayerGate['run']> {
     const ran = this.layerGate.run(state, input);
+    // A refactor holds the captured tests at every later stage too: the close stage reads them on the verified commit.
+    // The scope the Human approved with a legacy Goal binds the integration commit and the close stage like a package.
+    if (input.stage !== 'submit') ran.checks = [...ran.checks, ...this.legacyChecks(state, input)];
     if (input.stage !== 'integrate') return ran;
     // A review of the integration commit locks its tests into every later integration commit, like a package's.
     const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
@@ -77,6 +84,97 @@ export class AssuranceService {
       for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
     const delivery = this.runTests(setup, wanted, input.head);
     return { ...ran, checks: [...ran.checks, this.reviewCheck(state, reviews, input.head, delivery)] };
+  }
+
+  /** The checks of a characterize or refactor Goal at a stage that sees the whole Goal (the integration commit, the close). */
+  private legacyChecks(state: GoalState, input: LayerGateInput): CheckResult[] {
+    const setup = this.deps.loadSetup(state);
+    if (!setup) return [];
+    const lock = state.testLock;
+    const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
+    const checks: CheckResult[] = [];
+    if (state.spec.kind === 'refactor') {
+      const kept = this.characterized(state, input.head, input.base);
+      if (kept) checks.push(kept);
+      checks.push(
+        refactorScopeCheck({
+          changed: input.changed,
+          paths: state.spec.paths ?? [],
+          needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
+          lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
+          judged: this.judgedByAPackage(state, input),
+        }),
+      );
+    }
+    if (state.spec.kind === 'characterize' && input.base)
+      checks.push(characterizeScopeCheck({ repo: this.deps.repo, setup, base: input.base, head: input.head }));
+    // What a characterize Goal locked stays as it was locked at these stages too: the integration commit cannot rewrite a captured test.
+    if (state.spec.kind === 'characterize' && lock) {
+      const wanted = new Map<string, { part: string; layer: LayerId }>();
+      for (const entry of lock.map)
+        wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
+      const delivery = this.runTests(setup, wanted, input.head);
+      checks.push(
+        lockedTestsCheck({
+          lock,
+          deliveryFiles: Object.fromEntries(
+            Object.keys(lock.files).map(path => {
+              const content = fileAt(this.deps.repo, input.head, path);
+              return [path, content ? sha256Of(content) : undefined];
+            }),
+          ),
+          delivery: delivery.set,
+          runProblems: delivery.problems,
+          criteria: lock.map.map(entry => entry.acceptanceId),
+        }),
+      );
+    }
+    return checks;
+  }
+
+  /**
+   * The changed files whose content at `head` is exactly what a package gate judged (its delivery commit changed them and
+   * holds the same bytes): a sensitive file the integration changed again after that is not judged.
+   */
+  private judgedByAPackage(state: GoalState, input: LayerGateInput): string[] {
+    const { repo } = this.deps;
+    const gates = Object.values(state.packages ?? {}).flatMap(item => (item.gate ? [item.gate] : []));
+    return input.changed.filter(file => {
+      const now = fileAt(repo, input.head, file);
+      return gates.some(gate => {
+        if (!gate.changedFiles?.includes(file)) return false;
+        const then = fileAt(repo, gate.deliveryCommit, file);
+        return now === undefined ? then === undefined : then?.equals(now) === true;
+      });
+    });
+  }
+
+  /** The layers the captured tests of a refactor live in, added to `wanted`: the base and the delivery both run them. */
+  private capturedLayers(state: GoalState, wanted: Map<string, { part: string; layer: LayerId }>) {
+    const coverage = this.deps.goals
+      ? coverageOfRefactor(this.deps.repo, this.deps.goals(), state, undefined, this.deps.inspector)
+      : undefined;
+    for (const { lock } of coverage?.sources ?? [])
+      for (const entry of lock.map)
+        wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
+    return coverage;
+  }
+
+  /** `APOS-CHARACTERIZED` for a refactor, run on its own (the close and integrate stages have no run to share). */
+  private characterized(state: GoalState, head: string, base: string | undefined): CheckResult | undefined {
+    if (state.spec.kind !== 'refactor') return undefined;
+    const setup = this.deps.loadSetup(state);
+    const wanted = new Map<string, { part: string; layer: LayerId }>();
+    const coverage = this.capturedLayers(state, wanted);
+    if (!setup || !coverage) return undefined;
+    const at = base ?? state.proposal?.baseCommit ?? head;
+    return characterizedResult({
+      repo: this.deps.repo,
+      coverage,
+      head,
+      delivery: this.runTests(setup, wanted, head),
+      base: this.runTests(setup, wanted, at),
+    });
   }
 
   /** Every test of the given layers, run once on `commit` in a clean worktree. */
@@ -160,10 +258,13 @@ export class AssuranceService {
     for (const review of reviews)
       for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
 
+    const coverage = state.spec.kind === 'refactor' ? this.capturedLayers(state, wanted) : undefined;
     const run = (commit: string) => this.runTests(setup, wanted, commit);
     const delivery = run(head);
     const atBase = run(base);
     const checks: CheckResult[] = [];
+    if (coverage) checks.push(characterizedResult({ repo, coverage, head, delivery, base: atBase }));
+    if (state.spec.kind === 'characterize') checks.push(characterizeScopeCheck({ repo, setup, base, head }));
 
     if (lock) {
       const deliveryFiles = Object.fromEntries(
@@ -207,6 +308,17 @@ export class AssuranceService {
         }
       checks.push(infraCheck({ lockInfra: lock.infra, delivery: now, inherited }));
     }
+    if (state.spec.kind === 'refactor')
+      checks.push(
+        refactorScopeCheck({
+          changed: changed.filter(file => !inherited.has(file)),
+          paths: state.spec.paths ?? [],
+          needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
+          lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
+          // This is the package gate: APOS-SCOPE below judges the sensitive files, with an approval route.
+          judged: changed,
+        }),
+      );
     const paths = item.spec.paths;
     if (paths?.length)
       checks.push(

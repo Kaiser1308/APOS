@@ -79,7 +79,9 @@ export function registerSetupFlow(ctx: CliContext): void {
         });
         recordProbe(journal, commit, report);
         for (const item of report.results)
-          write(`${item.ok ? 'ok  ' : 'FAIL'} ${item.part}.${item.layer} ${item.tool}: ${item.reason}`);
+          write(
+            `${item.outcome === 'no-tests' ? 'none' : item.ok ? 'ok  ' : 'FAIL'} ${item.part}.${item.layer} ${item.tool}: ${item.reason}`,
+          );
         write(
           `setup ${report.sha256.slice(0, 12)} at ${commit.slice(0, 12)}: probe ${report.ok ? 'passed' : 'failed'}`,
         );
@@ -91,15 +93,27 @@ export function registerSetupFlow(ctx: CliContext): void {
     .command('approve')
     .description('Human decision: approve the probed setup at a commit; Goals approved later pin it')
     .requiredOption('--commit <rev>', 'commit holding the probed setup')
+    .option(
+      '--baseline-missing',
+      'accept a repo with no tests in some layer (the probe says no-tests): every Goal on this setup is labelled low assurance',
+    )
     .option(ON_BEHALF_FLAGS, ON_BEHALF_HELP)
-    .action((flags: { commit: string; onBehalf?: string }) =>
+    .action((flags: { commit: string; baselineMissing?: boolean; onBehalf?: string }) =>
       withJournalAsync(async journal => {
-        const pending = prepareApproval(journal, repo(), flags.commit, codec);
+        const pending = prepareApproval(journal, repo(), flags.commit, codec, {
+          baselineMissing: flags.baselineMissing === true,
+        });
         const confirmation = await assertHuman('setup approve', pending.commit.slice(0, 12), flags.onBehalf);
         const approved = recordApproval(journal, pending, confirmation);
         write(
           `Approved setup v${approved.version} (${approved.sha256.slice(0, 12)}) at ${approved.commit.slice(0, 12)}`,
         );
+        if (approved.baselineMissing) {
+          write(`BẢO ĐẢM THẤP: repo chưa có test nền (${approved.baselineMissing.join(', ')})`);
+          write(
+            'The label judges nothing differently: a layer with no tests is still red at the gate and at close. Keep in the setup only the layers that have tests to run (docs/setup.md).',
+          );
+        }
       }),
     );
 
@@ -111,7 +125,7 @@ export function registerSetupFlow(ctx: CliContext): void {
         const latest = journal.setupHistory().latest;
         write(
           latest
-            ? `setup v${latest.version} sha256 ${latest.sha256} commit ${latest.commit}`
+            ? `setup v${latest.version} sha256 ${latest.sha256} commit ${latest.commit}${latest.baselineMissing ? `\nBẢO ĐẢM THẤP: repo chưa có test nền (${latest.baselineMissing.join(', ')})` : ''}`
             : 'No approved setup: guarantees that depend on a setup are off',
         );
       }),

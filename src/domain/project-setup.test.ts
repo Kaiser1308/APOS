@@ -65,6 +65,8 @@ describe('parseSetupObject', () => {
       assertPatterns: [],
       notImplementedPatterns: [],
       loadErrorPatterns: [],
+      noTestsExitCodes: [],
+      noTestsPatterns: [],
     });
     expect(parsed.setup.parts.old?.tests).toBeUndefined();
     expect(() => parseSetupObject({ schemaVersion: 2, parts: { app: { ...part, tests: { paths: [] } } } })).toThrow();

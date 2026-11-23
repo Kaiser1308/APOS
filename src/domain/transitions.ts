@@ -125,6 +125,8 @@ export type GoalState = {
   setupVersion?: number;
   /** Flags the Human added at `goal approve --flag` (`mutation`): they come on top of the ones in the Goal document. */
   flags?: string[];
+  /** The layers the setup this Goal is pinned to had no tests in (it was approved with `--baseline-missing`): the Goal is low assurance. */
+  baselineMissing?: string[];
   /** Set when `bug approve` gave gate A, the appetite and gate B in one go: who confirmed, for the assurance table. */
   bugApproval?: { by: string; onBehalf?: string };
   selected: boolean;
@@ -335,7 +337,14 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const blockers = goalApprovalBlockers(state.spec);
       requireThat(!blockers.length, `Goal not approvable: ${blockers.join('; ')}`);
       const data = event.data as
-        | { appetite?: unknown; setupVersion?: unknown; flags?: unknown; via?: unknown; confirmation?: unknown }
+        | {
+            appetite?: unknown;
+            setupVersion?: unknown;
+            flags?: unknown;
+            via?: unknown;
+            confirmation?: unknown;
+            baselineMissing?: unknown;
+          }
         | undefined;
       requireThat(data?.appetite, 'Goal approval must include the Human-approved appetite');
       const setupVersion = data?.setupVersion;
@@ -349,9 +358,16 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           (Array.isArray(flags) && flags.every(flag => typeof flag === 'string' && FLAG_PATTERN.test(flag))),
         'Goal approval flags must be words',
       );
+      const missing = data?.baselineMissing;
+      requireThat(
+        missing === undefined ||
+          (Array.isArray(missing) && missing.length > 0 && missing.every(item => typeof item === 'string' && item)),
+        'Goal approval baselineMissing must be a list of layer names',
+      );
       return {
         ...state,
         ...(Array.isArray(flags) && flags.length ? { flags: flags as string[] } : {}),
+        ...(Array.isArray(missing) ? { baselineMissing: missing as string[] } : {}),
         status: 'approved',
         ...(data?.via === BUG_APPROVE_VIA ? { bugApproval: confirmationOf(data.confirmation) } : {}),
         approvedGoalVersion: state.spec.version,

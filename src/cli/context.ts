@@ -23,7 +23,12 @@ export type CliContext = {
    * an interactive terminal, or `--on-behalf "<why>"`. Nothing is written to the log before this passes.
    */
   assertHuman(command: string, subject: string, onBehalf?: string): Promise<HumanConfirmation>;
-  goalWithSource(file: string, sourcePath: string, origin: string): ReturnType<typeof goalWithSource>;
+  goalWithSource(
+    file: string,
+    sourcePath: string,
+    origin: string,
+    extra?: GoalFlags,
+  ): ReturnType<typeof goalWithSource>;
   readJsonFile(file: string): unknown;
 };
 
@@ -32,9 +37,17 @@ function readJsonFile(file: string): unknown {
   return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
 }
 
+/** What `goal create --kind --covers --paths` adds to the Goal JSON (the flag wins over the file). */
+export type GoalFlags = { kind?: string; covers?: string[]; paths?: string[] };
+
 /** Reads the Goal JSON and the verbatim source; fills `source` when absent, otherwise checks it matches. */
-function goalWithSource(file: string, sourcePath: string, origin: string) {
-  const raw = readJsonFile(file) as Record<string, unknown>;
+function goalWithSource(file: string, sourcePath: string, origin: string, extra: GoalFlags = {}) {
+  const raw: Record<string, unknown> = {
+    ...(readJsonFile(file) as Record<string, unknown>),
+    ...(extra.kind ? { kind: extra.kind } : {}),
+    ...(extra.covers?.length ? { covers: extra.covers } : {}),
+    ...(extra.paths?.length ? { paths: extra.paths } : {}),
+  };
   const text = readFileSync(sourcePath, 'utf8');
   const digest = sourceDigest(text);
   const given = raw.source as { sha256?: string } | undefined;

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { UserError } from '../domain/errors.js';
 import { LAYER_IDS } from '../domain/layers.js';
-import { parseProjectSetup, type LayerSpec } from '../domain/project-setup.js';
+import { parseProjectSetup, type LayerSpec, type PartSetup } from '../domain/project-setup.js';
 import type { ProbeResult, ProjectEvent } from '../domain/setup-history.js';
 import { SETUP_FILE, type SetupCodec } from '../domain/setup-codec.js';
 import type { TestOutcome } from '../domain/results/index.js';
@@ -16,6 +16,7 @@ import { ShellExecutor, type CommandExecutor } from './shell-executor.js';
 import { ToolRunner, notRunnable } from './layer-runner.js';
 import { fillRunOne } from '../domain/run-one.js';
 import { loadFailure } from '../domain/results/load-errors.js';
+import { noTestsReason, type NoTestsSignals } from '../domain/results/no-tests.js';
 import type { CatalogEntry } from '../domain/catalog.js';
 
 export type ProbeDeps = {
@@ -78,13 +79,22 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
     root: string,
     patterns: string[],
     part: string,
-  ): { ok: boolean; reason: string } => {
+    noTests: NoTestsSignals,
+  ): Pick<ProbeResult, 'ok' | 'reason' | 'outcome'> => {
     const first = run(tool, tool.command, root, part);
     const problem = notRunnable(first.exec);
     if (problem) return { ok: false, reason: `${problem}: ${tool.command}` };
     const report = first.report;
     if (tool.format === 'exit')
       return { ok: true, reason: `runs (exit ${first.exec.exitCode}); only the exit code is read` };
+    // A repo with no tests is not a broken tool, but only when the tool says so in the words its stack declares.
+    const empty = noTestsReason({
+      exitCode: first.exec.exitCode,
+      output: first.exec.output,
+      ...(report ? { report } : {}),
+      signals: noTests,
+    });
+    if (empty) return { ok: true, outcome: 'no-tests', reason: empty };
     if (!report) return { ok: false, reason: 'no report was read' };
     if (report.kind === 'unreadable') return { ok: false, reason: `report unreadable: ${report.reason}` };
     if (tool.format === 'junit' && report.kind === 'tests' && !report.tests.length)
@@ -133,20 +143,54 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
     return { ok: true, reason: summary };
   };
 
-  type Scope = { part: string; root: string; layers: Partial<Record<string, LayerSpec[]>>; patterns: string[] };
+  type Scope = {
+    part: string;
+    root: string;
+    layers: Partial<Record<string, LayerSpec[]>>;
+    patterns: string[];
+    noTests: NoTestsSignals;
+  };
+  const compiles = (pattern: string) => {
+    try {
+      new RegExp(pattern, 'm');
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // The signals a stack declares: the setup's copy (pinned) and the catalog's. A pattern that does not compile is reported by the tests row.
+  const signalsOf = (setup: PartSetup): NoTestsSignals => {
+    const entry = deps.catalog?.find(item => item.stack === setup.stack);
+    return {
+      exitCodes: [...new Set([...(setup.tests?.noTestsExitCodes ?? []), ...(entry?.noTestsExitCodes ?? [])])],
+      patterns: [...new Set([...(setup.tests?.noTestsPatterns ?? []), ...(entry?.noTestsPatterns ?? [])])].filter(
+        compiles,
+      ),
+      broken: [...new Set([...(setup.tests?.loadErrorPatterns ?? []), ...(entry?.loadErrorPatterns ?? [])])].filter(
+        compiles,
+      ),
+    };
+  };
   const scopes: Scope[] = [
     ...Object.entries(parsed.setup.parts).map(([part, setup]) => ({
       part,
       root: setup.root,
       layers: setup.layers,
       patterns: deps.catalog?.find(entry => entry.stack === setup.stack)?.loadErrorPatterns ?? [],
+      noTests: signalsOf(setup),
     })),
-    { part: 'system', root: '.', layers: parsed.setup.system ?? {}, patterns: [] },
+    {
+      part: 'system',
+      root: '.',
+      layers: parsed.setup.system ?? {},
+      patterns: [],
+      noTests: { exitCodes: [], patterns: [] },
+    },
   ];
-  for (const { part, root, layers, patterns } of scopes)
+  for (const { part, root, layers, patterns, noTests } of scopes)
     for (const layer of LAYER_IDS)
       for (const tool of layers[layer] ?? []) {
-        const outcome = probeTool(tool, layer, root, patterns, part);
+        const outcome = probeTool(tool, layer, root, patterns, part, noTests);
         results.push({ part, layer, tool: tool.id, ...outcome });
       }
   for (const [part, setup] of Object.entries(parsed.setup.parts)) {
@@ -155,6 +199,7 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
       ...setup.tests.assertPatterns,
       ...setup.tests.notImplementedPatterns,
       ...setup.tests.loadErrorPatterns,
+      ...setup.tests.noTestsPatterns,
     ];
     const bad = patterns.filter(pattern => {
       try {

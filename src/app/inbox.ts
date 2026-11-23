@@ -43,6 +43,18 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
     // A notice about a closed or stopped Goal is history, and the supervisor's `awaiting-outcome` notice repeats the verified status item above.
     // An archived (legacy) Goal is read-only: its old notices are history, not work.
     if (['closed', 'stopped', 'legacy'].includes(effectiveStatus(state)) || state.status === 'legacy') continue;
+    // A Goal on a setup approved with no baseline is low assurance until it closes: the Human sees it where they look.
+    if (state.baselineMissing?.length)
+      items.push({
+        goalId,
+        kind: 'notice',
+        detail: JSON.stringify({
+          kind: 'low-assurance',
+          layers: state.baselineMissing,
+          note: `BẢO ĐẢM THẤP: repo chưa có test nền (${state.baselineMissing.join(', ')})`,
+        }),
+        at: events.at(-1)?.at,
+      });
     const warnings = [
       ...new Set(
         [state.gate, ...Object.values(state.packages ?? {}).map(item => item.gate)].flatMap(

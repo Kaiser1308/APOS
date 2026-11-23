@@ -4,6 +4,7 @@ import { GitCommitInspector } from '../../app/integration.js';
 import { goalNeedsTests, setupLocksTests, testPlanProblems } from '../../domain/test-plan.js';
 import { UserError } from '../../domain/errors.js';
 import { bugfixPlan } from '../bugfix-plan.js';
+import { characterizePlan, refactorPlanProblems } from '../legacy-plan.js';
 import { pinnedSetupOf } from '../test-lock-wiring.js';
 import { planLayerProblems } from '../lead-layers.js';
 import type { CliContext } from '../context.js';
@@ -17,8 +18,12 @@ export function registerLead(ctx: CliContext): void {
     .command('propose')
     .option('--file <json>', 'the execution proposal')
     .option('--bugfix', 'plan a bugfix Goal as one Solo package: the Tester reproduces, the Worker fixes (with --goal)')
-    .option('--goal <id>', 'with --bugfix: the Goal to plan')
-    .option('--base <sha>', 'with --bugfix: the commit the bug is reproduced on (default: HEAD)')
+    .option(
+      '--characterize',
+      'plan a characterize Goal as one Solo package: the Tester captures the behaviour in tests, no code changes (with --goal)',
+    )
+    .option('--goal <id>', 'with --bugfix or --characterize: the Goal to plan')
+    .option('--base <sha>', 'with --bugfix or --characterize: the commit the work starts from (default: HEAD)')
     .option(
       '--stub <path>',
       'with --bugfix: a module the reproduction imports (default: the Goal repro hint); repeatable',
@@ -26,34 +31,47 @@ export function registerLead(ctx: CliContext): void {
       [],
     )
     .option('--by <name>', 'who proposes, for the log', 'lead')
-    .action((flags: { file?: string; bugfix?: boolean; goal?: string; base?: string; stub: string[]; by: string }) =>
-      withJournal(journal => {
-        if (Boolean(flags.file) === Boolean(flags.bugfix))
-          throw new UserError('Give either --file <json> or --bugfix --goal <id>');
-        const bugfix = flags.bugfix ? bugfixPlan(ctx, journal, flags) : undefined;
-        const parsed = bugfix ?? parseExecutionProposal(readJsonFile(flags.file!));
-        const by = flags.by;
-        assertProposalRationale(parsed);
-        const current = journal.getGoal(parsed.goalId);
-        if (!current) throw new Error(`Goal does not exist: ${parsed.goalId}`);
-        // No Lead worktree to read the base from any more: the plan names it, and it must be a real commit.
-        const inspector = options.inspector ?? new GitCommitInspector();
-        if (!parsed.baseCommit || !inspector.exists(repo(), parsed.baseCommit))
-          throw new UserError('proposal.baseCommit must be the full sha of a commit that exists in this repo');
-        const planned = parsed;
-        const state = current;
-        const proposal =
-          planned.sourceSha256 || !state ? planned : { ...planned, sourceSha256: state.spec.source.sha256 };
-        if (!state || proposal.goalVersion !== state.spec.version)
-          throw new Error('Proposal targets stale Goal version');
-        const mapped = new Set(proposal.acceptanceMapping.map(item => item.acceptanceId));
-        if (state.spec.acceptance.some(item => !mapped.has(item.id)))
-          throw new Error('Every Goal acceptance criterion needs a verification mapping');
-        journal.append(
-          newEvent(proposal.goalId, state.proposal ? 'proposal-revised' : 'proposal-drafted', { ...proposal, by }),
-        );
-        write(`Proposed ${proposal.id}`);
-      }),
+    .action(
+      (flags: {
+        file?: string;
+        bugfix?: boolean;
+        characterize?: boolean;
+        goal?: string;
+        base?: string;
+        stub: string[];
+        by: string;
+      }) =>
+        withJournal(journal => {
+          if ([flags.file, flags.bugfix, flags.characterize].filter(Boolean).length !== 1)
+            throw new UserError('Give one of --file <json>, --bugfix --goal <id> or --characterize --goal <id>');
+          const sample = flags.bugfix
+            ? bugfixPlan(ctx, journal, flags)
+            : flags.characterize
+              ? characterizePlan(ctx, journal, flags)
+              : undefined;
+          const parsed = sample ?? parseExecutionProposal(readJsonFile(flags.file!));
+          const by = flags.by;
+          assertProposalRationale(parsed);
+          const current = journal.getGoal(parsed.goalId);
+          if (!current) throw new Error(`Goal does not exist: ${parsed.goalId}`);
+          // No Lead worktree to read the base from any more: the plan names it, and it must be a real commit.
+          const inspector = options.inspector ?? new GitCommitInspector();
+          if (!parsed.baseCommit || !inspector.exists(repo(), parsed.baseCommit))
+            throw new UserError('proposal.baseCommit must be the full sha of a commit that exists in this repo');
+          const planned = parsed;
+          const state = current;
+          const proposal =
+            planned.sourceSha256 || !state ? planned : { ...planned, sourceSha256: state.spec.source.sha256 };
+          if (!state || proposal.goalVersion !== state.spec.version)
+            throw new Error('Proposal targets stale Goal version');
+          const mapped = new Set(proposal.acceptanceMapping.map(item => item.acceptanceId));
+          if (state.spec.acceptance.some(item => !mapped.has(item.id)))
+            throw new Error('Every Goal acceptance criterion needs a verification mapping');
+          journal.append(
+            newEvent(proposal.goalId, state.proposal ? 'proposal-revised' : 'proposal-drafted', { ...proposal, by }),
+          );
+          write(`Proposed ${proposal.id}`);
+        }),
     );
 
   // No Human gate on HOW: the Lead commits its plan and APOS machine-checks it.
@@ -82,6 +100,9 @@ export function registerLead(ctx: CliContext): void {
           pinned: state.setupVersion !== undefined,
         });
         if (problems.length) throw new UserError(`The plan is not ready:\n- ${problems.join('\n- ')}`);
+        // A refactor's plan stays on the code the characterize Goals captured, and its base holds their tests.
+        const legacy = refactorPlanProblems(ctx, journal, state);
+        if (legacy.length) throw new UserError(`The plan is not ready:\n- ${legacy.join('\n- ')}`);
         // A Goal pinned to a setup that says where tests are gets a tester before any code; the decision is recorded here
         // because replaying older logs must not change what they did.
         const setup = pinnedSetupOf(ctx, journal, state.setupVersion);

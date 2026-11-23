@@ -75,6 +75,7 @@ export const STACKS: CatalogEntry[] = [
     // count. The commands above add the default reporter next to the junit one because the junit reporter alone prints nothing.
     noTestsExitCodes: [],
     noTestsPatterns: ['No test files found'],
+    manifests: ['package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
     testPaths: ['**/*.test.ts', '**/*.spec.ts', 'tests/**'],
     testInfra: [
       'vitest.config.*',
@@ -170,6 +171,7 @@ export const STACKS: CatalogEntry[] = [
     // pytest exits 5 when it collects nothing; exit 4 (a path that does not exist) is a usage error and stays a failure, so no output pattern.
     noTestsExitCodes: [5],
     noTestsPatterns: [],
+    manifests: ['pyproject.toml', 'poetry.lock', 'uv.lock', 'requirements*.txt', 'Pipfile*'],
     testPaths: ['tests/**', '**/test_*.py', '**/*_test.py'],
     testInfra: ['**/conftest.py', 'pytest.ini', 'tox.ini', 'setup.cfg', 'pyproject.toml', '**/__init__.py'],
     assertPatterns: [
@@ -252,6 +254,7 @@ export const STACKS: CatalogEntry[] = [
     ],
     noTestsExitCodes: [],
     noTestsPatterns: [],
+    manifests: ['build.gradle*', 'settings.gradle*', 'gradle.lockfile', 'gradle/libs.versions.toml'],
     testPaths: ['src/test/**'],
     testInfra: ['src/test/resources/**', 'build.gradle*', 'settings.gradle*'],
     assertPatterns: [
@@ -313,6 +316,7 @@ export const STACKS: CatalogEntry[] = [
     ],
     noTestsExitCodes: [],
     noTestsPatterns: [],
+    manifests: ['pom.xml', '**/pom.xml'],
     testPaths: ['src/test/**'],
     testInfra: ['src/test/resources/**', 'pom.xml', '**/pom.xml'],
     assertPatterns: [

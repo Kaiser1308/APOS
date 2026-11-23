@@ -26,6 +26,20 @@ export type CheckResult = {
   newFailures: string[];
   /** A SARIF layer: how many findings it blocked on and how many were lower, so the table can show them. */
   findings?: { blocking: number; lower: number };
+  /**
+   * A SARIF layer of a maintenance Goal, measured against the base by fingerprint: the findings the delivery added (at
+   * the blocking level, and below it) and which base findings are gone (`fixed`) or still there (`remaining`).
+   */
+  scan?: {
+    baseCommit: string;
+    baseTotal: number;
+    newBlocking: number;
+    newLower: number;
+    fixed: string[];
+    remaining: string[];
+  };
+  /** A test layer of a maintenance Goal: how many tests were already failing on the base (they are not new failures). */
+  baseFailing?: number;
   /** A metric layer: the measured value (the median of the runs). */
   metric?: { name: string; value: number };
   /** A refactor: how many captured tests it kept green, and which characterize Goals they come from. */

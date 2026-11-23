@@ -20,6 +20,7 @@ import { fileAt, filesAt, sha256Of } from './git-files.js';
 import type { ToolRunner } from './layer-runner.js';
 import type { LayerId } from '../domain/layers.js';
 import { LayerGate, type LayerGateInput } from './layer-gate.js';
+import { maintenanceScope } from '../domain/maintenance.js';
 import { refactorScopeCheck } from '../domain/characterized.js';
 import { addedLines, integrationChecks, judgedByAPackage, unverifiable } from './integration-assurance.js';
 import { characterizeScopeCheck, characterizedResult, coverageOfRefactor } from './characterized-gate.js';
@@ -44,7 +45,7 @@ export { addedLines };
 export class AssuranceService {
   private readonly layerGate: LayerGate;
   constructor(private readonly deps: AssuranceDeps) {
-    this.layerGate = new LayerGate({ runner: deps.runner, loadSetup: deps.loadSetup });
+    this.layerGate = new LayerGate({ runner: deps.runner, repo: deps.repo, loadSetup: deps.loadSetup });
   }
 
   /** The layers the stage plans (floor, Lead's, triggers, criteria), run and judged. Empty for a Goal without a setup. */
@@ -290,12 +291,15 @@ export class AssuranceService {
           judged: changed,
         }),
       );
-    const paths = item.spec.paths;
-    if (paths?.length)
+    // A maintenance Goal may change its manifests and the paths the Human approved, whatever the plan says: no stub paths
+    // (it has no Tester), and an empty scope is not "unrestricted" but "nothing may change".
+    const maintenance = state.spec.kind === 'maintenance';
+    const paths = maintenance ? maintenanceScope(setup, state.spec) : item.spec.paths;
+    if (maintenance || paths?.length)
       checks.push(
         scopeCheck({
           changed: changed.filter(file => !inherited.has(file)),
-          paths: [...paths, ...(item.spec.stubPaths ?? [])],
+          paths: [...(paths ?? []), ...(maintenance ? [] : (item.spec.stubPaths ?? []))],
           needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
           lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
         }),

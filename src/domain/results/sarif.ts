@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { findingFingerprint } from '../findings.js';
 import { unreadable, parseJson, type Finding, type ParsedReport } from './types.js';
 
 const level = z.enum(['error', 'warning', 'note', 'none']);
@@ -7,6 +8,8 @@ const result = z.object({
   ruleIndex: z.number().int().optional(),
   rule: z.object({ id: z.string().optional() }).optional(),
   level: level.optional(),
+  message: z.object({ text: z.string().optional() }).optional(),
+  partialFingerprints: z.record(z.string(), z.string()).optional(),
   locations: z
     .array(
       z.object({
@@ -47,16 +50,23 @@ export function readSarif(content: string): ParsedReport {
       const physical = item.locations?.[0]?.physicalLocation;
       const file = physical?.artifactLocation?.uri;
       const line = physical?.region?.startLine;
+      const ruleId =
+        item.ruleId ??
+        item.rule?.id ??
+        (item.ruleIndex === undefined ? undefined : rules[item.ruleIndex]?.id) ??
+        'unknown';
       findings.push({
-        ruleId:
-          item.ruleId ??
-          item.rule?.id ??
-          (item.ruleIndex === undefined ? undefined : rules[item.ruleIndex]?.id) ??
-          'unknown',
+        ruleId,
         // SARIF's default level is "warning"; "none" carries no severity, so it is the lowest we have.
         level: item.level === undefined ? 'warning' : item.level === 'none' ? 'note' : item.level,
         ...(file === undefined ? {} : { file }),
         ...(line === undefined ? {} : { line }),
+        fingerprint: findingFingerprint({
+          ruleId,
+          file,
+          message: item.message?.text,
+          partial: item.partialFingerprints,
+        }),
       });
     }
   }

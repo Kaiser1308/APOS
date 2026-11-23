@@ -1,7 +1,15 @@
+import { loadFailure } from '../domain/results/load-errors.js';
 import { MUTATION_FLAG } from '../domain/goal-flags.js';
 import { floorReductions } from '../domain/exceptions.js';
 import type { CheckResult, LayerPlanRecord } from '../domain/gate.js';
-import { judgeFindings, judgeMetric, judgeTests, type Verdict } from '../domain/layer-verdict.js';
+import {
+  baseDisagreement,
+  lostTests,
+  judgeFindings,
+  judgeMetric,
+  judgeTests,
+  type Verdict,
+} from '../domain/layer-verdict.js';
 import { planLayers, skippedLayers, type LayerRun, type PlanInput, type Stage } from '../domain/layer-plan.js';
 import { proofDemands, stricter, type FailOn, type ProofDemand } from '../domain/proof-tools.js';
 import type { LayerSpec, ProjectSetup } from '../domain/project-setup.js';
@@ -10,10 +18,14 @@ import type { TestOutcome } from '../domain/results/index.js';
 import { goalFlagsOf } from '../domain/goal-flags.js';
 import type { GoalState } from '../domain/transitions.js';
 import { sourceFilesOf } from './source-files.js';
-import { notRunnable, type ToolRunner } from './layer-runner.js';
+import { notRunnable, reportExitProblem, type ToolRunner } from './layer-runner.js';
+import { maintenanceScan, sameProject } from './maintenance-gate.js';
+import { scanTools, securityCheck } from '../domain/maintenance.js';
 
 export type LayerGateDeps = {
   runner: ToolRunner;
+  /** The repo, for a maintenance Goal to tell whether its recorded base scan still stands for the plan's base. */
+  repo?: string;
   /** The setup the Goal is pinned to, or undefined when it has none (then no layer runs). */
   loadSetup: (state: GoalState) => ProjectSetup | undefined;
 };
@@ -68,16 +80,26 @@ export class LayerGate {
     const plan: PlanInput = {
       setup,
       stage: input.stage,
+      kind: state.spec.kind,
       changed: input.changed,
       packageLayers: this.packageLayers(state, input.stage, input.scope),
       goalFlags: goalFlagsOf(state),
       reductions: floorReductions(state, input.scope, input.stage),
-      requiredTools: [...demands.keys()],
+      // A security Goal is proved by the scan whatever the floor of a stage says: the close stage runs it too.
+      requiredTools: [
+        ...demands.keys(),
+        ...(state.spec.kind === 'maintenance' && state.spec.security?.length
+          ? scanTools(setup, state.spec.part).map(item => item.key)
+          : []),
+      ],
     };
     const runs = planLayers(plan);
     const checks = runs
       .filter(run => !run.reduced)
       .flatMap(run => this.evaluate(state, setup, run, input, demands.get(`${run.part}.${run.layer}.${run.tool.id}`)));
+    // A security Goal names findings: the delivery must be shown to have lost them, by the scans just judged.
+    if (state.spec.kind === 'maintenance' && state.spec.security?.length)
+      checks.push(securityCheck(state.spec.security, checks));
     return {
       checks,
       layers: {
@@ -110,7 +132,7 @@ export class LayerGate {
       case 'exit':
         return [this.exit(checkId, label, tool, root, input.head)];
       case 'sarif':
-        return [this.sarif(checkId, label, tool, root, input.head, demand)];
+        return [this.sarif(state, checkId, label, tool, root, input, demand)];
       case 'metric':
         return this.metric(checkId, label, tool, root, input, demand, setup, run.part);
       default:
@@ -128,13 +150,35 @@ export class LayerGate {
   }
 
   private sarif(
+    state: GoalState,
     checkId: string,
     label: string,
     tool: LayerSpec,
     root: string,
-    head: string,
+    input: LayerGateInput,
     demand: ProofDemand | undefined,
   ): CheckResult {
+    const head = input.head;
+    // A maintenance Goal answers for what it adds: the findings the base already had are not its.
+    if (state.spec.kind === 'maintenance' && input.base) {
+      let failOn: FailOn = tool.failOn ?? 'error';
+      if (demand?.failOn) failOn = stricter(failOn, demand.failOn);
+      return maintenanceScan({
+        runner: this.deps.runner,
+        goal: state.spec,
+        checkId,
+        label,
+        tool,
+        root,
+        head,
+        base: input.base,
+        failOn,
+        recordedIsBase:
+          state.spec.baseline !== undefined &&
+          this.deps.repo !== undefined &&
+          sameProject(this.deps.repo, state.spec.baseline.commit, input.base),
+      });
+    }
     const { exec, report } = this.deps.runner.run(head, tool, tool.command, root);
     const problem = notRunnable(exec);
     if (problem) return unverifiable(checkId, `${label}: ${problem}: ${tool.command}`);
@@ -233,7 +277,9 @@ export class LayerGate {
     const { runner } = this.deps;
     const { tool } = run;
     const head: TestOutcome[][] = [];
-    for (let n = 0; n < (tool.runs ?? 1); n++) {
+    // A maintenance Goal compares two worlds, so a layer is run at least twice on each: a result that differs is not a result.
+    const maintenance = state.spec.kind === 'maintenance';
+    for (let n = 0; n < Math.max(tool.runs ?? 1, maintenance ? 2 : 1); n++) {
       const got = runner.layerTests(input.head, run.part, root, run.layer, [tool]);
       if (got.problems.length) return unverifiable(checkId, `the layer did not run: ${got.problems.join('; ')}`);
       if (got.processFailures.length)
@@ -241,6 +287,31 @@ export class LayerGate {
       head.push(got.tests);
     }
     const atBase = input.base ? runner.layerTests(input.base, run.part, root, run.layer, [tool]) : undefined;
+    // The base is the yardstick: a base run that did not give a readable result leaves nothing to measure against, and the
+    // delivery's failures would all look new.
+    if (maintenance && atBase && (atBase.problems.length || atBase.processFailures.length))
+      return unverifiable(
+        checkId,
+        `${label}: the base did not give a readable result, so there is nothing to compare with: ${[...atBase.problems, ...atBase.processFailures].join('; ')}`,
+      );
+    if (maintenance && atBase) {
+      const again = runner.layerTests(input.base!, run.part, root, run.layer, [tool]);
+      // A base whose tests never loaded (a collection or import error) is no yardstick either, however readable its report.
+      const patterns = setup.parts[run.part]?.tests?.loadErrorPatterns;
+      const notLoaded = [atBase.tests, again.tests].map(tests => loadFailure(tests, patterns)).find(Boolean);
+      if (notLoaded)
+        return unverifiable(
+          checkId,
+          `${label}: the base did not load its tests (${notLoaded}), so there is nothing to compare with`,
+        );
+      const unreadable = [...again.problems, ...again.processFailures];
+      const split = unreadable.length ? [] : baseDisagreement(atBase.tests, again.tests);
+      if (unreadable.length || split.length)
+        return unverifiable(
+          checkId,
+          `${label}: two runs on the base disagree${split.length ? ` (${split.slice(0, 5).join(', ')})` : ` (${unreadable.join('; ')})`}, so nothing is proved`,
+        );
+    }
     // With two tools in one layer a locked test belongs to the tool that reported it when the tests were locked (the base),
     // not to whichever report it shows up in now: a locked test that vanishes from its own tool's report is red.
     const shared = (setup.parts[run.part]?.layers[run.layer]?.length ?? 0) > 1;
@@ -260,12 +331,27 @@ export class LayerGate {
       locked,
       loadErrorPatterns: setup.parts[run.part]?.tests?.loadErrorPatterns,
     });
-    return result(checkId, verdict, { newFailures: verdict.newFailures });
+    const baseFailing =
+      maintenance && atBase && !atBase.problems.length
+        ? atBase.tests.filter(test => test.status === 'fail' || test.status === 'error').length
+        : undefined;
+    // A maintenance Goal answers for the tests it had: one the delivery no longer runs (gone, or skipped) is lost coverage.
+    // Judged after the runs were found to agree and to have loaded, so an inconclusive delivery stays `unverifiable`.
+    const lost =
+      maintenance && atBase && verdict.status !== 'unverifiable' && head[0] ? lostTests(atBase.tests, head[0]) : [];
+    const lostNote = `${lost.length} test(s) of the base are not run any more: ${lost.slice(0, 5).join(', ')}${lost.length > 5 ? ', ...' : ''}`;
+    return result(
+      checkId,
+      lost.length
+        ? {
+            status: 'fail',
+            reason: verdict.status === 'fail' ? `${verdict.reason}; ${lostNote}` : `${label}: ${lostNote}`,
+          }
+        : verdict,
+      {
+        newFailures: verdict.newFailures,
+        ...(baseFailing === undefined ? {} : { baseFailing }),
+      },
+    );
   }
-}
-
-function reportExitProblem(exitCode: number | null, accepted: number[] | undefined): string | undefined {
-  const allowed = accepted ?? [0];
-  if (exitCode !== null && allowed.includes(exitCode)) return undefined;
-  return `command exited ${exitCode ?? 'without an exit code'}; accepted report exit codes: ${allowed.join(', ')}`;
 }

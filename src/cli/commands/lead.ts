@@ -4,6 +4,7 @@ import { GitCommitInspector } from '../../app/integration.js';
 import { goalNeedsTests, setupLocksTests, testPlanProblems } from '../../domain/test-plan.js';
 import { UserError } from '../../domain/errors.js';
 import { bugfixPlan } from '../bugfix-plan.js';
+import { maintenancePlan, maintenancePlanProblems } from '../maintenance-plan.js';
 import { characterizePlan, refactorPlanProblems } from '../legacy-plan.js';
 import { pinnedSetupOf } from '../test-lock-wiring.js';
 import { planLayerProblems } from '../lead-layers.js';
@@ -22,8 +23,15 @@ export function registerLead(ctx: CliContext): void {
       '--characterize',
       'plan a characterize Goal as one Solo package: the Tester captures the behaviour in tests, no code changes (with --goal)',
     )
-    .option('--goal <id>', 'with --bugfix or --characterize: the Goal to plan')
-    .option('--base <sha>', 'with --bugfix or --characterize: the commit the work starts from (default: HEAD)')
+    .option(
+      '--maintenance',
+      'plan a maintenance Goal as one Solo package: the Worker changes manifests and lockfiles, no Tester (with --goal)',
+    )
+    .option('--goal <id>', 'with --bugfix, --characterize or --maintenance: the Goal to plan')
+    .option(
+      '--base <sha>',
+      'with --bugfix, --characterize or --maintenance: the commit the work starts from (default: HEAD)',
+    )
     .option(
       '--stub <path>',
       'with --bugfix: a module the reproduction imports (default: the Goal repro hint); repeatable',
@@ -36,19 +44,24 @@ export function registerLead(ctx: CliContext): void {
         file?: string;
         bugfix?: boolean;
         characterize?: boolean;
+        maintenance?: boolean;
         goal?: string;
         base?: string;
         stub: string[];
         by: string;
       }) =>
         withJournal(journal => {
-          if ([flags.file, flags.bugfix, flags.characterize].filter(Boolean).length !== 1)
-            throw new UserError('Give one of --file <json>, --bugfix --goal <id> or --characterize --goal <id>');
+          if ([flags.file, flags.bugfix, flags.characterize, flags.maintenance].filter(Boolean).length !== 1)
+            throw new UserError(
+              'Give one of --file <json>, --bugfix --goal <id>, --characterize --goal <id> or --maintenance --goal <id>',
+            );
           const sample = flags.bugfix
             ? bugfixPlan(ctx, journal, flags)
             : flags.characterize
               ? characterizePlan(ctx, journal, flags)
-              : undefined;
+              : flags.maintenance
+                ? maintenancePlan(ctx, journal, flags)
+                : undefined;
           const parsed = sample ?? parseExecutionProposal(readJsonFile(flags.file!));
           const by = flags.by;
           assertProposalRationale(parsed);
@@ -100,6 +113,8 @@ export function registerLead(ctx: CliContext): void {
           pinned: state.setupVersion !== undefined,
         });
         if (problems.length) throw new UserError(`The plan is not ready:\n- ${problems.join('\n- ')}`);
+        const solo = maintenancePlanProblems(state);
+        if (solo.length) throw new UserError(`The plan is not ready:\n- ${solo.join('\n- ')}`);
         // A refactor's plan stays on the code the characterize Goals captured, and its base holds their tests.
         const legacy = refactorPlanProblems(ctx, journal, state);
         if (legacy.length) throw new UserError(`The plan is not ready:\n- ${legacy.join('\n- ')}`);

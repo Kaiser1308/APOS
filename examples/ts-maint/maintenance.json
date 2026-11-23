@@ -1,0 +1,5 @@
+{
+  "description": "Upgrade fmt to a version without CVE-FMT-1",
+  "security": "CVE-FMT-1",
+  "paths": "CHANGELOG.md"
+}

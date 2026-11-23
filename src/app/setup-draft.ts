@@ -43,6 +43,7 @@ function partFrom(entry: CatalogEntry, root: string): PartSetup {
     layers,
     needsHuman: [...entry.needsHuman],
     forbid: [...entry.forbid],
+    ...(entry.manifests ? { manifests: [...entry.manifests] } : {}),
     ...(entry.testPaths.length
       ? {
           tests: {

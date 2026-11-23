@@ -45,6 +45,12 @@ loadErrorPatterns:
 # pytest exits 5 when it collects nothing; exit 4 (a path that does not exist) is a usage error and stays a failure, so no output pattern.
 noTestsExitCodes:
   - 5
+manifests:
+  - pyproject.toml
+  - poetry.lock
+  - uv.lock
+  - requirements*.txt
+  - Pipfile*
 testPaths:
   - tests/**
   - '**/test_*.py'

@@ -154,8 +154,10 @@ export function bugfixProposal(input: {
   });
 }
 
-/** What the Human's inbox says about a Goal in draft: a bug is approved in one go, any other Goal through gate A. */
+/** What the Human's inbox says about a Goal in draft: a bug or a maintenance Goal is approved in one go, any other Goal through gate A. */
 export const draftGateDetail = (goal: GoalSpec): string =>
   goal.kind === 'bugfix'
     ? `gates A and B in one go: apos bug approve ${goal.id}`
-    : 'gate A: approve the Goal and its appetite';
+    : goal.kind === 'maintenance'
+      ? `gates A and B in one go: apos maintenance approve ${goal.id}`
+      : 'gate A: approve the Goal and its appetite';

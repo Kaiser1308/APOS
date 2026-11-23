@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { findingFingerprint } from '../findings.js';
 import { unreadable, parseJson, type ParsedReport } from './types.js';
 
 const test = z.object({
@@ -12,10 +13,12 @@ const finding = z.object({
   level: z.enum(['error', 'warning', 'note']),
   file: z.string().optional(),
   line: z.number().int().optional(),
+  message: z.string().optional(),
+  fingerprint: z.string().min(1).optional(),
 });
 const report = z.union([z.object({ tests: z.array(test) }), z.object({ findings: z.array(finding) })]);
 
-/** `{"tests":[{id,status,message?}]}` or `{"findings":[{ruleId,level,file?,line?}]}`. Anything else is unreadable. */
+/** `{"tests":[{id,status,message?}]}` or `{"findings":[{ruleId,level,file?,line?,message?,fingerprint?}]}`. Anything else is unreadable. */
 export function readAposJson(content: string): ParsedReport {
   const json = parseJson(content);
   if (json === undefined) return unreadable('apos-json report is not valid JSON');
@@ -28,5 +31,11 @@ export function readAposJson(content: string): ParsedReport {
   }
   return 'tests' in parsed.data
     ? { kind: 'tests', tests: parsed.data.tests }
-    : { kind: 'findings', findings: parsed.data.findings };
+    : {
+        kind: 'findings',
+        findings: parsed.data.findings.map(({ message, fingerprint, ...item }) => ({
+          ...item,
+          fingerprint: fingerprint ?? findingFingerprint({ ruleId: item.ruleId, file: item.file, message }),
+        })),
+      };
 }

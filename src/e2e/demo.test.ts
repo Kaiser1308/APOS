@@ -55,6 +55,21 @@ describe('demo-goal.mjs', () => {
     600_000,
   );
 
+  it.skipIf(!hasVitest)(
+    'ts-maint: a dependency upgrade held to the base: a new failure is red, a file outside the manifests is red, the upgrade that removes the finding is green',
+    () => {
+      const done = spawnSync(process.execPath, [script, 'ts-maint'], { encoding: 'utf8' });
+      expect(done.stderr).toBe('');
+      expect(done.stdout).toContain('every step ended as expected');
+      expect(done.stdout).toContain('new failure(s) vs the base');
+      expect(done.stdout).toContain('outside the package paths');
+      expect(done.stdout).toContain('có trên');
+      expect(done.stdout).toContain('không còn trên');
+      expect(done.status).toBe(0);
+    },
+    600_000,
+  );
+
   it.skipIf(!(hasPytest && hasPython))(
     'py-legacy: a repo with no tests approved as low assurance, behaviour captured, a refactor held to it',
     () => {

@@ -23,6 +23,21 @@ function disagreement(runs: TestOutcome[][]): string[] {
 }
 
 /**
+ * The tests of the base that the delivery no longer runs: gone from its report, or skipped now though they ran on the base.
+ * A dependency upgrade that makes a test vanish has not kept the tests green, it has stopped asking.
+ */
+export function lostTests(base: TestOutcome[], head: TestOutcome[]): string[] {
+  const now = new Map(head.map(test => [test.id, test.status]));
+  return sorted(
+    base.filter(test => test.status !== 'skip' && (now.get(test.id) ?? 'skip') === 'skip').map(test => test.id),
+  );
+}
+
+/** The ids whose status differs between two runs of the same layer on the same commit. */
+export const baseDisagreement = (first: TestOutcome[], second: TestOutcome[]): string[] =>
+  disagreement([first, second]);
+
+/**
  * A test layer is green when its tests show no failure the base did not already have, and every locked test passes.
  * The locked tests were red at the base by design, so "already failing" never excuses them. Repeated runs that
  * disagree prove nothing (unverifiable), whichever run looks best.

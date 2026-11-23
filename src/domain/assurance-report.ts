@@ -4,6 +4,8 @@ import { planLayers, type LayerRun, type LayerWhy, type PlanInput, type Stage } 
 import { goalKind } from './contracts.js';
 import { capturedEvidence, preservedEvidence, type Preserved } from './legacy.js';
 import { reviewOverrideBy } from './review-tests.js';
+import { maintenanceEvidence, maintenanceLines, type MaintenanceEvidence } from './maintenance-report.js';
+import { MAINT_APPROVE_VIA } from './maintenance.js';
 import { proofDemands } from './proof-tools.js';
 import type { ProjectSetup } from './project-setup.js';
 import { acceptanceProof } from './test-plan.js';
@@ -49,8 +51,12 @@ export type AssuranceReport = {
   captured?: { covers: string[]; tests: number };
   /** Only for a `refactor` Goal: what it kept, as the gate that judged the captured tests says. */
   preserved?: Preserved;
-  /** Only when `bug approve` gave gates A and B in one go: `human` or `on-behalf:<where they agreed>`. */
+  /** Only when `bug approve` or `maintenance approve` gave gates A and B in one go: `human` or `on-behalf:<where they agreed>`. */
   combinedApproval?: string;
+  /** The command that did it; absent means `bug approve`. */
+  combinedCommand?: string;
+  /** Only for a `maintenance` Goal: what the gate proved against the base. */
+  maintenance?: MaintenanceEvidence;
   /** What is off, and why. */
   off: string[];
   /** Tools whose only evidence is an exit code: no test ids, no counts. */
@@ -205,7 +211,8 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
     off.add('khoá test: tắt (setup không khai tests.paths, hoặc Goal không có tiêu chí cần test)');
 
   const bug = goalKind(state.spec) === 'bugfix' ? bugEvidence(state) : undefined;
-  const bugBy = state.bugApproval;
+  const bugBy = state.bugApproval ?? state.maintenanceApproval;
+  const maintenance = maintenanceEvidence(state, setup);
   return {
     goalId,
     ...(state.baselineMissing?.length ? { lowAssurance: state.baselineMissing } : {}),
@@ -213,6 +220,8 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
     ...(capturedEvidence(state) ? { captured: capturedEvidence(state)! } : {}),
     ...(preservedEvidence(state) ? { preserved: preservedEvidence(state)! } : {}),
     ...(bugBy ? { combinedApproval: bugBy.by === 'on-behalf' ? `on-behalf:${bugBy.onBehalf ?? '?'}` : 'human' } : {}),
+    ...(state.maintenanceApproval && !state.bugApproval ? { combinedCommand: MAINT_APPROVE_VIA } : {}),
+    ...(maintenance ? { maintenance } : {}),
     ...(state.setupVersion === undefined
       ? {}
       : {
@@ -268,6 +277,7 @@ const WHY: Record<LayerWhy, string> = {
   lead: ' (Lead thêm)',
   trigger: ' (kích hoạt theo file)',
   'goal-flag': ' (cờ của Goal)',
+  'goal-kind': ' (Goal bảo trì)',
   proof: ' (tiêu chí)',
 };
 const STAGE_NAME: Record<Stage, string> = { submit: 'submit', integrate: 'ghép', close: 'đóng' };
@@ -329,9 +339,10 @@ export function renderAssuranceText(report: AssuranceReport): string {
           : 'giữ nguyên hành vi: chưa chứng minh (chưa có gate xanh trên các test đã chụp)'
       }`,
     );
+  if (report.maintenance) lines.push(...maintenanceLines(report.maintenance, label));
   if (report.combinedApproval)
     lines.push(
-      `${label('Duyệt')}duyệt gộp bằng bug approve (${report.combinedApproval === 'human' ? 'Human' : report.combinedApproval})`,
+      `${label('Duyệt')}duyệt gộp bằng ${report.combinedCommand ?? 'bug approve'} (${report.combinedApproval === 'human' ? 'Human' : report.combinedApproval})`,
     );
   if (report.reviews)
     lines.push(

@@ -32,6 +32,11 @@ loadErrorPatterns:
   - ClassNotFoundException
   - NoClassDefFoundError
   - ExceptionInInitializerError
+manifests:
+  - build.gradle*
+  - settings.gradle*
+  - gradle.lockfile
+  - gradle/libs.versions.toml
 testPaths:
   - src/test/**
 testInfra:

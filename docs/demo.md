@@ -488,3 +488,119 @@ GOAL-002  setup v1  (app: python)
 
 demo py-legacy: every step ended as expected.
 ```
+
+## A dependency upgrade (`ts-maint`: `fmt` 1.0.0 has CVE-FMT-1)
+
+`npm run demo:maint` upgrades a dependency with no criterion written by anyone. `maintenance open --security CVE-FMT-1` scans the base once and finds the finding there; the gate then holds every delivery to the base. The first upgrade (`fmt` 2.0.0) breaks four tests that were green, the second touches `src/price.ts`, which is neither a manifest nor a declared path, and the third changes `package.json` only: it waits for a decision (a manifest is sensitive in the catalog), an agent approves it, and the same commit is green with the finding gone. The dependency is a folder in `vendor/`, so the demo needs no network.
+
+```text
+demo ts-maint: working in <tmp> (a temp directory; --keep leaves it)
+
+# init the project
+$ apos init  # exit 0
+Initialized <repo>
+
+# draft the setup from the catalog
+$ apos setup draft  # exit 0
+Wrote .apos/project.yaml: app
+Not committed. Edit it, commit it, then: apos setup probe --commit <sha>
+
+# probe every tool of the setup in a clean worktree
+$ apos setup probe --commit 0bd46669dd  # exit 0
+ok   app.L1 vitest: 2 tests, stable over 2 runs
+ok   app.L2 vitest-acceptance: 1 tests, runOne ok, stable over 2 runs
+ok   app.L3 vitest-integration: 1 tests, runOne ok
+ok   app.L5 node-scan: findings
+ok   app.tests patterns: 13 patterns compile; tests under **/*.test.ts, **/*.spec.ts, tests/**
+setup 554c06fdbbb7 at 0bd46669ddd4: probe passed
+
+# the Human approves the probed setup
+$ apos setup approve --commit 0bd46669dd --on-behalf demo  # exit 0
+Approved setup v1 (554c06fdbbb7) at 0bd46669ddd4
+
+# the PM opens a maintenance Goal that must remove CVE-FMT-1; the base is scanned once, and the finding is found there
+$ apos maintenance open Upgrade fmt to a version without CVE-FMT-1 --security CVE-FMT-1 --paths CHANGELOG.md  # exit 0
+Drafted GOAL-MAINT-001 (maintenance)
+Next: the Human runs `apos maintenance approve GOAL-MAINT-001`
+
+# it waits for the Human in the inbox
+$ apos inbox  # exit 0
+GOAL-MAINT-001	awaiting-approval	gates A and B in one go: apos maintenance approve GOAL-MAINT-001
+
+# the Human approves, sets the default appetite and selects, in one command
+$ apos maintenance approve GOAL-MAINT-001 --on-behalf demo  # exit 0
+Approved and selected GOAL-MAINT-001 on setup v1 (S, 60 min, 3 attempts)
+Next: the Lead plans it with `apos lead propose --maintenance --goal GOAL-MAINT-001`
+
+# the Lead plans it: one Solo package, no Tester; its paths are the manifests plus the declared path
+$ apos lead propose --maintenance --goal GOAL-MAINT-001  # exit 0
+Proposed EXEC-MAINT-001
+
+# the Lead commits the plan: the Goal is executing
+$ apos lead commit GOAL-MAINT-001  # exit 0
+Accepted GOAL-MAINT-001. Deliver with `apos package submit GOAL-MAINT-001 <package> --commit <sha>`.
+
+# the Worker upgrades to fmt 2.0.0, which renames format(): a test green on the base is red now, so it is red
+$ apos package submit GOAL-MAINT-001 WP-MAIN --commit 61ec1ebd77  # exit 1
+WP-MAIN red on 61ec1ebd776d572b4c9932354baaae49b755a745
+  APOS-SCOPE needs-human: sensitive files changed, a decision is needed: package.json
+  app.L1.vitest fail: app.L1 vitest: 2 new failure(s) vs the base: src/price.test.ts::shows a price in dollars and cents, src/price.test.ts::shows zero as $0.00
+  app.L2.vitest-acceptance fail: app.L2 vitest-acceptance: 1 new failure(s) vs the base: src/price.acceptance.test.ts::a customer sees the same price text on every screen
+  app.L3.vitest-integration fail: app.L3 vitest-integration: 1 new failure(s) vs the base: src/price.integration.test.ts::prices of a basket are all in the same format
+  needs attention: declared risks: The upgrade changes behaviour the existing tests do not cover
+  needs attention: files the checks run or are built from changed: package.json
+
+# the Worker upgrades to 1.1.0 and also edits src/price.ts: not a manifest and not a declared path, so it is red
+$ apos package submit GOAL-MAINT-001 WP-MAIN --commit 5de5fef14e  # exit 1
+WP-MAIN red on 5de5fef14e4e323d6ed7a733c1b9b9a6c5158158
+  APOS-SCOPE fail: outside the package paths (package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, CHANGELOG.md): src/price.ts; sensitive files also changed: package.json
+  needs attention: declared risks: The upgrade changes behaviour the existing tests do not cover
+  needs attention: files the checks run or are built from changed: package.json
+
+# the Worker upgrades to 1.1.0 and nothing else: package.json is a sensitive file, so the gate waits for a decision
+$ apos package submit GOAL-MAINT-001 WP-MAIN --commit dffcabbf91  # exit 3
+WP-MAIN needs-human on dffcabbf91d71b95d014e51c01fd285f6d5df168
+  APOS-SCOPE needs-human: sensitive files changed, a decision is needed: package.json
+  needs attention: declared risks: The upgrade changes behaviour the existing tests do not cover
+  needs attention: files the checks run or are built from changed: package.json
+
+# an agent approves the manifest change on the Human’s behalf (the table will say so)
+$ apos exception approve GOAL-MAINT-001 --kind needs-human --ref WP-MAIN --reason a dependency upgrade changes package.json by definition --by agent:lead  # exit 0
+Approved needs-human for WP-MAIN on dffcabbf91d71b95d014e51c01fd285f6d5df168 by agent:lead. Submit WP-MAIN again with the same commit.
+
+# the same commit again: no new failure, no new finding, CVE-FMT-1 gone, only the manifest changed: green
+$ apos package submit GOAL-MAINT-001 WP-MAIN --commit dffcabbf91  # exit 0
+WP-MAIN green on dffcabbf91d71b95d014e51c01fd285f6d5df168; GOAL-MAINT-001 verified
+  needs attention: declared risks: The upgrade changes behaviour the existing tests do not cover
+  needs attention: files the checks run or are built from changed: package.json
+
+# the Human closes the Goal on the commit that passed the gate
+$ apos outcome close GOAL-MAINT-001 --on-behalf demo  # exit 0
+Close-stage layers green on dffcabbf91d71b95d014e51c01fd285f6d5df168
+close GOAL-MAINT-001
+
+# the assurance table says what was proved against the base
+$ apos goal show GOAL-MAINT-001  # exit 0
+GOAL-MAINT-001	closed	Upgrade fmt to a version without CVE-FMT-1
+setup v1
+không có khoá test (setup không khai tests.paths, hoặc Goal không có tiêu chí cần test)
+
+GOAL-MAINT-001  setup v1  (app: typescript)
+  Tiêu chí           0   máy chứng minh 0 · anh xác nhận tay 0
+  Test đã khoá       không có
+  Kiểm kê / phạm vi  bật
+  Lớp khâu submit    WP-MAIN: L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration (Goal bảo trì) ✓ · L5 node-scan (Goal bảo trì) ✓
+  Lớp khâu đóng      L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration ✓ · L5 node-scan ✓
+  Bảo trì            chỉ chạm manifest/lockfile (+ paths); lỗi có sẵn trên base: 0; lỗi mới: 0
+  Quét               finding mới 0 (dưới mức chặn: 0)
+  Vá bảo mật         finding h:1dec7211f4b07fa0 có trên 5c69273, không còn trên dffcabb
+  Duyệt              duyệt gộp bằng maintenance approve (on-behalf:demo)
+  Ngoại lệ           needs-human WP-MAIN (agent:lead): a dependency upgrade changes package.json by definition
+  Agent duyệt thay   1 chỗ: needs-human WP-MAIN (agent:lead)
+  Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L4 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    khoá test: tắt (setup không khai tests.paths, hoặc Goal không có tiêu chí cần test)
+
+demo ts-maint: every step ended as expected.
+```

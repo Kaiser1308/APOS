@@ -118,20 +118,49 @@ const goalSchema = z
     /** Switches the Human approves with the Goal (`mutation`, `perf`): a setup tool that says `when: flag:x` runs only with `x`. */
     flags: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/, 'a flag is a word')).optional(),
     /** Absent means `feature`: Goals written before `apos bug` replay unchanged. A `bugfix` has one red-green criterion. */
-    kind: z.enum(['feature', 'bugfix', 'characterize', 'refactor']).optional(),
+    kind: z.enum(['feature', 'bugfix', 'characterize', 'refactor', 'maintenance']).optional(),
     /** `bugfix`: where the bug shows (a path), a hint for the Tester; it does not change any gate. */
     reproHint: namedText.optional(),
     /** `bugfix`: the setup part the bug lives in. */
     part: namedText.optional(),
     /** `characterize`: globs (repo-relative) of the code whose current behaviour the Goal captures; the Human approves them with the Goal. */
     covers: z.array(namedText).min(1).optional(),
-    /** `refactor`: globs (repo-relative) of the code to restructure; each file must be covered by a closed characterize Goal. */
+    /**
+     * `refactor`: globs (repo-relative) of the code to restructure; each file must be covered by a closed characterize Goal.
+     * `maintenance`: globs of what the Goal may change besides the manifests and lockfiles of its part.
+     */
     paths: z.array(namedText).min(1).optional(),
+    /** `maintenance`: the base findings (fingerprints) the delivery must no longer show; the Human approves them with the Goal. */
+    security: z.array(namedText).min(1).optional(),
+    /** `maintenance`: what the base scan showed when the Goal was opened, kept once so the gate does not rerun the base. */
+    baseline: z
+      .object({
+        commit: namedText,
+        scans: z.array(
+          z.object({
+            tool: namedText,
+            /** The command that scanned: a baseline stands only for the same scanner, so a setup that changes it is scanned again. */
+            command: namedText.optional(),
+            findings: z.array(
+              z.object({
+                fingerprint: namedText,
+                ruleId: namedText,
+                level: z.enum(['error', 'warning', 'note']),
+                file: z.string().optional(),
+              }),
+            ),
+          }),
+        ),
+      })
+      .optional(),
+    /** `maintenance`: the pull request the delivery comes from (`--from-pr`): its number, remote and the sha fetched when the Goal was opened. */
+    fromPr: z.object({ number: z.number().int().positive(), remote: namedText, sha: namedText }).optional(),
   })
   .superRefine((goal, ctx) => {
     const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
     // A refactor needs no criterion of its own: what it must keep is what the characterize Goals locked.
-    const refactor = goal.kind === 'refactor';
+    // A maintenance Goal has none either: what it must hold is the base, measured by the gate.
+    const refactor = goal.kind === 'refactor' || goal.kind === 'maintenance';
     const sketch = goal.acceptance.length === 0 && goal.checks.length === 0 && !refactor;
     const allAcceptanceUsesToolProofs =
       goal.acceptance.length > 0 && goal.acceptance.every(item => item.proof === 'benchmark' || item.proof === 'scan');
@@ -139,6 +168,11 @@ const goalSchema = z
       issue(['acceptance'], 'Goal must declare at least one acceptance criterion');
     if (!sketch && !refactor && !allAcceptanceUsesToolProofs && goal.checks.length === 0)
       issue(['checks'], 'Goal must declare at least one check');
+    if (goal.kind === 'maintenance' && (goal.acceptance.length || goal.checks.length))
+      issue(
+        ['acceptance'],
+        'A maintenance Goal has no criterion or check of its own: the gate holds it to the base (no new failure, no new finding, only manifests and its paths)',
+      );
     if (goal.kind === 'bugfix') {
       if (goal.acceptance.length !== 1)
         issue(
@@ -151,10 +185,13 @@ const goalSchema = z
     }
     for (const [field, kinds] of [
       ['covers', ['characterize']],
-      ['paths', ['refactor']],
+      ['paths', ['refactor', 'maintenance']],
+      ['security', ['maintenance']],
+      ['baseline', ['maintenance']],
+      ['fromPr', ['maintenance']],
     ] as const) {
       const wanted = kinds.includes(goal.kind as never);
-      if (wanted && !goal[field])
+      if (wanted && !goal[field] && goal.kind !== 'maintenance')
         issue([field], `A ${goal.kind} Goal says which code it is about: ${field} is required`);
       if (!wanted && goal[field])
         issue([field], `${field} belongs to a ${kinds[0]} Goal, not a ${goal.kind ?? 'feature'} one`);
@@ -338,9 +375,10 @@ export function parseGoalSpec(value: unknown): GoalSpec {
   return goalSchema.parse(value);
 }
 /** What kind of Goal this is; a Goal written before kinds existed is a feature. */
-export const goalKind = (goal: GoalSpec): 'feature' | 'bugfix' | 'characterize' | 'refactor' => goal.kind ?? 'feature';
+export const goalKind = (goal: GoalSpec): NonNullable<GoalSpec['kind']> => goal.kind ?? 'feature';
 /** A Goal not yet shaped: no criterion. A refactor has none of its own and is not a sketch. */
-export const isSketchGoal = (goal: GoalSpec): boolean => goal.acceptance.length === 0 && goal.kind !== 'refactor';
+export const isSketchGoal = (goal: GoalSpec): boolean =>
+  goal.acceptance.length === 0 && goal.kind !== 'refactor' && goal.kind !== 'maintenance';
 export function assertGoalExclusionComplete(goal: GoalSpec): void {
   for (const [index, item] of goal.requirements.entries()) {
     if (item.disposition !== 'excluded') continue;
@@ -379,7 +417,7 @@ export function goalApprovalBlockers(goal: GoalSpec): string[] {
   const blockers: string[] = [];
   const covered = new Set(goal.acceptance.flatMap(item => item.requirementIds));
   // A refactor with no criterion answers to the locked characterization tests, not to a criterion per requirement.
-  const needsCoverage = goal.kind !== 'refactor' || goal.acceptance.length > 0;
+  const needsCoverage = (goal.kind !== 'refactor' && goal.kind !== 'maintenance') || goal.acceptance.length > 0;
   for (const item of goal.requirements) {
     if (needsCoverage && item.disposition === 'acceptance' && !covered.has(item.id))
       blockers.push(`Requirement ${item.id} has no acceptance criterion`);

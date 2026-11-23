@@ -50,6 +50,11 @@ loadErrorPatterns:
 # count. The commands above add the default reporter next to the junit one because the junit reporter alone prints nothing.
 noTestsPatterns:
   - No test files found
+manifests:
+  - package.json
+  - package-lock.json
+  - pnpm-lock.yaml
+  - yarn.lock
 testPaths:
   - '**/*.test.ts'
   - '**/*.spec.ts'

@@ -78,6 +78,8 @@ const partSchema = z.object({
   needsHuman: z.array(z.string().min(1)).default([]),
   forbid: z.array(z.string().min(1)).default([]),
   tests: testsSchema.optional(),
+  /** Globs (relative to `root`) of the manifests and lockfiles a maintenance Goal may change. Copied from the catalog at draft time; absent on a setup approved before. */
+  manifests: z.array(z.string().min(1)).min(1).optional(),
   note: z.string().optional(),
 });
 export type PartSetup = z.infer<typeof partSchema>;

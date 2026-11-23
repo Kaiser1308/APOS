@@ -80,6 +80,24 @@ describe('first-wave catalog content', () => {
   });
 });
 
+describe('"no tests" signals', () => {
+  const of = (stack: string) => STACKS.find(entry => entry.stack === stack)!;
+  it('pytest exits 5 and vitest says "No test files found" (its exit 1 is too common to count); Java declares none, so it is not supported', () => {
+    expect(of('python').noTestsExitCodes).toEqual([5]);
+    expect(of('typescript').noTestsExitCodes).toEqual([]);
+    expect(of('typescript').noTestsPatterns.some(item => new RegExp(item).test('No test files found, exiting'))).toBe(
+      true,
+    );
+    for (const stack of ['java-gradle', 'java-maven']) {
+      expect(of(stack).noTestsExitCodes).toEqual([]);
+      expect(of(stack).noTestsPatterns).toEqual([]);
+    }
+  });
+  it('python has no output pattern: pytest prints "no tests ran" for a missing path (exit 4) too', () => {
+    expect(of('python').noTestsPatterns).toEqual([]);
+  });
+});
+
 describe('catalog schema', () => {
   const entry = STACKS[0]!;
   it('refuses a regex that does not compile', () => {

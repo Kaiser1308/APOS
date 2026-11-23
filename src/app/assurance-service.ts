@@ -22,6 +22,7 @@ import { fileAt, filesAt, sha256Of } from './git-files.js';
 import type { ToolRunner } from './layer-runner.js';
 import type { LayerId } from '../domain/layers.js';
 import { LayerGate, type LayerGateInput } from './layer-gate.js';
+import { characterizeScopeCheck, characterizedResult, coverageOfRefactor } from './characterized-gate.js';
 
 export type AssuranceDeps = {
   repo: string;
@@ -29,6 +30,8 @@ export type AssuranceDeps = {
   inspector: CommitInspector;
   /** The setup the Goal is pinned to, or undefined when it has none (then nothing here applies). */
   loadSetup: (state: GoalState) => ProjectSetup | undefined;
+  /** Every Goal of the project, for a refactor to find the characterize Goals it leans on. */
+  goals?: () => GoalState[];
 };
 
 /** Lines a diff adds, outside `.apos/`, without the `+` marker. */
@@ -67,6 +70,9 @@ export class AssuranceService {
   /** The layers the stage plans (floor, Lead's, triggers, criteria), run and judged. Empty for a Goal without a setup. */
   layerChecks(state: GoalState, input: LayerGateInput): ReturnType<LayerGate['run']> {
     const ran = this.layerGate.run(state, input);
+    // A refactor holds the captured tests at every later stage too: the close stage reads them on the verified commit.
+    const kept = input.stage === 'submit' ? undefined : this.characterized(state, input.head, input.base);
+    if (kept) ran.checks = [...ran.checks, kept];
     if (input.stage !== 'integrate') return ran;
     // A review of the integration commit locks its tests into every later integration commit, like a package's.
     const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
@@ -77,6 +83,34 @@ export class AssuranceService {
       for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
     const delivery = this.runTests(setup, wanted, input.head);
     return { ...ran, checks: [...ran.checks, this.reviewCheck(state, reviews, input.head, delivery)] };
+  }
+
+  /** The layers the captured tests of a refactor live in, added to `wanted`: the base and the delivery both run them. */
+  private capturedLayers(state: GoalState, wanted: Map<string, { part: string; layer: LayerId }>) {
+    const coverage = this.deps.goals
+      ? coverageOfRefactor(this.deps.repo, this.deps.goals(), state, undefined, this.deps.inspector)
+      : undefined;
+    for (const { lock } of coverage?.sources ?? [])
+      for (const entry of lock.map)
+        wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
+    return coverage;
+  }
+
+  /** `APOS-CHARACTERIZED` for a refactor, run on its own (the close and integrate stages have no run to share). */
+  private characterized(state: GoalState, head: string, base: string | undefined): CheckResult | undefined {
+    if (state.spec.kind !== 'refactor') return undefined;
+    const setup = this.deps.loadSetup(state);
+    const wanted = new Map<string, { part: string; layer: LayerId }>();
+    const coverage = this.capturedLayers(state, wanted);
+    if (!setup || !coverage) return undefined;
+    const at = base ?? state.proposal?.baseCommit ?? head;
+    return characterizedResult({
+      repo: this.deps.repo,
+      coverage,
+      head,
+      delivery: this.runTests(setup, wanted, head),
+      base: this.runTests(setup, wanted, at),
+    });
   }
 
   /** Every test of the given layers, run once on `commit` in a clean worktree. */
@@ -160,10 +194,13 @@ export class AssuranceService {
     for (const review of reviews)
       for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
 
+    const coverage = state.spec.kind === 'refactor' ? this.capturedLayers(state, wanted) : undefined;
     const run = (commit: string) => this.runTests(setup, wanted, commit);
     const delivery = run(head);
     const atBase = run(base);
     const checks: CheckResult[] = [];
+    if (coverage) checks.push(characterizedResult({ repo, coverage, head, delivery, base: atBase }));
+    if (state.spec.kind === 'characterize') checks.push(characterizeScopeCheck({ repo, setup, base, head }));
 
     if (lock) {
       const deliveryFiles = Object.fromEntries(

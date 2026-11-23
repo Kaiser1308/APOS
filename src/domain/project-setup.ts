@@ -63,6 +63,9 @@ const testsSchema = z.object({
   assertPatterns: z.array(z.string()).default([]),
   notImplementedPatterns: z.array(z.string()).default([]),
   loadErrorPatterns: z.array(z.string()).default([]),
+  /** Copied from the catalog: how the test tool says there is no test (see `catalogEntrySchema`). Empty: the probe cannot tell. */
+  noTestsExitCodes: z.array(z.number().int()).default([]),
+  noTestsPatterns: z.array(z.string()).default([]),
   /** Copied from the catalog at draft time. Absent: tests are not held to the declared entries ("chưa kiểm"). */
   entryRule: entryRuleSchema.optional(),
 });

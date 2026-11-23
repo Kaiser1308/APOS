@@ -1,6 +1,6 @@
-# Demo: three example Goals, run for real
+# Demo: four example stories, run for real
 
-`npm run demo:ts`, `npm run demo:py` and `npm run demo:bug` copy an example from `examples/` to a temp directory, `git init` it and drive the **real** APOS binary (`dist/cli.js`, so run `npm run build` first) with a real test runner (vitest, pytest). Every step prints the command, its exit code and what APOS said, and checks the exit code it expected; a surprise exits 1. A machine without a tool the example needs (`git`, `npx`/vitest, `python`/pytest) stops at once with exit 2 and names it: the script never reports a pass it did not see. `--keep` leaves the temp directory in place. See `examples/README.md` for the files of an example.
+`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug` and `npm run demo:legacy` copy an example from `examples/` to a temp directory, `git init` it and drive the **real** APOS binary (`dist/cli.js`, so run `npm run build` first) with a real test runner (vitest, pytest). Every step prints the command, its exit code and what APOS said, and checks the exit code it expected; a surprise exits 1. A machine without a tool the example needs (`git`, `npx`/vitest, `python`/pytest) stops at once with exit 2 and names it: the script never reports a pass it did not see. `--keep` leaves the temp directory in place. See `examples/README.md` for the files of an example.
 
 The story, in order: setup draft, probe, approve; Goal create, approve, select; the Lead proposes and commits a plan; the Tester submits the acceptance tests (locked); a delivery that edits a locked test is red; a delivery with wrong code is red; the right code is green; a reviewer blocks with a red test; the final fix (the review's test is now locked and green) is green; the Human closes the Goal; `goal show` prints the assurance table.
 
@@ -319,4 +319,172 @@ GOAL-BUG-001  setup v1  (app: typescript)
   Tắt / chưa kiểm    L5 không chạy ở khâu close: setup không có công cụ cho lớp này
 
 demo ts-bug: every step ended as expected.
+```
+
+## An old repo with no tests (`py-legacy`: capture what `pricing.py` does today, then tidy it)
+
+`npm run demo:legacy` tells the story of a repo that has **no test at all** (`pricing.py`, with a minimum charge and a code `FREE0` that makes an order free; `shipping.py`, which nothing captures). It needs `pytest` and `python`. The story: the probe reads the test layer as `no-tests` (the demo's setup keeps only L2, where the captured tests go: a layer with no tests is red at the gate like any other, label or not, so a legacy setup lists only the layers that have tests to run); the Human's `setup approve` is refused until it says `--baseline-missing`; a `characterize` Goal captures `pricing.py` (a Tester's test that is red on today's code is refused, the green one is locked, the Lead submits the commit that locked it, the Human closes); a `refactor` Goal whose `paths` reach `shipping.py` cannot be approved, and the one on `pricing.py` can; a refactor that "fixes" `FREE0` is red on `APOS-CHARACTERIZED`, one that only restructures is green; close; `goal show`. Output as printed:
+
+```text
+demo py-legacy: working in <tmp> (a temp directory; --keep leaves it)
+
+# init the project
+$ apos init  # exit 0
+Initialized <repo>
+
+# draft the setup from the catalog
+$ apos setup draft  # exit 0
+Wrote .apos/project.yaml: app
+Not committed. Edit it, commit it, then: apos setup probe --commit <sha>
+
+# the probe runs every tool (the setup keeps only L2, where the captured tests go): the repo has no tests, and the tool says so
+$ apos setup probe --commit d4dbb911db  # exit 0
+none app.L2 pytest-acceptance: the tool reports no tests (exit 5, empty report)
+ok   app.tests patterns: 10 patterns compile; tests under tests/**, **/test_*.py, **/*_test.py
+setup c25214af7518 at d4dbb911db00: probe passed
+
+# the Human approves without saying so: refused, there is no baseline
+$ apos setup approve --commit d4dbb911db --on-behalf demo  # exit 1
+The probe found no tests in app.L2: the repo has no baseline, so what the gates prove is weak. A Human can accept that with `apos setup approve --commit d4dbb911db00 --baseline-missing` (every Goal on this setup is then labelled low assurance), or add tests first
+
+# the Human accepts a repo with no tests, knowingly: every Goal on this setup is labelled low assurance
+$ apos setup approve --commit d4dbb911db --baseline-missing --on-behalf demo  # exit 0
+Approved setup v1 (c25214af7518) at d4dbb911db00
+BẢO ĐẢM THẤP: repo chưa có test nền (app.L2)
+The label judges nothing differently: a layer with no tests is still red at the gate and at close. Keep in the setup only the layers that have tests to run (docs/setup.md).
+
+# the PM drafts a characterize Goal: the behaviour of pricing.py as it is, odd corners included
+$ apos goal create --file <apos>/examples/py-legacy/characterize.json --source <apos>/examples/py-legacy/brief.md --kind characterize --covers pricing.py  # exit 0
+Drafted GOAL-001 (characterize)
+
+# the Human approves it, and with it the code it covers (gate A)
+$ apos goal approve GOAL-001 --size S --max-minutes 60 --max-attempts 3 --on-behalf demo  # exit 0
+Approved GOAL-001 on setup v1
+
+# the Human selects it
+$ apos goal select GOAL-001 --on-behalf demo  # exit 0
+Selected GOAL-001
+
+# the Lead plans it: one Solo package, tests only
+$ apos lead propose --characterize --goal GOAL-001  # exit 0
+Proposed EXEC-001
+
+# the Lead commits the plan: the Goal waits for the tests
+$ apos lead commit GOAL-001  # exit 0
+Accepted GOAL-001. Next the tester writes the acceptance tests and stubs: `apos tests submit GOAL-001 --commit <sha>`. Packages open once they are locked.
+
+# a Tester writes what they think FREE0 should do: red on today's code, refused
+$ apos tests submit GOAL-001 --commit 91a80631d4  # exit 1
+tests refused on 91a80631d45a211e4bd802393a20ee4eab8a9ea2: nothing is locked
+  AC-4 app.L2 tests.acceptance.test_pricing_today::test_ac4_the_code_free0_makes_the_order_free: chụp hành vi phải xanh trên code như hiện tại: the test is fail. Describe what the code does today, odd behaviour included; a wrong-looking result is a note for a later `apos bug`, not a failing test
+
+# the Tester writes what the code does today: green twice, so it is locked
+$ apos tests submit GOAL-001 --commit 1bafc2f77d  # exit 0
+Locked 4 tests in 1 files on 1bafc2f77d0f9e7739ed236a516a00227db5036a. Packages are gated on top of this commit.
+
+# no code to write: the Lead submits the commit that locked the tests
+$ apos package submit GOAL-001 WP-MAIN --commit 1bafc2f77d  # exit 0
+WP-MAIN green on 1bafc2f77d0f9e7739ed236a516a00227db5036a; GOAL-001 verified
+  needs attention: declared risks: A test pins a defect as if it were wanted; the criterion says so, and a bug is opened later with apos bug
+
+# the Human closes the Goal
+$ apos outcome close GOAL-001 --on-behalf demo  # exit 0
+Close-stage layers green on 1bafc2f77d0f9e7739ed236a516a00227db5036a
+close GOAL-001
+
+# the table opens with the warning, and says what was captured
+$ apos goal show GOAL-001  # exit 0
+GOAL-001	closed	Write down what pricing.py does today, so it can be restructured safely
+setup v1
+khoá test: commit 1bafc2f77d0f9e7739ed236a516a00227db5036a, 4 test, 1 file, 4 assert (đếm dòng, chỉ gần đúng)
+
+BẢO ĐẢM THẤP: repo chưa có test nền (app.L2)
+GOAL-001  setup v1  (app: python)
+  Tiêu chí           4   máy chứng minh 4 · anh xác nhận tay 0
+  Test đã khoá       L2 4
+  Kiểm kê / phạm vi  bật
+  Lớp khâu đóng      L2 pytest-acceptance ✓
+  Chụp hành vi       4 test đã khoá, chụp hành vi hiện tại của pricing.py (hành vi lạ ghi thành ghi chú, mở `apos bug` sau)
+  Agent duyệt thay   0 chỗ
+  Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L1 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L2 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L1 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L3 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L4 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L5 không chạy ở khâu close: setup không có công cụ cho lớp này
+
+# the PM drafts a refactor Goal; its paths are every module
+$ apos goal create --file <apos>/examples/py-legacy/refactor.json --source <apos>/examples/py-legacy/refactor-brief.md  # exit 0
+Drafted GOAL-002 (refactor)
+
+# the Human cannot approve it: shipping.py is not captured by any closed Goal
+$ apos goal approve GOAL-002 --size M --max-minutes 120 --max-attempts 3 --on-behalf demo  # exit 1
+GOAL-002 cannot be approved:
+- not covered by a closed characterize Goal: shipping.py. Capture their behaviour first (a characterize Goal whose covers include them, closed), or take them out of paths
+
+# the PM narrows the paths to pricing.py
+$ apos goal revise --file <apos>/examples/py-legacy/refactor-v2.json --source <apos>/examples/py-legacy/refactor-brief.md  # exit 0
+Revised GOAL-002 v2; Human approval required
+
+# the Human approves it: every file it reaches is captured
+$ apos goal approve GOAL-002 --size M --max-minutes 120 --max-attempts 3 --on-behalf demo  # exit 0
+Approved GOAL-002 on setup v1
+
+# the Human selects it
+$ apos goal select GOAL-002 --on-behalf demo  # exit 0
+Selected GOAL-002
+
+# the Lead plans it on a base that holds the captured tests
+$ apos lead propose --file <tmp>/work/refactor-plan.json  # exit 0
+Proposed EXEC-002
+
+# the Lead commits the plan
+$ apos lead commit GOAL-002  # exit 0
+Accepted GOAL-002. Deliver with `apos package submit GOAL-002 <package> --commit <sha>`.
+
+# a refactor that "fixes" FREE0 changes behaviour: the captured test is red
+$ apos package submit GOAL-002 WP-MAIN --commit eebac5f05b  # exit 1
+WP-MAIN red on eebac5f05bc331923807f55ea383dd4f6ef91e2d
+  APOS-CHARACTERIZED fail: GOAL-001: AC-4 app.L2 tests.acceptance.test_pricing_today::test_ac4_the_code_free0_makes_the_order_free: is fail, not pass
+  app.L2.pytest-acceptance fail: app.L2 pytest-acceptance: 1 new failure(s) vs the base: tests.acceptance.test_pricing_today::test_ac4_the_code_free0_makes_the_order_free
+  needs attention: declared risks: A rounding rule is lost in the split
+
+# a refactor that only restructures: every captured test is green, the Goal is verified
+$ apos package submit GOAL-002 WP-MAIN --commit bd3d209a6a  # exit 0
+WP-MAIN green on bd3d209a6ae2eeff8984ec3336cef8599c348519; GOAL-002 verified
+  needs attention: declared risks: A rounding rule is lost in the split
+
+# the Human closes it: the captured tests run again at the close stage
+$ apos outcome close GOAL-002 --on-behalf demo  # exit 0
+Close-stage layers green on bd3d209a6ae2eeff8984ec3336cef8599c348519
+close GOAL-002
+
+# the table says how many tests were kept, from which Goal, green before and after
+$ apos goal show GOAL-002  # exit 0
+GOAL-002	closed	pricing.py is split into small steps and behaves exactly as before
+setup v1
+không có khoá test riêng: các test đã chụp của Goal characterize là bằng chứng (dòng "Giữ hành vi")
+
+BẢO ĐẢM THẤP: repo chưa có test nền (app.L2)
+GOAL-002  setup v1  (app: python)
+  Tiêu chí           0   máy chứng minh 0 · anh xác nhận tay 0
+  Test đã khoá       không có
+  Kiểm kê / phạm vi  bật
+  Lớp khâu submit    WP-MAIN: L2 pytest-acceptance ✓
+  Lớp khâu đóng      L2 pytest-acceptance ✓
+  Giữ hành vi        giữ nguyên hành vi: 4 test chụp từ GOAL-001, xanh trước trên 7069c84, xanh sau trên bd3d209
+  Agent duyệt thay   0 chỗ
+  Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L1 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L1 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L3 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L4 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L5 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    khoá test: tắt (setup không khai tests.paths, hoặc Goal không có tiêu chí cần test)
+
+
+demo py-legacy: every step ended as expected.
 ```

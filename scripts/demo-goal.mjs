@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs one example Goal (examples/<name>) through the whole APOS v3 flow with the real binary and a real test runner:
-//   node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug> [--keep] [--bin <path to cli.js>]
+//   node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug|py-legacy> [--keep] [--bin <path to cli.js>]
 // It copies the example to a temp directory, `git init`s it, and drives APOS with the commands a Lead, a Tester, a Worker
 // and a Reviewer would run. Every step prints what APOS said and checks the exit code it expected; a surprise exits 1.
 // A machine without a tool the example needs stops at once with exit 2 and says which (it never reports a pass it did not see).
@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, stringify } from 'yaml';
+import { legacyStory } from './demo-legacy-story.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -23,8 +24,9 @@ const usage = (message, code) => {
   console.error(message);
   process.exit(code);
 };
-const hasStory = source && ['goal.json', 'bug.json'].some(file => existsSync(join(source, file)));
-if (!hasStory) usage('usage: node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug> [--keep] [--bin <cli.js>]', 2);
+const hasStory = source && ['goal.json', 'bug.json', 'characterize.json'].some(file => existsSync(join(source, file)));
+if (!hasStory)
+  usage('usage: node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug|py-legacy> [--keep] [--bin <cli.js>]', 2);
 if (!existsSync(bin)) usage(`demo: ${bin} does not exist: run \`npm run build\` first`, 2);
 
 const demo = JSON.parse(readFileSync(join(source, 'demo.json'), 'utf8'));
@@ -84,7 +86,7 @@ function apos(expected, note, ...argv) {
     env: { ...process.env, APOS_HOME: home, APOS_ARTIFACTS: artifacts, NODE_NO_WARNINGS: '1' },
   });
   const code = done.status ?? 1;
-  const shortArgs = argv.map(arg => (/^[0-9a-f]{40}$/.test(arg) ? arg.slice(0, 10) : arg));
+  const shortArgs = argv.map(arg => (/^[0-9a-f]{40}$/.test(arg) ? arg.slice(0, 10) : shown(arg)));
   console.log(`\n# ${note}\n$ apos ${shortArgs.join(' ')}  # exit ${code}`);
   const text = shown(`${done.stdout}${done.stderr}`);
   if (text) console.log(text);
@@ -212,15 +214,21 @@ try {
   const setup = parse(readFileSync(setupFile, 'utf8'));
   const app = setup.parts.app;
   delete app.layers.L0;
+  // A legacy repo lists only the layers that have a tool worth running: an empty layer is red at the gate like any other.
+  for (const layer of demo.dropLayers ?? []) delete app.layers[layer];
   if (demo.bench) {
     const benchTool = { ...demo.bench, command: demo.bench.command.replace(/^python /, `${python} `) };
     app.layers.L5 = [benchTool];
   } else delete app.layers.L5;
   writeFileSync(setupFile, stringify(setup));
   const base = commit('setup');
-  apos(0, 'probe every tool of the setup in a clean worktree', 'setup', 'probe', '--commit', base);
-  apos(0, 'the Human approves the probed setup', 'setup', 'approve', '--commit', base, ...human);
-  if (demo.story === 'bugfix') bugStory();
+  if (demo.story === 'legacy') legacyStory({ apos, git, commit, expectText, human, source, work, base });
+  else {
+    apos(0, 'probe every tool of the setup in a clean worktree', 'setup', 'probe', '--commit', base);
+    apos(0, 'the Human approves the probed setup', 'setup', 'approve', '--commit', base, ...human);
+  }
+  if (demo.story === 'legacy') console.log('');
+  else if (demo.story === 'bugfix') bugStory();
   else {
     apos(
       0,

@@ -1,0 +1,11 @@
+{
+  "story": "legacy",
+  "tools": [
+    "pytest",
+    "python"
+  ],
+  "dropLayers": [
+    "L1",
+    "L3"
+  ]
+}

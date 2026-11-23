@@ -19,7 +19,7 @@ import {
 import type { GoalState } from '../domain/transitions.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
-import { fileAt, filesAt, sha256Of } from './git-files.js';
+import { fileAt, filesAt, filesByCommit, sha256Of } from './git-files.js';
 import type { ToolRunner } from './layer-runner.js';
 import { untrustedProtectedFiles } from './protected-milestones.js';
 
@@ -80,11 +80,18 @@ export function inspectTests(input: InspectInput): Inspection {
   const testFiles: string[] = [];
   // A bug is reproduced on the code as it is: the Tester adds tests and tests.json, and nothing else. A stub or test
   // infrastructure the Tester could edit would let a test go red without the bug, so the commit's code is the base's code.
-  const bugfix = goalKind(state.spec) === 'bugfix';
+  // A characterize Goal is the same: the behaviour is captured on the code as it is, so only tests are added.
+  const kind = goalKind(state.spec);
+  const bugfix = kind === 'bugfix';
+  const characterize = kind === 'characterize';
+  const notATest = (file: string) =>
+    file !== mapPath && !file.startsWith('.apos/') && (matchesAny(file, infraGlobs) || !owner(file));
   for (const file of changed) {
-    if (bugfix && file !== mapPath && !file.startsWith('.apos/') && (matchesAny(file, infraGlobs) || !owner(file))) {
+    if ((bugfix || characterize) && notATest(file)) {
       problems.push(
-        `${file}: bugfix: the Tester adds tests only (tests.paths and tests.json), never code, a stub or test infrastructure: the bug must be red on the code as it is`,
+        bugfix
+          ? `${file}: bugfix: the Tester adds tests only (tests.paths and tests.json), never code, a stub or test infrastructure: the bug must be red on the code as it is`
+          : `${file}: characterize: the Tester adds tests only (tests.paths and tests.json), never code, a stub or test infrastructure: the behaviour is captured on the code as it is`,
       );
       continue;
     }
@@ -99,6 +106,15 @@ export function inspectTests(input: InspectInput): Inspection {
         `${file}: not a test file (tests.paths), a declared stub, or ${mapPath}: a tester may touch only those`,
       );
   }
+
+  // Any commit of the Goal counts: code changed in one commit and put back in the next is still code changed.
+  if (characterize && inspector.contains(repo, from, commit))
+    for (const item of filesByCommit(repo, from, commit))
+      for (const file of item.files)
+        if (notATest(file) && !changed.includes(file))
+          problems.push(
+            `${file}: characterize: changed in commit ${item.commit.slice(0, 7)} (and changed back): a characterize Goal never changes code, in any commit`,
+          );
 
   let map: TestMapEntry[] = [];
   const mapText = fileAt(repo, commit, mapPath);
@@ -162,6 +178,7 @@ export function inspectTests(input: InspectInput): Inspection {
         },
         outcomes,
         bugfix,
+        characterize,
         patterns: Object.fromEntries(
           Object.entries(setup.parts).map(([name, part]) => [
             name,
@@ -225,7 +242,11 @@ export function inspectTests(input: InspectInput): Inspection {
         text: text.toString('utf8'),
         partRoot: where.root,
         exists: path => present.has(path),
-        allowed: path => matchesAny(path, stubs) || matchesAny(path, rootedGlobs(where.root, where.tests?.paths ?? [])),
+        allowed: path =>
+          matchesAny(path, stubs) ||
+          matchesAny(path, rootedGlobs(where.root, where.tests?.paths ?? [])) ||
+          // The tests of a characterize Goal call the code they capture, which is not a stub.
+          (characterize && matchesAny(path, state.spec.covers ?? [])),
       }),
     );
   }

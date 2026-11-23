@@ -1,7 +1,7 @@
 # APOS tool catalog. See docs/catalog.md before changing commands.
 stack: typescript
 notes:
-  - 'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc, Stryker (the mutation score is computed from reports/mutation/mutation.json; needs @stryker-mutator/core and the vitest runner in the project).'
+  - 'verified: vitest 4.1.12 (--reporter=default --reporter=junit --outputFile.junit, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc, Stryker (the mutation score is computed from reports/mutation/mutation.json; needs @stryker-mutator/core and the vitest runner in the project).'
 detect:
   files:
     - package.json
@@ -17,16 +17,16 @@ layers:
       format: sarif
   L1:
     - id: vitest
-      command: npx vitest run --reporter=junit --outputFile={report} --exclude "**/*.{acceptance,integration}.test.ts"
+      command: npx vitest run --reporter=default --reporter=junit --outputFile.junit={report} --exclude "**/*.{acceptance,integration}.test.ts"
       format: junit
   L2:
     - id: vitest-acceptance
-      command: npx vitest run acceptance.test --reporter=junit --outputFile={report}
+      command: npx vitest run acceptance.test --reporter=default --reporter=junit --outputFile.junit={report}
       format: junit
       runOne: npx vitest run "{classname}" --reporter=junit --outputFile={report} -t "^{name|spaced|regex}$"
   L3:
     - id: vitest-integration
-      command: npx vitest run integration.test --reporter=junit --outputFile={report}
+      command: npx vitest run integration.test --reporter=default --reporter=junit --outputFile.junit={report}
       format: junit
       runOne: npx vitest run "{classname}" --reporter=junit --outputFile={report} -t "^{name|spaced|regex}$"
   L5:
@@ -45,6 +45,11 @@ loadErrorPatterns:
   - Failed to resolve import
   - SyntaxError
   - Transform failed
+  - Unhandled Error
+# vitest exits 1 for a lot of reasons (a globalSetup that throws leaves the same empty junit report), so only its own words
+# count. The commands above add the default reporter next to the junit one because the junit reporter alone prints nothing.
+noTestsPatterns:
+  - No test files found
 testPaths:
   - '**/*.test.ts'
   - '**/*.spec.ts'

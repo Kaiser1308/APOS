@@ -13,7 +13,7 @@ import {
 import { goalApprovalBlockers, goalKind, parseAppetite } from '../../domain/contracts.js';
 import { UserError } from '../../domain/errors.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
-import { approvalSetupVersion } from '../goal-approval.js';
+import { approvalSetupVersion, baselineMissingOf } from '../goal-approval.js';
 import { pinnedSetupOf } from '../test-lock-wiring.js';
 import type { CliContext } from '../context.js';
 
@@ -108,7 +108,16 @@ export function registerBug(ctx: CliContext): void {
           if (pending.length) throw new UserError(`${id} cannot be selected yet: ${pending.join('; ')}`);
           const setupVersion = approvalSetupVersion(ctx, journal, id, 'latest', flags.flag);
           const confirmation = await assertHuman('bug approve', id, flags.onBehalf);
-          registry.approve(id, appetite, undefined, confirmation, setupVersion, flags.flag, BUG_APPROVE_VIA);
+          registry.approve(
+            id,
+            appetite,
+            undefined,
+            confirmation,
+            setupVersion,
+            flags.flag,
+            BUG_APPROVE_VIA,
+            baselineMissingOf(journal, setupVersion),
+          );
           journal.append(
             newEvent(id, 'appetite-set', {
               appetite,

@@ -1,0 +1,64 @@
+diff --git a/.apos/goals/GOAL-001/tests.json b/.apos/goals/GOAL-001/tests.json
+new file mode 100644
+index 0000000..3e83efd
+--- /dev/null
++++ b/.apos/goals/GOAL-001/tests.json
+@@ -0,0 +1,34 @@
++[
++  {
++    "acceptanceId": "AC-1",
++    "part": "app",
++    "layer": "L2",
++    "testIds": [
++      "tests.acceptance.test_pricing_today::test_ac1_the_total_is_unit_price_times_quantity_summed"
++    ]
++  },
++  {
++    "acceptanceId": "AC-2",
++    "part": "app",
++    "layer": "L2",
++    "testIds": [
++      "tests.acceptance.test_pricing_today::test_ac2_an_order_under_one_unit_is_charged_one_unit"
++    ]
++  },
++  {
++    "acceptanceId": "AC-3",
++    "part": "app",
++    "layer": "L2",
++    "testIds": [
++      "tests.acceptance.test_pricing_today::test_ac3_the_code_ten_takes_a_tenth_off_rounded_down"
++    ]
++  },
++  {
++    "acceptanceId": "AC-4",
++    "part": "app",
++    "layer": "L2",
++    "testIds": [
++      "tests.acceptance.test_pricing_today::test_ac4_the_code_free0_makes_the_order_free"
++    ]
++  }
++]
+diff --git a/tests/acceptance/test_pricing_today.py b/tests/acceptance/test_pricing_today.py
+new file mode 100644
+index 0000000..045d751
+--- /dev/null
++++ b/tests/acceptance/test_pricing_today.py
+@@ -0,0 +1,18 @@
++from pricing import quote
++
++
++def test_ac1_the_total_is_unit_price_times_quantity_summed():
++    assert quote([("pen", 150, 2), ("ink", 300, 1)]) == 600
++
++
++def test_ac2_an_order_under_one_unit_is_charged_one_unit():
++    assert quote([("clip", 5, 3)]) == 100
++
++
++def test_ac3_the_code_ten_takes_a_tenth_off_rounded_down():
++    assert quote([("pad", 1005, 1)], "TEN") == 905
++
++
++def test_ac4_the_code_free0_makes_the_order_free():
++    # Possibly a defect: the code reads as "0% off". Captured as it is today; a bug is opened later.
++    assert quote([("pen", 300, 1)], "FREE0") == 300

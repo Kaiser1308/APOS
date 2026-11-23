@@ -10,7 +10,8 @@ import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import { lockSummary } from '../lock-summary.js';
 import { buildAssuranceReport, renderAssuranceText } from '../../domain/assurance-report.js';
 import { pinnedSetupOf } from '../test-lock-wiring.js';
-import { approvalSetupVersion } from '../goal-approval.js';
+import { approvalSetupVersion, baselineMissingOf } from '../goal-approval.js';
+import { refactorApprovalProblems } from '../legacy-plan.js';
 import type { CliContext } from '../context.js';
 
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
@@ -23,12 +24,41 @@ export function registerGoal(ctx: CliContext): void {
     .requiredOption('--file <json>')
     .requiredOption('--source <path>', 'verbatim source the Goal was shaped from')
     .option('--origin <text>', 'who or what produced the source', 'human')
-    .action(({ file, source, origin }: { file: string; source: string; origin: string }) =>
-      withJournal(journal => {
-        const { spec, text } = goalWithSource(file, source, origin);
-        journal.appendWithSource(newEvent(spec.id, 'goal-drafted', spec), text);
-        write(`Drafted ${spec.id}`);
-      }),
+    .option(
+      '--kind <kind>',
+      'feature (default), bugfix, characterize or refactor; the flag wins over "kind" in the file',
+    )
+    .option(
+      '--covers <glob>',
+      'characterize: code whose current behaviour this Goal captures (repeatable); the Human approves it with the Goal',
+      collect,
+      [],
+    )
+    .option(
+      '--paths <glob>',
+      'refactor: code to restructure (repeatable); each file must be covered by a closed characterize Goal',
+      collect,
+      [],
+    )
+    .action(
+      ({
+        file,
+        source,
+        origin,
+        ...flags
+      }: {
+        file: string;
+        source: string;
+        origin: string;
+        kind?: string;
+        covers: string[];
+        paths: string[];
+      }) =>
+        withJournal(journal => {
+          const { spec, text } = goalWithSource(file, source, origin, flags);
+          journal.appendWithSource(newEvent(spec.id, 'goal-drafted', spec), text);
+          write(`Drafted ${spec.id}${spec.kind && spec.kind !== 'feature' ? ` (${spec.kind})` : ''}`);
+        }),
     );
   goal.command('list').action(() =>
     withJournal(journal => {
@@ -98,8 +128,21 @@ export function registerGoal(ctx: CliContext): void {
       withJournalAsync(async journal => {
         const appetite = parseAppetite(appetiteOf(flags));
         const setupVersion = approvalSetupVersion(ctx, journal, id, flags.setupVersion, flags.flag);
+        // A refactor is approved only on code a closed characterize Goal covers; looked at before anything is written.
+        const state = journal.getGoal(id);
+        const uncovered = state ? refactorApprovalProblems(ctx, journal, state) : [];
+        if (uncovered.length) throw new UserError(`${id} cannot be approved:\n- ${uncovered.join('\n- ')}`);
         const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
-        new GoalRegistryService(journal).approve(id, appetite, undefined, confirmation, setupVersion, flags.flag);
+        new GoalRegistryService(journal).approve(
+          id,
+          appetite,
+          undefined,
+          confirmation,
+          setupVersion,
+          flags.flag,
+          undefined,
+          baselineMissingOf(journal, setupVersion),
+        );
         write(
           `Approved ${id}${setupVersion === undefined ? '' : ` on setup v${setupVersion}`}${flags.flag.length ? ` with flag ${flags.flag.join(', ')}` : ''}`,
         );

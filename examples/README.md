@@ -1,12 +1,13 @@
 # Example Goals
 
-Three small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
+Four small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
 
 | Example | Stack | Goal |
 | --- | --- | --- |
 | `ts-orders` | TypeScript, vitest | An order placed more than 30 days ago cannot be cancelled |
 | `py-parking` | Python, pytest | A slot becomes occupied when its sensor reports a car |
 | `ts-bug` | TypeScript, vitest | A bug: the code `FREE0` (0% off) makes an order's total 0. Run by `npm run demo:bug` through `apos bug` |
+| `py-legacy` | Python, pytest | A repo with **no tests**: approved as low assurance, `pricing.py` captured by a `characterize` Goal, then tidied by a `refactor` Goal. Run by `npm run demo:legacy` |
 
 Each example has:
 
@@ -24,6 +25,15 @@ Each example has:
 | `00b-code-edit` | the repo | The reproduction, and a change to the code | `tests submit`: refused, "the Tester adds tests only" |
 | `01-repro-test` | the repo | The reproduction: red on the bug | `tests submit`: locked |
 | `02-fix` | 01 | The fix | `package submit`: green, verified |
+
+`py-legacy` is the old-repo story: `repo/` has no test (the demo keeps only L2 in the setup, where the captured tests go: an empty layer is red at the gate like any other; the folders `tests/acceptance/` and `tests/integration/` exist with a `.gitkeep`, because a test tool pointed at a missing folder is exit 4, not "no tests"), `brief.md` and `characterize.json` are the first Goal, `refactor-brief.md`, `refactor.json` (paths reach `shipping.py`), `refactor-v2.json` (paths narrowed to `pricing.py`) and `refactor-plan.json` the second, and these steps:
+
+| Patch | On top of | What it is | What APOS says |
+| --- | --- | --- | --- |
+| `01-wrong-capture` | the repo | Tests of `pricing.py`; the one for `FREE0` asserts what the Tester thinks it should do | `tests submit`: refused, `chụp hành vi phải xanh trên code như hiện tại` |
+| `02-capture` | the repo | The same tests, asserting what the code does today | `tests submit`: locked; `package submit` on that commit: green, verified |
+| `03-refactor-breaks` | 02, merged | A restructuring that also "fixes" `FREE0` | `package submit`: red, `APOS-CHARACTERIZED fail` |
+| `04-refactor` | 02, merged | A restructuring that keeps every behaviour | `package submit`: green, verified |
 
 ## The steps
 

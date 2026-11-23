@@ -71,6 +71,13 @@ export const catalogEntrySchema = z.object({
   notImplementedPatterns: z.array(regex),
   /** Regexes that recognise a test that never loaded (collection, import or class-init error), matched on the failure message. */
   loadErrorPatterns: z.array(regex).default([]),
+  /**
+   * How the stack's test tool says "there is no test here": exit codes (pytest: 5) and regexes matched on its output
+   * (vitest: "No test files found"). Empty means the stack cannot tell a repo with no tests from a broken tool, and a
+   * probe of such a repo fails as before.
+   */
+  noTestsExitCodes: z.array(z.number().int()).default([]),
+  noTestsPatterns: z.array(regex).default([]),
   /** How to tell which module a test imports, so a test can be held to the declared entries. Absent: the stack's tests are not checked that way and the assurance table says so. */
   entryRule: entryRuleSchema.optional(),
   /** Regexes forbidden in added diff lines: the strict floor a draft starts with. */

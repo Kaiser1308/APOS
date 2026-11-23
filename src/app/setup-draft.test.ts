@@ -52,6 +52,8 @@ describe('draftSetup', () => {
         assertPatterns: entry.assertPatterns,
         notImplementedPatterns: entry.notImplementedPatterns,
         loadErrorPatterns: entry.loadErrorPatterns,
+        noTestsExitCodes: entry.noTestsExitCodes,
+        noTestsPatterns: entry.noTestsPatterns,
         entryRule: entry.entryRule,
       });
       expect(tests?.paths.length).toBeGreaterThan(0);

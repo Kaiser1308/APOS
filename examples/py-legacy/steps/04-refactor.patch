@@ -1,0 +1,37 @@
+diff --git a/pricing.py b/pricing.py
+index 2862abe..b7407c3 100644
+--- a/pricing.py
++++ b/pricing.py
+@@ -1,15 +1,22 @@
+ """Pricing of an order. Written years ago; nobody wrote a test for it."""
+ 
+ 
+-def quote(items, code=None):
+-    """The total in cents of a list of (name, unit price in cents, quantity), after an optional discount code."""
+-    total = 0
+-    for _name, cents, quantity in items:
+-        total = total + cents * quantity
++def _subtotal(items):
++    return sum(cents * quantity for _name, cents, quantity in items)
++
++
++def _apply_code(total, code):
+     if code == "TEN":
+-        total = total - total // 10
+-    elif code == "FREE0":
+-        total = 0
+-    if 0 < total < 100:
+-        total = 100
++        return total - total // 10
++    if code == "FREE0":
++        return 0
+     return total
++
++
++def _minimum_charge(total):
++    return 100 if 0 < total < 100 else total
++
++
++def quote(items, code=None):
++    """The total in cents of a list of (name, unit price in cents, quantity), after an optional discount code."""
++    return _minimum_charge(_apply_code(_subtotal(items), code))

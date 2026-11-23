@@ -2,6 +2,7 @@ import type { CheckResult, GateReport } from './gate.js';
 import type { LayerId } from './layers.js';
 import { planLayers, type LayerRun, type LayerWhy, type PlanInput, type Stage } from './layer-plan.js';
 import { goalKind } from './contracts.js';
+import { capturedEvidence, preservedEvidence, type Preserved } from './legacy.js';
 import { reviewOverrideBy } from './review-tests.js';
 import { proofDemands } from './proof-tools.js';
 import type { ProjectSetup } from './project-setup.js';
@@ -42,6 +43,12 @@ export type AssuranceReport = {
   exceptions: { kind: string; ref: string; by: string; reason: string }[];
   /** Only for a `bugfix` Goal: the test that reproduces the bug, with the commits it was red and green on, once the evidence is whole. */
   bug?: { reproduced: boolean; test?: string; redOn?: string; greenOn?: string };
+  /** The layers that had no tests when the setup was approved (`--baseline-missing`): the table opens with a warning. */
+  lowAssurance?: string[];
+  /** Only for a `characterize` Goal: the code it captures and the tests it has locked. */
+  captured?: { covers: string[]; tests: number };
+  /** Only for a `refactor` Goal: what it kept, as the gate that judged the captured tests says. */
+  preserved?: Preserved;
   /** Only when `bug approve` gave gates A and B in one go: `human` or `on-behalf:<where they agreed>`. */
   combinedApproval?: string;
   /** What is off, and why. */
@@ -201,7 +208,10 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
   const bugBy = state.bugApproval;
   return {
     goalId,
+    ...(state.baselineMissing?.length ? { lowAssurance: state.baselineMissing } : {}),
     ...(bug ? { bug } : {}),
+    ...(capturedEvidence(state) ? { captured: capturedEvidence(state)! } : {}),
+    ...(preservedEvidence(state) ? { preserved: preservedEvidence(state)! } : {}),
     ...(bugBy ? { combinedApproval: bugBy.by === 'on-behalf' ? `on-behalf:${bugBy.onBehalf ?? '?'}` : 'human' } : {}),
     ...(state.setupVersion === undefined
       ? {}
@@ -266,6 +276,7 @@ const label = (text: string) => `  ${text.padEnd(19)}`;
 /** The text of spec 6.9: what the machine proved, what the Human confirmed by hand, who approved on whose behalf, what is off. */
 export function renderAssuranceText(report: AssuranceReport): string {
   const lines: string[] = [];
+  if (report.lowAssurance) lines.push(`BẢO ĐẢM THẤP: repo chưa có test nền (${report.lowAssurance.join(', ')})`);
   const parts = report.setup ? Object.entries(report.setup.parts).map(([name, stack]) => `${name}: ${stack}`) : [];
   lines.push(
     `${report.goalId}  ${report.setup ? `setup v${report.setup.version}${parts.length ? `  (${parts.join(', ')})` : ''}` : 'không có setup'}`,
@@ -304,6 +315,18 @@ export function renderAssuranceText(report: AssuranceReport): string {
         report.bug.reproduced
           ? `lỗi được tái hiện bằng test ${report.bug.test}: đỏ trên ${report.bug.redOn}, xanh trên ${report.bug.greenOn}`
           : 'lỗi chưa được tái hiện bằng test'
+      }`,
+    );
+  if (report.captured)
+    lines.push(
+      `${label('Chụp hành vi')}${report.captured.tests} test đã khoá, chụp hành vi hiện tại của ${report.captured.covers.join(', ')} (hành vi lạ ghi thành ghi chú, mở \`apos bug\` sau)`,
+    );
+  if (report.preserved)
+    lines.push(
+      `${label('Giữ hành vi')}${
+        report.preserved.proven
+          ? `giữ nguyên hành vi: ${report.preserved.tests} test chụp từ ${report.preserved.from?.join(', ')}, xanh trước trên ${report.preserved.base}, xanh sau trên ${report.preserved.after}`
+          : 'giữ nguyên hành vi: chưa chứng minh (chưa có gate xanh trên các test đã chụp)'
       }`,
     );
   if (report.combinedApproval)

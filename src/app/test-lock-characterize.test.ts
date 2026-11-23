@@ -1,0 +1,118 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { cleanProjects, mapFor, setupDocument, testingProject } from './test-lock.test-support.js';
+import { spec } from '../domain/fixtures.test-support.js';
+
+afterEach(cleanProjects);
+
+/** Characterize Goals say which code they capture; their one criterion is stays-green by default. */
+const characterize = { ...spec, kind: 'characterize' as const, covers: ['src/legacy.txt'] };
+const total = 'tests.acceptance.calc::total';
+const capture = (goalId: string, line = 'case total pass') => ({
+  'tests/acceptance/calc.t': `${line}\n`,
+  [`.apos/goals/${goalId}/tests.json`]: mapFor(goalId, [total]),
+});
+/** The legacy project: the code exists (src/legacy.txt) and nothing tests it. */
+const project = (options: Parameters<typeof testingProject>[0] = {}) =>
+  testingProject({ goal: characterize, files: { 'src/impl.txt': 'add\n', 'src/legacy.txt': 'legacy\n' }, ...options });
+
+describe('tests submit for a characterize Goal', () => {
+  it('locks tests that are green on the code as it is, and reads the criterion as stays-green', async () => {
+    const p = await project();
+    expect(p.state().spec.acceptance[0]?.proof).toBe('stays-green');
+    const commit = p.commit(capture(p.goalId), 'capture');
+    expect(await p.service.submit(p.goalId, commit, 'tester')).toEqual({ ok: true, problems: [] });
+    expect(p.state().testLock?.commit).toBe(commit);
+  }, 60_000);
+
+  it('refuses a test that is red on the current code: capturing behaviour must be green as it is (review focus 3)', async () => {
+    const p = await project();
+    const commit = p.commit(capture(p.goalId, 'case total fail 0 is not 40'), 'capture');
+    const result = await p.service.submit(p.goalId, commit, 'tester');
+    expect(result.ok).toBe(false);
+    expect(result.problems.join('\n')).toContain('chụp hành vi phải xanh trên code như hiện tại');
+    expect(p.state().testLock).toBeUndefined();
+  }, 60_000);
+
+  it('refuses a Tester who changes code, a stub or test infrastructure (review focus 3)', async () => {
+    const p = await project();
+    for (const [file, content] of [
+      ['src/legacy.txt', 'edited\n'],
+      ['src/stub.txt', 'stub\n'],
+      ['tests/infra.cfg', 'swallow\n'],
+    ] as const) {
+      const result = await p.service.submit(
+        p.goalId,
+        p.commit({ ...capture(p.goalId), [file]: content }, file),
+        'tester',
+      );
+      expect(result.ok, file).toBe(false);
+      expect(result.problems.join('\n'), file).toContain(`${file}: characterize: the Tester adds tests only`);
+    }
+    expect(p.state().testLock).toBeUndefined();
+  }, 180_000);
+
+  it('refuses code changed in any commit of the Goal, even one a later commit puts back', async () => {
+    const p = await project();
+    p.commit({ 'src/legacy.txt': 'tampered\n' }, 'fix the code so the test is easy');
+    const commit = p.commit({ ...capture(p.goalId), 'src/legacy.txt': 'legacy\n' }, 'capture, code put back');
+    const result = await p.service.submit(p.goalId, commit, 'tester');
+    expect(result.ok).toBe(false);
+    expect(result.problems.join('\n')).toMatch(/src\/legacy\.txt: characterize: .*in commit \w{7}/);
+    expect(p.state().testLock).toBeUndefined();
+  }, 60_000);
+
+  it('lets the tests import the code it captures, and no other internal module', async () => {
+    const entryRule = {
+      importPatterns: ['^use (\\S+)'],
+      allowImports: [],
+      moduleSeparator: '/',
+      moduleFiles: ['{path}.txt'],
+    };
+    const setup = {
+      ...setupDocument,
+      parts: { app: { ...setupDocument.parts.app, tests: { ...setupDocument.parts.app.tests, entryRule } } },
+    };
+    const p = await project({ setup });
+    const refused = await p.service.submit(
+      p.goalId,
+      p.commit(capture(p.goalId, 'use src/impl\ncase total pass'), 'imports a module the Goal does not cover'),
+      'tester',
+    );
+    expect(refused.ok).toBe(false);
+    expect(refused.problems.join('\n')).toContain('imports "src/impl"');
+    const ok = await p.service.submit(
+      p.goalId,
+      p.commit(capture(p.goalId, 'use src/legacy\ncase total pass'), 'imports the covered code'),
+      'tester',
+    );
+    expect(ok.problems).toEqual([]);
+    expect(ok.ok).toBe(true);
+  }, 120_000);
+
+  it('leaves an ordinary Goal as it was', async () => {
+    const p = await testingProject();
+    const commit = p.commit({ ...capture(p.goalId, 'case total needs add'), 'src/stub.txt': 'stub\n' }, 'tests');
+    expect((await p.service.submit(p.goalId, commit, 'tester')).ok).toBe(true);
+  }, 60_000);
+});
+
+describe('the package gate of a characterize Goal', () => {
+  it('sees code changed in a commit and put back, which the net diff does not', async () => {
+    const { characterizeScopeCheck } = await import('./characterized-gate.js');
+    const p = await project();
+    const setup = p.loadSetup(p.state());
+    const lock = p.commit(capture(p.goalId), 'capture');
+    const clean = characterizeScopeCheck({
+      repo: p.dir,
+      setup,
+      base: lock,
+      head: p.commit({ 'tests/acceptance/more.t': 'case x pass\n' }),
+    });
+    expect(clean.status).toBe('pass');
+    p.commit({ 'src/legacy.txt': 'tampered\n' }, 'edit the code');
+    const head = p.commit({ 'src/legacy.txt': 'legacy\n' }, 'put it back');
+    const seen = characterizeScopeCheck({ repo: p.dir, setup, base: lock, head });
+    expect(seen.status).toBe('fail');
+    expect(seen.reason).toMatch(/src\/legacy\.txt \(commit \w{7}\)/);
+  }, 60_000);
+});

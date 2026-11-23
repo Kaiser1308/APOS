@@ -1,0 +1,17 @@
+{
+  "id": "EXEC-002",
+  "version": 1,
+  "goalId": "GOAL-002",
+  "goalVersion": 2,
+  "mode": "solo-direct",
+  "approach": "Extract the steps of quote into small functions in pricing.py and keep quote as the only entry",
+  "rationale": "One module, one owner: the captured tests are the safety net",
+  "risks": [
+    "A rounding rule is lost in the split"
+  ],
+  "paths": [
+    "pricing.py"
+  ],
+  "acceptanceMapping": [],
+  "verificationStrategy": "the tests the characterize Goal locked, green on the base and on the delivery"
+}

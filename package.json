@@ -13,6 +13,7 @@
     "demo:ts": "npm run build && node scripts/demo-goal.mjs ts-orders",
     "demo:py": "npm run build && node scripts/demo-goal.mjs py-parking",
     "demo:bug": "npm run build && node scripts/demo-goal.mjs ts-bug",
+    "demo:legacy": "npm run build && node scripts/demo-goal.mjs py-legacy",
     "skills:check": "node scripts/promote-skills.mjs --check",
     "skills:promote": "node scripts/promote-skills.mjs",
     "format": "prettier --write .",

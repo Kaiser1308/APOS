@@ -1,0 +1,103 @@
+{
+  "id": "GOAL-001",
+  "version": 1,
+  "outcome": "Write down what pricing.py does today, so it can be restructured safely",
+  "requirements": [
+    {
+      "id": "R-1",
+      "sourceSpan": "item 1",
+      "text": "The total is the sum of unit price times quantity",
+      "disposition": "acceptance"
+    },
+    {
+      "id": "R-2",
+      "sourceSpan": "item 2",
+      "text": "An order under 1.00 (and not free) is charged 1.00",
+      "disposition": "acceptance"
+    },
+    {
+      "id": "R-3",
+      "sourceSpan": "item 3",
+      "text": "The code TEN takes a tenth off, rounded down",
+      "disposition": "acceptance"
+    },
+    {
+      "id": "R-4",
+      "sourceSpan": "item 4",
+      "text": "The code FREE0 makes the order free (looks like a defect: captured, not fixed)",
+      "disposition": "acceptance"
+    }
+  ],
+  "scope": [
+    "pricing.py"
+  ],
+  "exclusions": [
+    "shipping.py is not captured here"
+  ],
+  "acceptance": [
+    {
+      "id": "AC-1",
+      "text": "The total is unit price times quantity, summed",
+      "requirementIds": [
+        "R-1"
+      ],
+      "given": "two items: 2 pens at 1.50 and 1 ink at 3.00",
+      "when": "the order is quoted",
+      "then": "the total is 6.00",
+      "checkIds": [
+        "CHK-1"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "text": "An order under 1.00 is charged 1.00",
+      "requirementIds": [
+        "R-2"
+      ],
+      "given": "an order of 3 clips at 0.05",
+      "when": "the order is quoted",
+      "then": "the total is 1.00",
+      "checkIds": [
+        "CHK-1"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "text": "The code TEN takes a tenth off, rounded down",
+      "requirementIds": [
+        "R-3"
+      ],
+      "given": "an order of 10.05 and the code TEN",
+      "when": "the order is quoted",
+      "then": "the total is 9.05: the tenth is 1.00, rounded down",
+      "checkIds": [
+        "CHK-1"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "text": "The code FREE0 makes the order free",
+      "requirementIds": [
+        "R-4"
+      ],
+      "given": "an order of 3.00 and the code FREE0",
+      "when": "the order is quoted",
+      "then": "the total is 0",
+      "checkIds": [
+        "CHK-1"
+      ],
+      "boundaries": [
+        "possibly a defect (the code reads as 0% off): captured as it is; open apos bug later"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "CHK-1",
+      "kind": "command",
+      "command": "pytest -q",
+      "expect": "pass"
+    }
+  ],
+  "priority": 1
+}

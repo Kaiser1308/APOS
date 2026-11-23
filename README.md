@@ -33,7 +33,7 @@
 3. [Install](#install)
 4. [Quick start](#quick-start)
 5. [The Goal contract](#the-goal-contract)
-6. [Delivery flows](#delivery-flows)
+6. [Delivery flows](#delivery-flows) (Solo, [a bug](#fixing-a-bug-apos-bug), [an old repo](#an-old-repo-with-few-tests), Multi-WP)
 7. [Project setup](#project-setup), [Layers by stage](#layers-by-stage), [The assurance table](#the-assurance-table) and [Web UI](#web-ui)
 8. [Configuration and state](#configuration-and-state)
 9. [Trust model](#trust-model)
@@ -101,7 +101,7 @@ flowchart TD
 
 ### Human-only commands
 
-`goal approve`, `goal appetite`, `goal select`, `bug approve`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base` and `blocker resolve`) are Human decisions. Each one makes you **type the Goal id back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
+`goal approve`, `goal appetite`, `goal select`, `bug approve`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base` and `blocker resolve`) are Human decisions; `setup approve` is one too, and `--baseline-missing` (accepting a repo with no tests) is the Human's to say. Each one makes you **type the Goal id back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
 
 `goal appetite` is the Human's decision to change the budget, never the scope.
 
@@ -264,6 +264,16 @@ apos outcome close GOAL-BUG-001
 
 Nothing about the gate is shortcut. Two rules are stricter for a bug, because its test must show the bug and not a stub: the Tester's commit may change tests and `tests.json` and nothing else (no code, stub or test infrastructure; so the test is red on the code as it is, the plan's base), and a reproduction that is already green is refused as "test không tái hiện lỗi". A bug that needs more than one criterion, a benchmark or a dependency is an ordinary Goal (a `bugfix` with two criteria is refused, also by `goal revise`). The assurance table ends the story with `lỗi được tái hiện bằng test <id>: đỏ trên <base>, xanh trên <delivery>`, or `lỗi chưa được tái hiện bằng test` while the evidence is not whole. `npm run demo:bug` runs it with vitest; see [docs/demo.md](docs/demo.md).
 
+### An old repo with few tests
+
+A repo with no tests (or few) does not need tests first; it needs an honest label and a way to get a safety net before anything is restructured. Three steps, each a Goal or a decision with its own rule:
+
+1. **Approve the setup as low assurance.** `apos setup probe` reads a test layer whose tool says "no tests" (pytest exit 5, vitest "No test files found", declared in the catalog) as `no-tests` and not as a failure. `apos setup approve --commit <sha>` is refused until the Human adds `--baseline-missing`; the approval then carries `assurance: baseline-missing`, and every Goal on that setup opens its assurance table with `BẢO ĐẢM THẤP: repo chưa có test nền (app.L1, app.L2)`. The label adds a warning and removes no check (a layer with no tests is still red at the gate: keep only the layers that have tests in the setup, as `examples/py-legacy` does). It goes only when a new setup version is approved on a probe that finds tests ([docs/setup.md](docs/setup.md)).
+2. **Capture the behaviour: a `characterize` Goal.** It writes down what the code does *today*, odd behaviour included. `apos goal create --file goal.json --source brief.md --kind characterize --covers <glob>` (or `"kind": "characterize", "covers": [...]` in the file): `covers` is the code it captures, and the Human approves it with the Goal at `goal approve`. Every criterion is `stays-green` (another proof is refused at creation). The Tester's commit may change tests and `tests.json` and nothing else, **in any commit of the Goal** (code changed in one commit and put back in the next is refused too), and a test that is red on the code as it is is refused: `chụp hành vi phải xanh trên code như hiện tại`. A behaviour that looks like a defect is written down as it is, with a note in the criterion; the defect is a separate `apos bug` later. There is no code to write: `apos lead propose --characterize --goal <id>` writes the Solo plan (the package may change test files only), and once `tests submit` has locked the tests the Lead submits that same commit (`apos package submit <id> WP-MAIN --commit <lock commit>`); the gate, the close-stage layers and `outcome close` are the usual ones.
+3. **Refactor only what is captured: a `refactor` Goal.** `"kind": "refactor", "paths": [...]` (or `--kind refactor --paths <glob>`). `goal approve` refuses, naming the files, when a file that `paths` matches in the repo today is not matched by the `covers` of a **closed** characterize Goal (a glob that matches no file is refused too: a typo is not "nothing to cover"); `lead commit` checks the same on the plan's base commit, that the base contains the commits that locked the tests, and that the plan's `paths` stay inside the Goal's. The tests those Goals locked become required evidence: the gate (at `package submit`, and again at the close stage) runs them as the check `APOS-CHARACTERIZED`: each must be green on the base (the behaviour was captured as it was), still be there byte for byte and green on the delivery. A refactor that turns one red, edits it or deletes it is red, like any locked test. A refactor needs no criterion of its own (if it has any they are `stays-green`); the inventory check and the `mutation` flag work as for any Goal. Its assurance table says `giữ nguyên hành vi: <n> test chụp từ <GOAL-…>, xanh trước trên <base>, xanh sau trên <commit>`.
+
+`npm run demo:legacy` runs the whole story on `examples/py-legacy` with pytest; see [docs/demo.md](docs/demo.md).
+
 ### Multi-WP
 
 Chosen by the Lead when one session is too small. `lead propose` then `package add --file <json> --reason <text>` for each package (at least two, acyclic, versioned interfaces `name@vN`, acceptance with the `checkIds` its gate runs), then `lead commit`. APOS notifies the Human.
@@ -337,6 +347,8 @@ GOAL-001  setup v1  (app: python)
   Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
 ```
 
+A Goal on a setup approved with no baseline opens with a first line, `BẢO ĐẢM THẤP: repo chưa có test nền (app.L1, app.L2)`. A characterize Goal adds `Chụp hành vi` (the code it captures, the tests locked), and a refactor adds `Giữ hành vi` (`giữ nguyên hành vi: <n> test chụp từ <GOAL-…>, xanh trước trên <base>, xanh sau trên <commit>`, or that it is not proved yet).
+
 It says what the machine proved, what you confirm by hand, which layers were cut and by whom (`human`, `on-behalf:<where>`, `agent:<name>`), tools whose only evidence is an exit code, and what is off (a flag-gated tool, a floor layer with no tool, the entry check for a stack with no rule, no setup at all).
 
 ## Web UI
@@ -388,9 +400,9 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `migrate` | Import APOS v1 Goal histories into the controller log. |
 | `setup draft [--part <name>=<dir>[:<stack>]]... [--force]` | Write a draft `.apos/project.yaml` from the tool catalog (not committed). |
 | `setup probe [--commit <rev>]` | Run every tool of the committed setup in clean worktrees and record the result. |
-| `setup approve --commit <sha>` | **H.** Approve the probed setup as the next version. |
+| `setup approve --commit <sha> [--baseline-missing]` | **H.** Approve the probed setup as the next version. A probe that found a layer with no tests (`no-tests`) is approved only with `--baseline-missing`: every Goal on that setup is then labelled low assurance. |
 | `setup show` | Print the latest approved setup version. |
-| `goal create --file <json> --source <path> [--origin <text>]` | Draft a Goal bound to a source snapshot. |
+| `goal create --file <json> --source <path> [--origin <text>] [--kind <kind>] [--covers <glob>]... [--paths <glob>]...` | Draft a Goal bound to a source snapshot. `--kind characterize --covers <glob>` captures the current behaviour of that code; `--kind refactor --paths <glob>` restructures code that is already captured (the flags win over the same fields in the file). |
 | `goal list` | List Goals, their status and the setup version they are pinned to. |
 | `plan [--source <path>] [--json]` | Show the multi-Goal plan (including sketch and deferred Goals) and requirement coverage (`covered`, `planned`, `deferred`, `orphan`, `out-of-scope`). |
 | `goal approve <id> --size <S\|M\|L> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>] [--setup-version <n\|latest>] [--flag <name>]...` | **Gate A (H).** Pins the latest approved setup (or the version given). `--flag mutation` switches the setup's mutation tool on for this Goal (see [Mutation](#mutation)). |
@@ -399,7 +411,7 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `bug open "<description>" --given <text> --when <text> --then <text> [--repro-hint <path>] [--part <part>] [--check <command>]` | Draft a Solo `bugfix` Goal (`GOAL-BUG-<n>`): one criterion proved by a red-green test, the description and flags as its hashed source. The check comes from the approved setup; `--check` is only for a project with none. |
 | `bug approve <id> [--appetite <S\|M\|L>] [--minutes <n>] [--attempts <n>] [--flag <name>]...` | **Gates A and B (H).** Approve, appetite (default S, 60 min, 3 attempts) and select in one go, with one confirmation. Refuses a Goal that is not a `bugfix`. |
 | `goal revise --file <json> --source <path> [--origin <text>]` | New Goal version; needs re-approval. |
-| `lead propose (--file <json> \| --bugfix --goal <id> [--base <sha>] [--stub <path>]...) [--by <name>]` | Submit an execution proposal (`baseCommit` required). `--bugfix` writes the Solo plan of a bug Goal from the Goal and its setup: the Tester reproduces, the Worker fixes. |
+| `lead propose (--file <json> \| --bugfix --goal <id> [--base <sha>] [--stub <path>]... \| --characterize --goal <id> [--base <sha>]) [--by <name>]` | Submit an execution proposal (`baseCommit` required). `--bugfix` writes the Solo plan of a bug Goal from the Goal and its setup: the Tester reproduces, the Worker fixes. `--characterize` writes the Solo plan of a characterize Goal: the Tester captures the behaviour in tests, no code changes. |
 | `lead commit <id> [--by <name>]` | Accept the plan. Solo gets `WP-MAIN`. A Goal pinned to a setup with test paths goes to `testing` first. |
 | `tests submit <goalId> --commit <sha> [--by <name>]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
 | `tests revise <goalId> --commit <sha> --reason <text> [--by <name>]` | Replace the lock. Exit 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception. |
@@ -451,7 +463,7 @@ Mutation testing is the second net under the assertion count: it changes the cod
 
 ## Demo
 
-`npm run demo:ts`, `npm run demo:py` and `npm run demo:bug` run an example Goal (`examples/ts-orders`, `examples/py-parking`, `examples/ts-bug`) through the whole flow with the real binary and a real test runner, and print the assurance table. The output of all three is in [docs/demo.md](docs/demo.md).
+`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug` and `npm run demo:legacy` run an example (`examples/ts-orders`, `examples/py-parking`, `examples/ts-bug`, `examples/py-legacy`) through the whole flow with the real binary and a real test runner, and print the assurance table. The output of all four is in [docs/demo.md](docs/demo.md).
 
 ## Old logs (legacy Goals)
 
@@ -489,6 +501,8 @@ Conventions and the dependency rules: [`AGENTS.md`](AGENTS.md), [`docs/architect
 - **The assertion count is rough** (a regex per line, see [Locked tests](#locked-tests)). **Whether the tests call the code only through the declared entries is checked only for the stacks whose catalogue has an `entryRule`** (Python, TypeScript; not Java yet); the assurance table says "chưa kiểm" for the others. The check reads import lines, so a dynamic import or a call through a re-export is not seen.
 - **Test ids are the layer report's ids.** A runner that changes how it names tests (for example renaming a `describe`) looks like a deleted test.
 - **The gate runs the Goal's own checks.** What it proves is only as good as the checks the Goal names, the tests locked from them and the layers the setup defines; the assurance table says which of these ran.
+- **A characterize Goal captures behaviour, not correctness.** Its tests pass because they describe what the code does today; APOS cannot tell a wanted behaviour from a defect, nor whether the tests reach every path of the code in `covers` (the assertion count is rough, there is no coverage). A refactor is as safe as the captured tests are complete. The `mutation` flag on the refactor Goal is how to see how much they would catch.
+- **The low-assurance label judges nothing differently.** A layer whose tool finds no test is red or `unverifiable` at the gate and at close, labelled or not: a legacy setup lists only the layers that have tests to run (L2 for the captured tests), or cuts one with a `floor-reduced` exception. Goals keep the label until a new setup version is approved on a probe that finds tests.
 - **Single host, trusted user** (see the trust model). Windows and Linux; Node 24+.
 - **Event log compatibility.** Controller-published document milestones are `documents-published` events with commit and file hashes. Do not roll back to a build older than v3 once a log holds v3 events: such a build does not know them.
 - **A Goal is one repo.** A Goal spanning several repos is out of scope for now.

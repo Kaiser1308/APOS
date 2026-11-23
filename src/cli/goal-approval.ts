@@ -51,3 +51,8 @@ export function approvalSetupVersion(
   }
   return setupVersion;
 }
+
+/** The layers with no tests that the approval of setup `version` accepted (`--baseline-missing`), for the label of a Goal pinned to it. */
+export function baselineMissingOf(journal: ProjectJournal, version: number | undefined): string[] {
+  return journal.setupHistory().approvals.find(item => item.version === version)?.baselineMissing ?? [];
+}

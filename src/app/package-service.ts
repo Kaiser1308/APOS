@@ -3,7 +3,9 @@ import { newEvent } from './events.js';
 import { minutesOverBudget, type GoalEventType, type GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
-import type { GateResult } from '../domain/gate.js';
+import { summarizeGate, type GateReport, type GateResult } from '../domain/gate.js';
+import { INFRA_CHECK, SCOPE_CHECK } from '../domain/assurance.js';
+import { randomUUID } from 'node:crypto';
 import { UserError } from '../domain/errors.js';
 import type { GateService } from './gate-service.js';
 import { GitCommitInspector } from './integration.js';
@@ -22,8 +24,15 @@ export class PackageService {
     this.store.append(newEvent(goalId, type, data));
   }
 
+  /** A Goal pinned to a setup scopes every package: a package without `paths` would run with no scope check. */
+  private requirePaths(goalId: string, spec: WorkPackageSpec): void {
+    if (this.store.getGoal(goalId)?.setupVersion !== undefined && !spec.paths?.length)
+      throw new UserError(`${spec.id} has no paths: the gate needs to know which files the package may change`);
+  }
+
   add(goalId: string, value: unknown, reason?: string, by = 'lead'): WorkPackageSpec {
     const spec = parseWorkPackage(value);
+    this.requirePaths(goalId, spec);
     const state = this.store.getGoal(goalId);
     const drafting = state?.status === 'planned' && reason === undefined;
     this.record(goalId, drafting ? 'package-added' : 'package-plan-added', drafting ? spec : { spec, reason, by });
@@ -36,6 +45,7 @@ export class PackageService {
 
   revise(goalId: string, value: unknown, reason: string, by = 'lead'): WorkPackageSpec {
     const spec = parseWorkPackage(value);
+    this.requirePaths(goalId, spec);
     this.record(goalId, 'package-revised', { spec, reason, by });
     return spec;
   }
@@ -59,6 +69,47 @@ export class PackageService {
   }
 
   /**
+   * A package that needed a human on this very commit and has an approved exception for it is judged again from the
+   * gate that already ran, with the sensitive-file decision marked approved: nothing is run twice for the same commit.
+   */
+  private approvedReport(state: GoalState, packageId: string, commit: string): GateReport | undefined {
+    const item = state.packages?.[packageId];
+    const prior = item?.gate;
+    if (!item || item.status !== 'needs-human' || prior?.result !== 'needs-human') return undefined;
+    if (prior.deliveryCommit.toLowerCase() !== commit.toLowerCase()) return undefined;
+    // Every check that waits for a decision needs its own approval (a sensitive file, test infrastructure).
+    const kindOf: Record<string, 'needs-human' | 'tests-infra'> = {
+      [SCOPE_CHECK]: 'needs-human',
+      [INFRA_CHECK]: 'tests-infra',
+    };
+    const waiting = prior.checks.filter(check => check.status === 'needs-human');
+    const approvals = waiting.map(check =>
+      [...(state.exceptions ?? [])]
+        .reverse()
+        .find(
+          entry =>
+            entry.kind === kindOf[check.checkId] &&
+            entry.ref === packageId &&
+            entry.commit.toLowerCase() === commit.toLowerCase(),
+        ),
+    );
+    if (!waiting.length || approvals.some(entry => !entry)) return undefined;
+    const checks = prior.checks.map(check => {
+      const approval = approvals[waiting.indexOf(check)];
+      return approval
+        ? { ...check, status: 'pass' as const, reason: `${check.reason}, duyệt bởi ${approval.by}: ${approval.reason}` }
+        : check;
+    });
+    return {
+      ...prior,
+      gateId: `GATE-${randomUUID()}`,
+      checks,
+      result: summarizeGate(checks),
+      at: new Date().toISOString(),
+    };
+  }
+
+  /**
    * Runs the gate on `commit` right now and records the outcome. The commit is checked first and the gate runs
    * before anything is written, so an invalid commit or an interrupted gate leaves the log as it was. A solo
    * package that goes green also verifies the Goal.
@@ -73,7 +124,7 @@ export class PackageService {
       throw new UserError(`${goalId} is a legacy Goal recorded by an older APOS: it is read-only`);
     if (state.status !== 'executing')
       throw new UserError(
-        `${goalId} is ${state.status}${state.blocker ? ` (${state.blocker.note})` : ''}: only an executing Goal takes a submission${state.status === 'planned' ? '; run `apos lead commit` first' : ''}`,
+        `${goalId} is ${state.status}${state.blocker ? ` (${state.blocker.note})` : ''}: only an executing Goal takes a submission${state.status === 'planned' ? '; run `apos lead commit` first' : state.status === 'testing' ? '; the acceptance tests are not locked yet: run `apos tests submit` first' : ''}`,
       );
     const item = state.packages?.[packageId];
     if (!item) throw new UserError(`Unknown package ${packageId} of ${goalId}`);
@@ -82,11 +133,17 @@ export class PackageService {
         `${packageId} is ${item.status}: only a pending, red or needs-human package can be submitted`,
       );
     if (!/^[0-9a-fA-F]{40,64}$/.test(commit)) throw new UserError('Submit the full commit sha');
-    const base = state.proposal?.baseCommit;
+    // With locked tests every package is gated on top of the commit that locked them.
+    const planBase = state.proposal?.baseCommit;
+    const base = state.testLock?.commit ?? planBase;
     if (!base) throw new UserError(`${goalId} has no proposal.baseCommit to gate against`);
     if (!inspector.exists(repoPath, commit)) throw new UserError(`Commit ${commit} does not exist in this repository`);
     if (!inspector.contains(repoPath, base, commit))
-      throw new UserError(`Commit ${commit} does not contain the base ${base} of ${packageId}`);
+      throw new UserError(
+        state.testLock
+          ? `Commit ${commit} does not contain the commit that locked the tests (${base}): rebase ${packageId} onto it, then submit again`
+          : `Commit ${commit} does not contain the base ${base} of ${packageId}`,
+      );
 
     const notGreen = item.spec.dependencies.filter(dep => state.packages?.[dep]?.status !== 'green');
     if (notGreen.length)
@@ -94,7 +151,8 @@ export class PackageService {
     const checkedAt = new Date().toISOString();
     this.enforceTimeBudget(goalId, state, checkedAt);
 
-    const report = gate.runPackage(goalId, packageId, repoPath, commit, base);
+    const approved = this.approvedReport(state, packageId, commit);
+    const report = approved ?? gate.runPackage(goalId, packageId, repoPath, commit, base);
     // Stamped with the time of the budget check above, so a long gate cannot push the submission past the budget.
     const submitted = newEvent(
       goalId,

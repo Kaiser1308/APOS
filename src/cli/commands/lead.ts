@@ -1,7 +1,9 @@
 import { newEvent } from '../../app/events.js';
 import { assertProposalRationale, parseExecutionProposal, proposalRationale } from '../../domain/contracts.js';
 import { GitCommitInspector } from '../../app/integration.js';
+import { goalNeedsTests, setupLocksTests, testPlanProblems } from '../../domain/test-plan.js';
 import { UserError } from '../../domain/errors.js';
+import { pinnedSetupOf } from '../test-lock-wiring.js';
 import type { CliContext } from '../context.js';
 
 export function registerLead(ctx: CliContext): void {
@@ -56,7 +58,20 @@ export function registerLead(ctx: CliContext): void {
           state.proposal,
           `. This saved proposal predates that field: add a "rationale" string to your execution JSON, re-run apos lead propose --file <execution.json>, then apos lead commit ${id}`,
         );
-        journal.append(newEvent(id, 'proposal-approved', { by: flags.by, proposalVersion: state.proposal.version }));
+        const problems = testPlanProblems({
+          goal: state.spec,
+          proposal: state.proposal,
+          packages: Object.values(state.packages ?? {}).map(item => item.spec),
+          pinned: state.setupVersion !== undefined,
+        });
+        if (problems.length) throw new UserError(`The plan is not ready:\n- ${problems.join('\n- ')}`);
+        // A Goal pinned to a setup that says where tests are gets a tester before any code; the decision is recorded here
+        // because replaying older logs must not change what they did.
+        const setup = pinnedSetupOf(ctx, journal, state.setupVersion);
+        const testing = Boolean(setup && setupLocksTests(setup) && goalNeedsTests(state.spec));
+        journal.append(
+          newEvent(id, 'proposal-approved', { by: flags.by, proposalVersion: state.proposal.version, testing }),
+        );
         if (state.proposal.mode === 'multi-wp') {
           const notice = {
             kind: 'multi-wp',
@@ -68,7 +83,11 @@ export function registerLead(ctx: CliContext): void {
           journal.append(newEvent(id, 'human-notified', notice));
           write(`NOTICE ${id}: Lead chose Multi-WP (${notice.packages.length} packages): ${notice.splitRationale}`);
         }
-        write(`Accepted ${id}. Deliver with \`apos package submit ${id} <package> --commit <sha>\`.`);
+        write(
+          testing
+            ? `Accepted ${id}. Next the tester writes the acceptance tests and stubs: \`apos tests submit ${id} --commit <sha>\`. Packages open once they are locked.`
+            : `Accepted ${id}. Deliver with \`apos package submit ${id} <package> --commit <sha>\`.`,
+        );
       }),
     );
 }

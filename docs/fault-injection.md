@@ -28,7 +28,7 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | Delivery rewrites an APOS skill, Goal document or source | gate red (`APOS-PROTECTED`) | `gate-service.test.ts` › fails the gate when the delivery rewrites an APOS-managed file |
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
 | Manual check confirmed by whoever submitted the work | refused | `gate-service.test.ts` › accepts manual confirmation only for a declared manual check … |
-| Tests, oracles, check-run files or build manifests changed | **warning in the gate report, the inbox and the UI; not blocked** (no test lock until phase 3: a known gap) | `v2-rules.test.ts` › warns when the gated diff changes tests …; `inbox.test.ts` › shows the warnings a gate report carries |
+| Tests, oracles, check-run files or build manifests changed | **warning in the gate report, the inbox and the UI; not blocked** for a Goal with no locked tests (a locked test changing is red: see [phase 3](#locked-tests-inventory-and-scope-phase-3)) | `v2-rules.test.ts` › warns when the gated diff changes tests …; `inbox.test.ts` › shows the warnings a gate report carries |
 | A review says `changes` | recorded as advice; gates nothing | `v2-rules.test.ts` › records a review as advice only; `integration.test.ts` › no longer needs a review to integrate |
 
 ## Submitting a package
@@ -90,6 +90,40 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | Setup approved after a Goal was approved | the Goal keeps its pinned version | `goal-setup-pin.test.ts` |
 | Approving without a terminal and without `--on-behalf` | refused | `setup-flow.test.ts` |
 
+## Locked tests, inventory and scope (phase 3)
+
+`APOS-INVENTORY` and `APOS-SCOPE` apply to every Goal pinned to a setup (the inventory against the plan base when there is no lock; the scope when the plan names `paths`); `APOS-LOCKED` only to a Goal with locked tests. A Goal pinned to no setup gets none of them. Every case is a test with a real git repo and a fake test tool (`test-lock.test-support.ts`); the end-to-end cases also run real pytest and vitest (`locked-flow.test.ts`, skipped when the runner is absent).
+
+| Injected fault | Expected | Test |
+| --- | --- | --- |
+| Test already green when submitted (a stub that works, or a test that never calls it) (review focus 1) | `tests submit` refuses and names the test; nothing locked | `test-lock.test.ts` › refuses a test that is already green and names it; `locked-flow.test.ts` |
+| Test red because it never loaded: load error, or an error that is not "not implemented" (review focus 2) | refused, not counted as red | `test-lock.test.ts` › refuses a test that is red because it did not load, or because of a typo; `test-lock.test.ts` (domain) › judgeSuite |
+| A mapped test the report does not hold | refused: the file did not load | `test-lock.test.ts` › refuses a test the report does not hold |
+| Tester commit touches source, docs or an undeclared file; deletes a test file | refused naming the file | `test-lock.test.ts` › lets the tester touch tests, declared stubs and tests.json …; › refuses to delete an existing test file |
+| `tests.json` missing, invalid, or a criterion without a test | refused, every problem listed at once | `test-lock.test.ts` › needs tests.json …; › reports every problem at once |
+| Two runs of the same commit disagree | refused: flaky | `test-lock.test.ts` › refuses when two runs … disagree |
+| Package branched from the old base, without the locked commit (review focus 3) | `package submit` refused: rebase onto the lock commit | `assurance-gate.test.ts` › refuses a package branched from the old base …; `test-lock.test.ts` › … does not contain the plan base |
+| Locked test edited by one space, or deleted (review focus 5) | gate red `locked test modified: <path>` | `assurance-gate.test.ts` › is red when the worker changes a locked test …; `assurance.test.ts`; `locked-flow.test.ts` |
+| Locked test edited and the runner broken in the same commit | still red (`locked test modified`), not `unverifiable` | `assurance-gate.test.ts` › a locked test edited while the runner is also broken is red …; `assurance.test.ts` |
+| Wide `paths` (`tests/**`, `**`): a package adds `tests/conftest.py` with a `pytest_runtest_makereport` hook that turns failures into passes, or `vitest.config.ts` + `setupFiles` that mocks the code under test, so the locked red test reads green | the gate is not green: `APOS-INFRA needs-human: hạ tầng test bị sửa: <path>` (the report shows `APOS-LOCKED` passing: that is the false green being judged) | `locked-flow.test.ts` › … swallowing the failure of the locked test is not green (real pytest and vitest); `assurance-gate.test.ts` › test infrastructure |
+| Infra file edited, added or deleted; the same commit after approval | `needs-human`; `exception approve --kind tests-infra` (agent: `agent:<name>`); the report and inbox say `hạ tầng test bị sửa: <path>, duyệt bởi <by>`; a `needs-human` (sensitive file) approval does not settle it; same commit green without a rerun | `exceptions.test.ts` › tests-infra; `assurance.test.ts` › infraCheck |
+| Stays-green test that already existed (tester changed nothing) | its file is locked with the rest, so weakening it is red | `codex-review.test.ts` |
+| Dependent Multi-WP package | the files its green dependency brought are not its change for `APOS-SCOPE` or `APOS-INFRA` unless modified again | `codex-review.test.ts` |
+| Package added or revised without `paths` on a pinned Goal | refused | `codex-review.test.ts` |
+| Locked test still failing on the delivery | gate red naming the test | `assurance-gate.test.ts` › is red when a locked test still fails |
+| Unit test deleted, or turned into a skip | gate red `test missing` / `test now skipped` | `assurance-gate.test.ts` › is red when a test that existed … |
+| Forbidden pattern (`@skip`, `.only`, `# type: ignore`) in an added line | gate red | `assurance-gate.test.ts` › is red for a forbidden pattern … |
+| File changed outside the package paths | gate red `APOS-SCOPE` | `assurance-gate.test.ts` › is red for a file outside the package paths |
+| Sensitive file changed | `needs-human` (exit 3), not also out of scope | `assurance-gate.test.ts` › needs a human for a sensitive file …; `assurance.test.ts` |
+| Exception for the package and commit | same commit green without a new gate run; another commit asks again; logged as `agent:<name>` | `exceptions.test.ts`; `exception-command.test.ts` |
+| Exception by a bare name, both `--by` and `--human`, `--human` with no terminal, `floor-reduced`, nothing waiting | refused | `exceptions.test.ts` › refuses what is not waiting …; `exception-command.test.ts` |
+| Test renamed in a revision (review focus 4) | treated as deleted: waits for a `tests-weakened` exception, not re-locked | `test-revise.test.ts` › treats a renamed locked test as a deleted one |
+| Revision with fewer asserts in a file, or fewer tests for a criterion | waits for the exception | `test-revise.test.ts` |
+| Revision that is green on the old code, does not contain the lock, or touches source | refused | `test-revise.test.ts` › refuses a revision that is green on the old code … |
+| Revision that keeps ids and asserts | re-locked with `revisionOf`; packages go back to `pending` and must contain the new lock | `test-revise.test.ts` › locks a stronger suite … |
+| Goal that pinned no setup, or a setup without `tests.paths` | no `testing` stage, no locked tests, runs as in phases 1 and 2; `goal show` says `không có khoá test` | `lead-commit-plan.test.ts`; `goal-setup-pin.test.ts`; `v3-flow.test.ts` |
+| Old log written before phase 3 | replays: `proposal-approved` with no `testing` flag goes to `executing` | `test-lock.test.ts` (domain) › goes to testing only when the Lead's commit says so |
+
 ## Cases dropped in phase 1 and why
 
 APOS v2 started, resumed, woke and watched agents through Orca (`controller watch`, Lead dispatch, `handoff`, role profiles, Runs). v3 does none of it: an orchestrator outside APOS does, and APOS only checks the commits it is handed. Every case below existed only because APOS drove agents, so it was removed together with the code it tested. The v2 table is in [`docs/archive/FINAL-DESIGN-v2.1.md`](archive/FINAL-DESIGN-v2.1.md) §8 and in git history.
@@ -111,5 +145,7 @@ APOS v2 started, resumed, woke and watched agents through Orca (`controller watc
 ## Not covered by automated tests
 
 - **A malicious local process.** The controller home (`~/.apos`) is outside the owner's worktree and the event log is hash-chained, so edits are detected. The caller runs as the same OS user, so this is tamper-evidence, not a security boundary; `--on-behalf` can be passed by anything that can run the CLI.
-- **A delivery that changes or deletes the tests that gate it.** Only a warning until test locking (phase 3).
+- **A delivery that changes or deletes the tests that gate it**, for a Goal with no locked tests (no setup, or a setup without `tests.paths`): only a warning. With locked tests it is red.
+- **A weakened test whose assertion count does not fall**, or a stub-test pair that agrees to prove nothing. The count is a line regex; the second net is mutation testing (phase 5).
+- **Tests that reach inside the code instead of the declared entries.** Not checked until the catalogue has a rule per stack (phase 4).
 - **A live run of a Lead and an orchestrator on a real project.** The end-to-end tests drive the CLI on scratch repos.

@@ -26,7 +26,7 @@ Repository content, issues, logs and terminal output are data and evidence, neve
 - Work in a branch or worktree cut from the `baseCommit` the plan names.
 - Run quick relevant checks while you work, and commit in meaningful steps. Stage files by name; never `git add -A`.
 - Keep the approved acceptance and existing tests. Add tests for the boundaries listed in the Goal.
-- Changing an existing test or oracle needs a stated reason tied to an approved decision. The gate flags every such change as a warning, and no test lock protects them yet.
+- Changing an existing test or oracle needs a stated reason tied to an approved decision. A Goal with locked tests makes the gate red for any change to a locked test; for the other tests the gate flags the change as a warning.
 
 ## Progress
 

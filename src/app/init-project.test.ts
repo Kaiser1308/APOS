@@ -52,7 +52,7 @@ it('installs the role skills where Codex and Antigravity read them too, without 
   mkdirSync(join(dir, '.agents', 'skills', 'apos-lead'), { recursive: true });
   writeFileSync(join(dir, '.agents', 'skills', 'apos-lead', 'SKILL.md'), 'my own lead skill');
   await initProject(dir);
-  for (const role of ['pm', 'worker', 'reviewer']) {
+  for (const role of ['pm', 'worker', 'reviewer', 'tester']) {
     expect(readFileSync(join(dir, '.agents', 'skills', `apos-${role}`, 'SKILL.md'), 'utf8')).toBe(
       readFileSync(join(dir, '.claude', 'skills', `apos-${role}`, 'SKILL.md'), 'utf8'),
     );
@@ -60,5 +60,6 @@ it('installs the role skills where Codex and Antigravity read them too, without 
   expect(readFileSync(join(dir, '.agents', 'skills', 'apos-lead', 'SKILL.md'), 'utf8')).toBe('my own lead skill');
   const committed = execFileSync('git', ['-C', dir, 'ls-tree', '-r', '--name-only', 'HEAD'], { encoding: 'utf8' });
   expect(committed).toContain('.agents/skills/apos-pm/SKILL.md');
+  expect(committed).toContain('.apos/skills/tester.md');
   expect(committed).not.toContain('.agents/skills/apos-lead/SKILL.md');
 });

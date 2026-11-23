@@ -47,6 +47,14 @@ const acceptanceSchema = z.object({
   prohibited: z.array(namedText).default([]),
   checkIds: z.array(id).min(1),
   ambiguity: ambiguitySchema.optional(),
+  /**
+   * How the criterion is proved. Absent means `red-green`: a test that is red before the work and green after.
+   * `benchmark` and `scan` arrive in phase 4. Kept optional so Goals written earlier replay unchanged.
+   */
+  proof: z.enum(['red-green', 'stays-green', 'manual']).optional(),
+  given: namedText.optional(),
+  when: namedText.optional(),
+  then: namedText.optional(),
 });
 
 /**
@@ -166,6 +174,12 @@ const proposalSchema = z
     splitRationale: namedText.optional(),
     /** Paths whose change forces an independent review (shared interfaces, schemas). */
     sharedPaths: z.array(namedText).default([]),
+    /** Solo: the globs WP-MAIN may change; Multi-WP packages carry their own. Required at `lead commit` for a Goal pinned to a setup. */
+    paths: z.array(namedText).min(1).optional(),
+    /** Empty skeleton files of the public entries (`entries`): the tester commits them, the worker fills them in. */
+    stubPaths: z.array(namedText).optional(),
+    /** The public entry points acceptance tests may call. */
+    entries: z.array(namedText).optional(),
     acceptanceMapping: z
       .array(z.object({ acceptanceId: id, verification: namedText, level: z.literal('goal').optional() }))
       .min(1),
@@ -209,6 +223,7 @@ export function parseAppetite(value: unknown): Appetite {
 export type GoalId = string;
 export type SpecVersion = number;
 export type GoalSpec = z.infer<typeof goalSchema>;
+export type Acceptance = GoalSpec['acceptance'][number];
 export type GoalCheck = GoalSpec['checks'][number];
 export type CommandCheck = Extract<GoalCheck, { kind: 'command' }>;
 export type ExecutionProposal = z.infer<typeof proposalSchema>;

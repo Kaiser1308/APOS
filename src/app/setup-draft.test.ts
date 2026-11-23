@@ -39,6 +39,30 @@ describe('draftSetup', () => {
     });
     expect(setup.mutation).toEqual({ minScore: 70 });
   });
+  it("copies the stack's test paths and patterns into the part, so the setup pins them", () => {
+    for (const [files, stack] of [
+      [ts, 'typescript'],
+      [{ 'pyproject.toml': '[project]\nname="x"\n' }, 'python'],
+    ] as const) {
+      const entry = STACKS.find(item => item.stack === stack)!;
+      const tests = draftSetup(repo(files), STACKS).setup.parts.app?.tests;
+      expect(tests, stack).toEqual({
+        paths: entry.testPaths,
+        infra: entry.testInfra,
+        assertPatterns: entry.assertPatterns,
+        notImplementedPatterns: entry.notImplementedPatterns,
+        loadErrorPatterns: entry.loadErrorPatterns,
+      });
+      expect(tests?.paths.length).toBeGreaterThan(0);
+    }
+  });
+  it('gives each stack its test paths', () => {
+    const byStack = Object.fromEntries(STACKS.map(entry => [entry.stack, entry.testPaths]));
+    expect(byStack['python']).toEqual(expect.arrayContaining(['tests/**', '**/test_*.py']));
+    expect(byStack['typescript']).toEqual(expect.arrayContaining(['**/*.test.ts', '**/*.spec.ts', 'tests/**']));
+    expect(byStack['java-gradle']).toEqual(['src/test/**']);
+    expect(byStack['java-maven']).toEqual(['src/test/**']);
+  });
   it('drafts a Python repo', () => {
     const { setup } = draftSetup(repo({ 'pyproject.toml': '[project]\nname="x"\n' }), STACKS);
     expect(setup.parts.app).toMatchObject({ stack: 'python' });

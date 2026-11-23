@@ -56,6 +56,8 @@
     "ModuleNotFoundError",
     "SyntaxError"
   ],
+  "testPaths": ["tests/**", "**/test_*.py", "**/*_test.py"],
+  "testInfra": ["**/conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml", "**/__init__.py"],
   "assertPatterns": [
     "^\\s*assert\\b",
     "\\bself\\.assert\\w+\\s*\\(",

@@ -40,7 +40,9 @@ The file format is the one the build injects as `SetupCodec` (JSON today; see [s
 | `detect` | A directory is this stack when every file in `files` exists and every `contains` substring is found. |
 | `layers` | Tools per layer `L0` to `L5` (`L6` is a hand confirmation, never a tool). The first tool of each layer is what a draft picks. |
 | `loadErrorPatterns` | Regexes matched on a failing test's message to recognise a test that never loaded (a collection or import error, a broken class). The probe fails with `tests could not load: <message>` on such a test, and also when every test in a report errored. Phase 3 reuses them to tell "red for the right reason" from "could not run". |
-| `assertPatterns`, `notImplementedPatterns` | Regexes for phase 3 (counting assertions, recognising "not implemented yet"). Prepared here, not used yet. |
+| `testPaths` | Globs, relative to the part's root, of the files that hold tests: what a tester may commit and what gets locked (Python `tests/**`, `**/test_*.py`; TypeScript `**/*.test.ts`, `**/*.spec.ts`, `tests/**`; Java `src/test/**`). |
+| `testInfra` | Globs of test infrastructure: `conftest.py`, `pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`, `**/__init__.py` (Python); `vitest.config.*`, `vite.config.*`, `jest.config.*`, `**/vitest.setup.*`, `**/setupTests.*`, `tsconfig*.json` (TypeScript); `src/test/resources/**`, build files (Java). Copied to `tests.infra` by `draft`; changing one after the lock needs a decision. |
+| `assertPatterns`, `notImplementedPatterns`, `loadErrorPatterns` | Regexes that count assertions line by line (rough), recognise a stub's "not implemented", and recognise a test that never loaded. Used by `apos tests submit`. |
 | `forbid` | Regexes forbidden in added diff lines: the strict floor a draft starts with. |
 | `needsHuman` | Globs of sensitive files (dependencies, build config) that need a Human. |
 | `notes` | Free text: which tool versions the commands were checked against, and what was not. |

@@ -214,3 +214,21 @@ describe('mergeReports', () => {
     expect(mergeReports([tests('a::1'), { kind: 'findings', findings: [] }]).kind).toBe('unreadable');
   });
 });
+
+describe('junit paths used as ids', () => {
+  it('reads the same id and file on Windows and Linux: backslashes become slashes', () => {
+    const report = (path: string) =>
+      readReport(
+        'junit',
+        `<testsuite name="s"><testcase classname="${path}" name="adds" file="${path}"/><testcase name="x" file="${path}"/></testsuite>`,
+      );
+    const windows = report('src\\calc.acceptance.test.ts');
+    expect(windows).toEqual(report('src/calc.acceptance.test.ts'));
+    expect(windows).toMatchObject({
+      tests: [
+        { id: 'src/calc.acceptance.test.ts::adds', file: 'src/calc.acceptance.test.ts' },
+        { id: 'src/calc.acceptance.test.ts::adds'.replace('adds', 'x') },
+      ],
+    });
+  });
+});

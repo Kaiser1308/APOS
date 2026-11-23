@@ -80,6 +80,55 @@ const junit = (mode: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
+describe('probeSetup test patterns', () => {
+  it('fails the probe when a regex of the tests block does not compile, and names it', async () => {
+    const { dir, commit } = await repoWith(
+      { L1: [junit('ok')] },
+      {},
+      {
+        tests: { paths: ['tests/**'], assertPatterns: ['assert('], notImplementedPatterns: [], loadErrorPatterns: [] },
+      },
+    );
+    const report = await probeSetup(dir, commit, deps());
+    expect(report.ok).toBe(false);
+    expect(report.results.find(item => item.layer === 'tests')).toMatchObject({
+      part: 'app',
+      tool: 'patterns',
+      ok: false,
+      reason: expect.stringContaining('assert(') as unknown,
+    });
+  }, 90_000);
+  it('does not count the pattern row as a tool: a part with tests and no layer still proves nothing', async () => {
+    const { dir, commit } = await repoWith(
+      {},
+      {},
+      { tests: { paths: ['tests/**'], assertPatterns: [], notImplementedPatterns: [], loadErrorPatterns: [] } },
+    );
+    const report = await probeSetup(dir, commit, deps());
+    expect(report.results.map(item => item.layer)).toEqual(['tests']);
+    expect(report.ok).toBe(false);
+  }, 90_000);
+  it('passes patterns that compile and says where the tests are', async () => {
+    const { dir, commit } = await repoWith(
+      { L1: [junit('ok')] },
+      {},
+      {
+        tests: {
+          paths: ['tests/**'],
+          assertPatterns: ['\\bassert\\b'],
+          notImplementedPatterns: ['NIE'],
+          loadErrorPatterns: [],
+        },
+      },
+    );
+    const report = await probeSetup(dir, commit, deps());
+    expect(report.ok).toBe(true);
+    expect(report.results.find(item => item.layer === 'tests')?.reason).toBe(
+      '2 patterns compile; tests under tests/**',
+    );
+  }, 90_000);
+});
+
 describe('probeSetup', () => {
   it('passes a junit tool whose runOne runs exactly one test and whose two runs agree', async () => {
     const { dir, commit } = await repoWith({

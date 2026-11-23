@@ -30,7 +30,7 @@ h3 { font-size:14px; margin:14px 0 6px; }
 .chip { display:inline-block; padding:1px 8px; border-radius:10px; background:var(--chip); font-size:12px; }
 .chip.human,.chip.blocked,.chip.red,.chip.fail { background:var(--bad); color:#fff; }
 .chip.verified,.chip.green,.chip.pass,.chip.closed,.chip.done { background:var(--ok); color:#fff; }
-.chip.executing,.chip.submitted { background:var(--accent); color:#fff; }
+.chip.executing,.chip.testing,.chip.submitted { background:var(--accent); color:#fff; }
 .chip.lead,.chip.unverifiable,.chip.manual-pending,.chip.needs-human,.chip.legacy { background:var(--warn); color:#fff; }
 table { width:100%; border-collapse:collapse; }
 th, td { text-align:left; padding:6px 8px; border-top:1px solid var(--line); vertical-align:top; }
@@ -91,7 +91,7 @@ details > summary { cursor:pointer; color:var(--accent); }
 <script>
 (function () {
   var HOLDERS = [["human", "Human"], ["lead", "Lead"], ["done", "Done"]];
-  var STEPS = ["draft", "approved", "selected", "planned", "executing", "verified", "closed"];
+  var STEPS = ["draft", "approved", "selected", "planned", "testing", "executing", "verified", "closed"];
   var state = { snap: null, goal: null, tab: "story", story: null, lastGood: null, failed: false, doneOpen: false, timeline: [], nextBefore: null };
 
   function h(tag, attrs, kids) {

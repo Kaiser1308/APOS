@@ -33,7 +33,7 @@ export class MetricsService {
     const verified = events.find(item => item.type === 'verified');
     const end = verified
       ? Date.parse(verified.at)
-      : ['selected', 'planned', 'executing', 'blocked'].includes(state.status)
+      : ['selected', 'planned', 'testing', 'executing', 'blocked'].includes(state.status)
         ? this.now()
         : undefined;
     return {

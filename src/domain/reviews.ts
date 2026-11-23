@@ -39,12 +39,14 @@ const ORACLE =
 /**
  * Things in a gated diff that deserve a human look: tests or oracles changed, shared interface paths touched, or
  * the files the checks run (or are built from) changed. Since v3 they no longer block anything: they are shown as
- * warnings in the gate report, the inbox and the UI. This is a known gap until test locking arrives (phase 3).
+ * warnings in the gate report, the inbox and the UI. A Goal with locked tests no longer warns about tests: the gate is red when a locked test changes.
  */
 export function reviewReasons(input: {
   spec: GoalSpec;
   proposal?: ExecutionProposal;
   changedFiles?: string[];
+  /** The Goal's acceptance tests are locked: changing one is a red gate, not a warning. */
+  testLocked?: boolean;
 }): string[] {
   const state = input;
 
@@ -52,7 +54,8 @@ export function reviewReasons(input: {
   if (state.proposal?.risks.length) reasons.push(`declared risks: ${state.proposal.risks.join('; ')}`);
   const changed = state.changedFiles ?? [];
   const oracle = changed.filter(file => ORACLE.test(file));
-  if (oracle.length) reasons.push(`tests or oracles changed: ${oracle.join(', ')} (not locked before phase 3)`);
+  if (oracle.length && !state.testLocked)
+    reasons.push(`tests or oracles changed: ${oracle.join(', ')} (not locked: this Goal has no locked tests)`);
   const shared = changed.filter(file =>
     (state.proposal?.sharedPaths ?? []).some(
       prefix => file === prefix || file.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`),

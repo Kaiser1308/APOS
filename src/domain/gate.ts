@@ -13,7 +13,8 @@ export type CheckRun = {
   /** Set when the check reads a standard report and that report was missing, empty or broken. */
   reportProblem?: string;
 };
-export type CheckStatus = 'pass' | 'fail' | 'unverifiable' | 'manual-pending';
+/** `needs-human` is a decision only a person (or an agent the Human lets) can make, such as a sensitive file changed. */
+export type CheckStatus = 'pass' | 'fail' | 'unverifiable' | 'manual-pending' | 'needs-human';
 export type CheckResult = {
   checkId: string;
   status: CheckStatus;
@@ -22,7 +23,7 @@ export type CheckResult = {
   delivery: CheckRun[];
   newFailures: string[];
 };
-export type GateResult = 'green' | 'red' | 'unverifiable' | 'pending';
+export type GateResult = 'green' | 'red' | 'unverifiable' | 'needs-human' | 'pending';
 export type GateEnvironment = { platform: string; shell: string; node: string };
 export type GateReport = {
   gateId: string;
@@ -169,6 +170,7 @@ export function protectedCheck(goalId: string, changedFiles: string[]): CheckRes
 export function summarizeGate(checks: CheckResult[]): GateResult {
   if (checks.some(item => item.status === 'fail')) return 'red';
   if (checks.some(item => item.status === 'unverifiable')) return 'unverifiable';
+  if (checks.some(item => item.status === 'needs-human')) return 'needs-human';
   if (checks.some(item => item.status === 'manual-pending')) return 'pending';
   return 'green';
 }

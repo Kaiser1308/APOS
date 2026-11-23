@@ -94,3 +94,39 @@ it('lists every needs-human package with why: the manual check waiting on a comm
   ]);
   expect(buildInbox(repo('legacy'))).toEqual([]);
 });
+
+it('lists what waits for an exception: a sensitive file (with the command to approve it), and a revision of locked tests', () => {
+  const commit = 'a'.repeat(40);
+  const state = (exceptions: unknown[], pendingRevision?: unknown) => ({
+    spec: { id: 'GOAL-1' },
+    status: 'executing',
+    exceptions,
+    ...(pendingRevision ? { pendingRevision } : {}),
+    packages: {
+      'WP-A': {
+        status: 'needs-human',
+        gate: {
+          at: '2026-11-14T00:00:00.000Z',
+          deliveryCommit: commit,
+          checks: [{ checkId: 'APOS-SCOPE', status: 'needs-human', reason: 'sensitive files changed: pyproject.toml' }],
+        },
+      },
+    },
+  });
+  const repo = (exceptions: unknown[], pending?: unknown) =>
+    ({ listGoals: () => [state(exceptions, pending)], events: () => [] }) as unknown as GoalRepository;
+  const details = (exceptions: unknown[], pending?: unknown) =>
+    buildInbox(repo(exceptions, pending)).map(item => JSON.parse(item.detail) as Record<string, unknown>);
+
+  expect(details([])[0]?.reasons).toEqual([
+    'APOS-SCOPE needs-human: sensitive files changed: pyproject.toml. Approve with: apos exception approve GOAL-1 --kind needs-human --ref WP-A --reason <why> (--by agent:<name> | --human)',
+  ]);
+  expect(details([{ kind: 'needs-human', ref: 'WP-A', commit, by: 'agent:x' }])[0]?.reasons).toEqual([
+    'sensitive files changed: pyproject.toml, duyệt bởi agent:x: submit again with the same commit',
+  ]);
+  const pending = { commit: 'b'.repeat(40), reason: 'drops a test', problems: ['x'], by: 't' };
+  expect(details([], pending).map(item => item.why)).toEqual(['package-needs-human', 'tests-revision-pending']);
+  expect(
+    details([{ kind: 'tests-weakened', ref: pending.commit, commit: pending.commit }], pending).map(item => item.why),
+  ).toEqual(['package-needs-human']);
+});

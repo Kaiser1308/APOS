@@ -52,6 +52,23 @@ describe('parseSetupObject', () => {
       setup: { schemaVersion: 2, parts: {} },
     });
   });
+  it("reads a part's tests block, defaults its patterns, and still reads a part without one", () => {
+    const part = { root: '.', layers: {}, needsHuman: [], forbid: [] };
+    const parsed = parseSetupObject({
+      schemaVersion: 2,
+      parts: { app: { ...part, tests: { paths: ['tests/**'] } }, old: { ...part, root: 'old' } },
+    });
+    if (parsed.version !== 2) throw new Error('v2 expected');
+    expect(parsed.setup.parts.app?.tests).toEqual({
+      paths: ['tests/**'],
+      infra: [],
+      assertPatterns: [],
+      notImplementedPatterns: [],
+      loadErrorPatterns: [],
+    });
+    expect(parsed.setup.parts.old?.tests).toBeUndefined();
+    expect(() => parseSetupObject({ schemaVersion: 2, parts: { app: { ...part, tests: { paths: [] } } } })).toThrow();
+  });
   it('refuses an unknown schemaVersion', () => {
     expect(refused({ schemaVersion: 3 })).toMatch(/schemaVersion/);
     expect(refused('nope')).toMatch(/schemaVersion/);

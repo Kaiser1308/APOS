@@ -11,6 +11,8 @@ import { attemptKey, type GateReport, type ManualConfirmation } from './gate.js'
 import { parseWorkPackage, validatePackageGraph, type WorkPackageSpec } from './packages.js';
 import { parseReview, type ReviewRecord } from './reviews.js';
 import { applyIntegrationGateRequest } from './integration-gate.js';
+import { applyException, type ExceptionRecord } from './exceptions.js';
+import { applyTestLockEvent, type TestLock, type TestRevisionPending } from './test-lock.js';
 import { LEGACY_EVENT_TYPES, type LegacyEventType } from './legacy-events.js';
 
 /** Every event APOS v3 writes. Anything else is refused on append; legacy types are only ever read back. */
@@ -47,6 +49,9 @@ export const GOAL_EVENT_TYPES = [
   'outcome-stopped',
   'review-submitted',
   'merge-completed',
+  'tests-locked',
+  'tests-revision-pending',
+  'exception-approved',
 ] as const;
 export type GoalEventType = (typeof GOAL_EVENT_TYPES)[number];
 const WRITABLE: ReadonlySet<string> = new Set(GOAL_EVENT_TYPES);
@@ -66,6 +71,8 @@ export type GoalStatus =
   | 'approved'
   | 'selected'
   | 'planned'
+  /** The plan is committed; a tester's acceptance tests are being written and locked (only for a Goal pinned to a setup). */
+  | 'testing'
   | 'executing'
   | 'blocked'
   | 'verified'
@@ -138,6 +145,11 @@ export type GoalState = {
   /** Gate rerun at the target branch head after a merge. */
   postMergeGate?: GateReport;
   findings?: Finding[];
+  /** The locked acceptance tests: every package is gated on top of this commit. Absent = no test locking. */
+  testLock?: TestLock;
+  /** A revision of the locked tests waiting for an approved exception. */
+  pendingRevision?: TestRevisionPending;
+  exceptions?: ExceptionRecord[];
   /** For a `legacy` Goal: how its old log ended, so closed Goals still count as closed. */
   legacyOutcome?: 'verified' | 'closed' | 'stopped';
 };
@@ -204,6 +216,8 @@ const soloPackage = (goal: GoalSpec, proposal: ExecutionProposal): PackageState 
       checkIds: item.checkIds,
     })),
     integration: 'Solo: the package is the whole Goal',
+    ...(proposal.paths ? { paths: proposal.paths } : {}),
+    ...(proposal.stubPaths ? { stubPaths: proposal.stubPaths } : {}),
   },
   status: 'pending',
   attempts: 0,
@@ -345,6 +359,8 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         gate: undefined,
         verifiedCommit: undefined,
         manualConfirmations: [],
+        testLock: undefined,
+        pendingRevision: undefined,
       };
     }
     case 'proposal-approved': {
@@ -387,10 +403,12 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           state.proposal,
           Object.values(state.packages ?? {}).map(item => item.spec),
         );
+      // The Lead's commit decides whether a tester goes first; old logs carry no such flag and replay as executing.
+      const testing = (event.data as { testing?: unknown } | undefined)?.testing === true;
       return {
         ...state,
         proposalApprovedVersion: state.proposal.version,
-        status: 'executing',
+        status: testing ? 'testing' : 'executing',
         packages:
           state.proposal.mode === 'multi-wp'
             ? state.packages
@@ -625,7 +643,10 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           FULL_SHA.test(gate.baseCommit ?? ''),
         'Gate report for current Goal version and full commits required',
       );
-      requireThat(['green', 'red', 'unverifiable', 'pending'].includes(gate.result), 'Gate result required');
+      requireThat(
+        ['green', 'red', 'unverifiable', 'needs-human', 'pending'].includes(gate.result),
+        'Gate result required',
+      );
       requireThat(gate.attemptKey === attemptKey(state), 'Gate was started for an earlier package attempt; rerun it');
       return { ...state, gate };
     }
@@ -743,6 +764,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       };
     case 'outcome-stopped':
       return { ...state, status: 'stopped' };
+    case 'tests-locked':
+    case 'tests-revision-pending':
+      return applyTestLockEvent(state, event);
+    case 'exception-approved':
+      return applyException(state, event);
     default:
       // An event type this version does not know (written by a newer APOS) leaves the state as it was,
       // so a rollback can still replay the log instead of losing every Goal after it.

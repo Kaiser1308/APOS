@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { protectedChanges } from '../domain/gate.js';
+import { testMapPath } from '../domain/test-lock.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 
 /** Only exact controller-published blobs, including their Git mode, can cross the protected-file guard. */
@@ -12,7 +13,18 @@ export function untrustedProtectedFiles(
   changed: string[],
 ): string[] {
   const milestones = store.getGoal(goalId)?.publishedDocuments ?? [];
+  const lock = store.getGoal(goalId)?.testLock;
   return protectedChanges(goalId, changed).filter(path => {
+    // The tester's map is committed by the tester, not APOS; it is trusted while it is the blob that was locked.
+    if (lock && path === testMapPath(goalId)) {
+      try {
+        const same = (commit: string) =>
+          execFileSync('git', ['-C', repo, 'rev-parse', `${commit}:${path}`], { encoding: 'utf8' });
+        return same(head) !== same(lock.commit);
+      } catch {
+        return true;
+      }
+    }
     const milestone = [...milestones].reverse().find(item => item.files[path]);
     if (!milestone) return true;
     try {

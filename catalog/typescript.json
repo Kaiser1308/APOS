@@ -60,6 +60,15 @@
     "SyntaxError",
     "Transform failed"
   ],
+  "testPaths": ["**/*.test.ts", "**/*.spec.ts", "tests/**"],
+  "testInfra": [
+    "vitest.config.*",
+    "vite.config.*",
+    "jest.config.*",
+    "**/vitest.setup.*",
+    "**/setupTests.*",
+    "tsconfig*.json"
+  ],
   "assertPatterns": ["\\bexpect\\s*\\(", "\\bassert(?:\\.\\w+)?\\s*\\(", "\\bexpectTypeOf\\s*\\("],
   "notImplementedPatterns": ["[Nn]ot implemented", "NotImplemented", "TODO: implement"],
   "forbid": [

@@ -45,12 +45,28 @@ const root = z
         .join('/') || '.',
   );
 
+/**
+ * Where a part keeps its tests and how to read them, copied from the catalog at draft time and pinned with the
+ * setup. `paths` are globs relative to the part's `root`. Absent on a setup approved before phase 3: such a Goal
+ * runs without test locking. The patterns are plain regex strings; the probe checks that they compile.
+ */
+const testsSchema = z.object({
+  paths: z.array(z.string().min(1)).min(1),
+  /** Globs (relative to `root`) of test infrastructure: conftest, runner config, setup files. */
+  infra: z.array(z.string().min(1)).default([]),
+  assertPatterns: z.array(z.string()).default([]),
+  notImplementedPatterns: z.array(z.string()).default([]),
+  loadErrorPatterns: z.array(z.string()).default([]),
+});
+export type PartTests = z.infer<typeof testsSchema>;
+
 const partSchema = z.object({
   root,
   stack: z.string().trim().min(1).optional(),
   layers,
   needsHuman: z.array(z.string().min(1)).default([]),
   forbid: z.array(z.string().min(1)).default([]),
+  tests: testsSchema.optional(),
   note: z.string().optional(),
 });
 export type PartSetup = z.infer<typeof partSchema>;

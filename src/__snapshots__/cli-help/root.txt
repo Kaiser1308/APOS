@@ -14,6 +14,7 @@ Commands:
   setup            draft, probe and approve the project setup
   goal
   plan [options]   show Goal plan and requirement coverage across the brief
+  bug              fix a bug with one small Goal: open it, the Human approves it
   lead
   tests            the tester submits acceptance tests; APOS checks and locks
                    them

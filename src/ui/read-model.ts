@@ -3,6 +3,7 @@ import { buildAssuranceReport, renderAssuranceText, type AssuranceReport } from 
 import type { GateReport } from '../domain/gate.js';
 import { buildPlan, type PlanSummary } from '../domain/plan.js';
 import type { GoalEvent, GoalState, GoalStatus } from '../domain/transitions.js';
+import { draftGateDetail } from '../domain/bugfix.js';
 import { buildInbox, type InboxItem } from '../app/inbox.js';
 import type { ReadOnlyJournal } from '../store/readonly-journal.js';
 
@@ -94,7 +95,7 @@ function gateItems(repo: ReadOnlyJournal): UiInboxItem[] {
       items.push({
         goalId: state.spec.id,
         kind: 'awaiting-approval',
-        detail: 'gate A: approve the Goal and its appetite',
+        detail: draftGateDetail(state.spec),
         at: [...events].reverse().find(item => item.type === 'goal-drafted' || item.type === 'goal-revised')?.at,
       });
     if (state.status === 'approved')

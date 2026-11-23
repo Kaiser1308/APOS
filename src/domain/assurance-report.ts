@@ -1,6 +1,7 @@
 import type { CheckResult, GateReport } from './gate.js';
 import type { LayerId } from './layers.js';
 import { planLayers, type LayerRun, type LayerWhy, type PlanInput, type Stage } from './layer-plan.js';
+import { goalKind } from './contracts.js';
 import { reviewOverrideBy } from './review-tests.js';
 import { proofDemands } from './proof-tools.js';
 import type { ProjectSetup } from './project-setup.js';
@@ -39,6 +40,10 @@ export type AssuranceReport = {
   reviews?: { blocks: number; lockedTests: number; overridden: { ids: string[]; by: string }[] };
   /** `by` is `human`, `on-behalf:<where they agreed>` or `agent:<name>`. */
   exceptions: { kind: string; ref: string; by: string; reason: string }[];
+  /** Only for a `bugfix` Goal: the test that reproduces the bug, with the commits it was red and green on, once the evidence is whole. */
+  bug?: { reproduced: boolean; test?: string; redOn?: string; greenOn?: string };
+  /** Only when `bug approve` gave gates A and B in one go: `human` or `on-behalf:<where they agreed>`. */
+  combinedApproval?: string;
   /** What is off, and why. */
   off: string[];
   /** Tools whose only evidence is an exit code: no test ids, no counts. */
@@ -192,8 +197,12 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
   else if (!state.testLock)
     off.add('khoá test: tắt (setup không khai tests.paths, hoặc Goal không có tiêu chí cần test)');
 
+  const bug = goalKind(state.spec) === 'bugfix' ? bugEvidence(state) : undefined;
+  const bugBy = state.bugApproval;
   return {
     goalId,
+    ...(bug ? { bug } : {}),
+    ...(bugBy ? { combinedApproval: bugBy.by === 'on-behalf' ? `on-behalf:${bugBy.onBehalf ?? '?'}` : 'human' } : {}),
     ...(state.setupVersion === undefined
       ? {}
       : {
@@ -217,6 +226,23 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
     exceptions,
     off: [...off],
     exitOnly,
+  };
+}
+
+/**
+ * A bug is "reproduced by a test" when a locked test (red on the code as it was at the plan's base: the Tester may change
+ * tests only) has a green gate delivery on top of it. Until then the table says it is not.
+ */
+function bugEvidence(state: GoalState): NonNullable<AssuranceReport['bug']> {
+  const entry = state.testLock?.map[0];
+  const base = state.proposal?.baseCommit;
+  const gate = state.gate;
+  if (!entry || !base || gate?.result !== 'green') return { reproduced: false };
+  return {
+    reproduced: true,
+    test: entry.testIds.map(id => `${entry.part}.${entry.layer}::${id}`).join(', '),
+    redOn: base.slice(0, 7),
+    greenOn: gate.deliveryCommit.slice(0, 7),
   };
 }
 
@@ -272,6 +298,18 @@ export function renderAssuranceText(report: AssuranceReport): string {
       );
     }
   }
+  if (report.bug)
+    lines.push(
+      `${label('Lỗi')}${
+        report.bug.reproduced
+          ? `lỗi được tái hiện bằng test ${report.bug.test}: đỏ trên ${report.bug.redOn}, xanh trên ${report.bug.greenOn}`
+          : 'lỗi chưa được tái hiện bằng test'
+      }`,
+    );
+  if (report.combinedApproval)
+    lines.push(
+      `${label('Duyệt')}duyệt gộp bằng bug approve (${report.combinedApproval === 'human' ? 'Human' : report.combinedApproval})`,
+    );
   if (report.reviews)
     lines.push(
       `${label('Review chặn')}${report.reviews.blocks} lần bằng test đỏ, ${report.reviews.lockedTests} test đã khoá vào lần giao sau${report.reviews.overridden.map(item => `; review bị bỏ qua: ${item.ids.join(', ')}, duyệt bởi ${item.by}`).join('')}`,

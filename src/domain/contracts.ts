@@ -117,6 +117,12 @@ const goalSchema = z
     priority: z.number().int().nonnegative().default(1),
     /** Switches the Human approves with the Goal (`mutation`, `perf`): a setup tool that says `when: flag:x` runs only with `x`. */
     flags: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/, 'a flag is a word')).optional(),
+    /** Absent means `feature`: Goals written before `apos bug` replay unchanged. A `bugfix` has one red-green criterion. */
+    kind: z.enum(['feature', 'bugfix']).optional(),
+    /** `bugfix`: where the bug shows (a path), a hint for the Tester; it does not change any gate. */
+    reproHint: namedText.optional(),
+    /** `bugfix`: the setup part the bug lives in. */
+    part: namedText.optional(),
   })
   .superRefine((goal, ctx) => {
     const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
@@ -127,6 +133,16 @@ const goalSchema = z
       issue(['acceptance'], 'Goal must declare at least one acceptance criterion');
     if (!sketch && !allAcceptanceUsesToolProofs && goal.checks.length === 0)
       issue(['checks'], 'Goal must declare at least one check');
+    if (goal.kind === 'bugfix') {
+      if (goal.acceptance.length !== 1)
+        issue(
+          ['acceptance'],
+          `A bugfix Goal has exactly one acceptance criterion (it has ${goal.acceptance.length}): a bigger bug is an ordinary Goal`,
+        );
+      for (const [index, item] of goal.acceptance.entries())
+        if (item.proof !== undefined && item.proof !== 'red-green')
+          issue(['acceptance', index], `A bugfix criterion is proved by a red-green test, not "${item.proof}"`);
+    }
     if (!sketch && goal.scope.length === 0) issue(['scope'], 'Goal must declare at least one scope entry');
     const unique = (items: { id: string }[], label: string, path: string) => {
       const seen = new Set<string>();
@@ -287,6 +303,8 @@ export type Evidence = {
 export function parseGoalSpec(value: unknown): GoalSpec {
   return goalSchema.parse(value);
 }
+/** What kind of Goal this is; a Goal written before kinds existed is a feature. */
+export const goalKind = (goal: GoalSpec): 'feature' | 'bugfix' => goal.kind ?? 'feature';
 export const isSketchGoal = (goal: GoalSpec): boolean => goal.acceptance.length === 0;
 export function assertGoalExclusionComplete(goal: GoalSpec): void {
   for (const [index, item] of goal.requirements.entries()) {

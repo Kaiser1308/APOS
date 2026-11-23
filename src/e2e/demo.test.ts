@@ -42,6 +42,19 @@ describe('demo-goal.mjs', () => {
     600_000,
   );
 
+  it.skipIf(!hasVitest)(
+    'ts-bug: a bug opened, approved in one command, a test that does not reproduce it refused, reproduced, fixed, closed',
+    () => {
+      const done = spawnSync(process.execPath, [script, 'ts-bug'], { encoding: 'utf8' });
+      expect(done.stderr).toBe('');
+      expect(done.stdout).toContain('every step ended as expected');
+      expect(done.stdout).toContain('test không tái hiện lỗi');
+      expect(done.stdout).toContain('lỗi được tái hiện bằng test');
+      expect(done.status).toBe(0);
+    },
+    600_000,
+  );
+
   it.skipIf(!(hasPytest && hasPython))(
     'py-parking: the same story with pytest',
     () => {

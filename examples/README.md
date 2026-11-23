@@ -1,11 +1,12 @@
 # Example Goals
 
-Two small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
+Three small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
 
 | Example | Stack | Goal |
 | --- | --- | --- |
 | `ts-orders` | TypeScript, vitest | An order placed more than 30 days ago cannot be cancelled |
 | `py-parking` | Python, pytest | A slot becomes occupied when its sensor reports a car |
+| `ts-bug` | TypeScript, vitest | A bug: the code `FREE0` (0% off) makes an order's total 0. Run by `npm run demo:bug` through `apos bug` |
 
 Each example has:
 
@@ -14,6 +15,15 @@ Each example has:
 - `goal.json`: the Goal (Given/When/Then criteria, and a `benchmark` criterion proved at the close stage);
 - `plan.json`: the Lead's Solo plan (the demo adds `baseCommit`);
 - `steps/*.patch`: what the people and agents commit, in the order of the story.
+
+`ts-bug` is a bug story and has a different shape: `bug.json` (what `apos bug open` is given) in place of `brief.md` and `goal.json`, no plan file (`apos lead propose --bugfix` writes it), and these steps:
+
+| Patch | On top of | What it is | What APOS says |
+| --- | --- | --- | --- |
+| `00-green-test` | the repo | A test that is green on the bug | `tests submit`: refused, "test không tái hiện lỗi" |
+| `00b-code-edit` | the repo | The reproduction, and a change to the code | `tests submit`: refused, "the Tester adds tests only" |
+| `01-repro-test` | the repo | The reproduction: red on the bug | `tests submit`: locked |
+| `02-fix` | 01 | The fix | `package submit`: green, verified |
 
 ## The steps
 

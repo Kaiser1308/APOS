@@ -124,6 +124,8 @@ export function judgeSuite(input: {
   proofOf: (acceptanceId: string) => 'red-green' | 'stays-green' | 'manual' | undefined;
   outcomes: LayerOutcome[];
   patterns: Record<string, Patterns>;
+  /** A bugfix test is red because the bug is there: one that is green does not reproduce it. */
+  bugfix?: boolean;
 }): string[] {
   const problems: string[] = [];
   const loadBroken = new Set<string>();
@@ -157,7 +159,9 @@ export function judgeSuite(input: {
         if (test.status !== 'pass') problems.push(`${label}: a stays-green test must pass, it is ${test.status}`);
       } else if (test.status === 'pass')
         problems.push(
-          `${label}: already green: a stub that happens to work, or a test that never calls it. A red-green test must fail first`,
+          input.bugfix
+            ? `${label}: the test does not reproduce the bug (test không tái hiện lỗi): it is already green on the current code. Make it fail on the bug, for the reason in the bug report`
+            : `${label}: already green: a stub that happens to work, or a test that never calls it. A red-green test must fail first`,
         );
       else if (
         test.status === 'error' &&

@@ -16,4 +16,4 @@ Own the package end to end: technical plan, code, tests, self-review as an outsi
 
 Hand the Lead the commit sha and a short report, as `_core/execute.md` describes. You do not run `apos package submit` unless the Lead tells you to; nothing you write verifies anything, because APOS runs the checks itself.
 
-Never run a Human command (`goal approve`, `goal select`, `outcome close|revise|stop`, `gate confirm`). Never pass `--on-behalf` unless the Human has clearly agreed to exactly that command somewhere else (for example a button on an item); the value must cite where they agreed, e.g. `--on-behalf "item 5 e57"`.
+Never run a Human command (`goal approve`, `goal select`, `bug approve`, `outcome close|revise|stop`, `gate confirm`). Never pass `--on-behalf` unless the Human has clearly agreed to exactly that command somewhere else (for example a button on an item); the value must cite where they agreed, e.g. `--on-behalf "item 5 e57"`.

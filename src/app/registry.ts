@@ -31,6 +31,7 @@ export class GoalRegistryService {
     confirmation?: unknown,
     setupVersion?: number,
     flags: string[] = [],
+    via?: string,
   ): void {
     this.assertAcyclic();
     const state = this.store.getGoal(goalId);
@@ -42,8 +43,16 @@ export class GoalRegistryService {
         confirmation,
         ...(setupVersion === undefined ? {} : { setupVersion }),
         ...(flags.length ? { flags } : {}),
+        ...(via ? { via } : {}),
       }),
     );
+  }
+
+  /** Why `select` would refuse this Goal right now, without writing anything; empty when it would not. */
+  selectProblems(goalId: string): string[] {
+    const state = this.store.getGoal(goalId);
+    if (!state) return [`Goal does not exist: ${goalId}`];
+    return state.spec.dependencies.filter(id => !this.isClosed(id)).map(id => `dependency ${id} is not closed`);
   }
 
   private isClosed(id: string): boolean {
@@ -51,7 +60,7 @@ export class GoalRegistryService {
     return state !== undefined && effectiveStatus(state) === 'closed';
   }
 
-  select(goalId: string, confirmation?: unknown): void {
+  select(goalId: string, confirmation?: unknown, via?: string): void {
     const state = this.store.getGoal(goalId);
     if (!state) throw new Error(`Goal does not exist: ${goalId}`);
     if (state.status !== 'approved')
@@ -60,6 +69,8 @@ export class GoalRegistryService {
       );
     const pending = state.spec.dependencies.filter(id => !this.isClosed(id));
     if (pending.length) throw new Error(`Goal dependencies not closed: ${pending.join(', ')}`);
-    this.store.append(newEvent(goalId, 'goal-selected', confirmation ? { confirmation } : undefined));
+    this.store.append(
+      newEvent(goalId, 'goal-selected', confirmation || via ? { confirmation, ...(via ? { via } : {}) } : undefined),
+    );
   }
 }

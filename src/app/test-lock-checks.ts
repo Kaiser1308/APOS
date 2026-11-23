@@ -1,6 +1,7 @@
 import { entryViolations } from '../domain/entry-rule.js';
 import { matchesAny, rootedGlobs } from '../domain/glob.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
+import { goalKind } from '../domain/contracts.js';
 import { acceptanceProof, needsTest } from '../domain/test-plan.js';
 import {
   countAsserts,
@@ -77,7 +78,16 @@ export function inspectTests(input: InspectInput): Inspection {
   const infraGlobs = testParts.flatMap(([, part]) => rootedGlobs(part.root, part.tests!.infra));
   const foreign = untrustedProtectedFiles(input.store, goalId, repo, commit, changed);
   const testFiles: string[] = [];
+  // A bug is reproduced on the code as it is: the Tester adds tests and tests.json, and nothing else. A stub or test
+  // infrastructure the Tester could edit would let a test go red without the bug, so the commit's code is the base's code.
+  const bugfix = goalKind(state.spec) === 'bugfix';
   for (const file of changed) {
+    if (bugfix && file !== mapPath && !file.startsWith('.apos/') && (matchesAny(file, infraGlobs) || !owner(file))) {
+      problems.push(
+        `${file}: bugfix: the Tester adds tests only (tests.paths and tests.json), never code, a stub or test infrastructure: the bug must be red on the code as it is`,
+      );
+      continue;
+    }
     if (file === mapPath || matchesAny(file, stubs) || matchesAny(file, infraGlobs)) continue;
     if (file.startsWith('.apos/')) {
       if (foreign.includes(file)) problems.push(`${file}: APOS-managed file changed`);
@@ -151,6 +161,7 @@ export function inspectTests(input: InspectInput): Inspection {
           return proof === 'benchmark' || proof === 'scan' ? undefined : proof;
         },
         outcomes,
+        bugfix,
         patterns: Object.fromEntries(
           Object.entries(setup.parts).map(([name, part]) => [
             name,

@@ -1,0 +1,7 @@
+{
+  "description": "An order's total is 0 when the customer types the code FREE0, a code that gives 0% off",
+  "given": "a cart of 40 and the discount code FREE0 (0% off)",
+  "when": "the total of the order is computed",
+  "then": "the total is 40: a 0% code takes nothing off",
+  "reproHint": "src/orders.ts"
+}

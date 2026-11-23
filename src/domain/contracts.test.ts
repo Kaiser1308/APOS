@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertProposalRationale,
   goalApprovalBlockers,
+  goalKind,
   parseAppetite,
   parseExecutionProposal,
   parseGoalSpec,
@@ -138,5 +139,28 @@ describe('appetite', () => {
   });
   it('no longer carries a spend limit', () => {
     expect(parseAppetite({ ...current, maxSpendUsd: 5 })).not.toHaveProperty('maxSpendUsd');
+  });
+});
+
+describe('Goal kind bugfix', () => {
+  const second = { ...goal.acceptance[0], id: 'AC-2' };
+  it('reads a Goal without a kind as a feature, so older logs replay as they were', () => {
+    expect(parseGoalSpec(goal).kind).toBeUndefined();
+    expect(goalKind(parseGoalSpec(goal))).toBe('feature');
+  });
+  it('accepts one criterion and keeps the repro hint and part', () => {
+    const bug = parseGoalSpec({ ...goal, kind: 'bugfix', reproHint: 'src/orders.ts', part: 'app' });
+    expect(goalKind(bug)).toBe('bugfix');
+    expect(bug.reproHint).toBe('src/orders.ts');
+  });
+  it('refuses a bugfix with more than one criterion: a bigger bug is an ordinary Goal', () => {
+    expect(() => parseGoalSpec({ ...goal, kind: 'bugfix', acceptance: [goal.acceptance[0], second] })).toThrow(
+      /exactly one/,
+    );
+  });
+  it('refuses a bugfix criterion proved any way but a red-green test', () => {
+    expect(() =>
+      parseGoalSpec({ ...goal, kind: 'bugfix', acceptance: [{ ...goal.acceptance[0], proof: 'manual' }] }),
+    ).toThrow(/red-green/);
   });
 });

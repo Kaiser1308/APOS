@@ -1,0 +1,13 @@
+Usage: apos bug [options] [command]
+
+fix a bug with one small Goal: open it, the Human approves it
+
+Options:
+  -h, --help                    display help for command
+
+Commands:
+  open [options] <description>  draft a Solo bugfix Goal: one criterion, a
+                                red-green test; then `apos bug approve <id>`
+  approve [options] <id>        Human: gate A, the appetite and gate B in one go
+                                (small, 60 minutes, 3 attempts unless said)
+  help [command]                display help for command

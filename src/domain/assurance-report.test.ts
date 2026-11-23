@@ -3,7 +3,7 @@ import { buildAssuranceReport, renderAssuranceText } from './assurance-report.js
 import type { CheckResult, GateReport } from './gate.js';
 import { parseSetupObject } from './project-setup.js';
 import type { GoalState } from './transitions.js';
-import { gateReport, spec } from './fixtures.test-support.js';
+import { gateReport, proposal, spec } from './fixtures.test-support.js';
 
 const check = (checkId: string, status: CheckResult['status'], extra: Partial<CheckResult> = {}): CheckResult => ({
   checkId,
@@ -308,5 +308,53 @@ describe('mutation in the table', () => {
   });
   it('says nothing when the setup has no mutation tool', () => {
     expect(renderAssuranceText(buildAssuranceReport(base))).not.toContain('mutation');
+  });
+});
+
+describe('a bugfix Goal in the table', () => {
+  const baseCommit = 'b'.repeat(40);
+  const delivery = 'd'.repeat(40);
+  const bug: GoalState = {
+    ...base,
+    spec: { ...spec, kind: 'bugfix' },
+    proposal: { ...proposal, baseCommit },
+    testLock: {
+      commit: 'c'.repeat(40),
+      files: {},
+      asserts: {},
+      infra: {},
+      unchecked: [],
+      by: 'tester',
+      map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L2', testIds: ['orders::total'] }],
+    } as never,
+  };
+  const line = (state: GoalState) =>
+    renderAssuranceText(buildAssuranceReport(state))
+      .split('\n')
+      .find(item => item.includes('Lỗi'));
+
+  it('says the bug is not yet reproduced by a test until a green delivery rests on the locked test', () => {
+    expect(line({ ...bug, testLock: undefined })).toContain('lỗi chưa được tái hiện bằng test');
+    expect(line(bug)).toContain('lỗi chưa được tái hiện bằng test');
+  });
+  it('names the test, the base the bug was red on and the delivery that was green', () => {
+    const green = { ...bug, gate: gateReport(delivery, 'green') };
+    expect(line(green)).toContain(
+      'lỗi được tái hiện bằng test app.L2::orders::total: đỏ trên bbbbbbb, xanh trên ddddddd',
+    );
+  });
+  it('does not claim it for a delivery that was red', () => {
+    expect(line({ ...bug, gate: gateReport(delivery, 'red') })).toContain('lỗi chưa được tái hiện bằng test');
+  });
+  it('says who approved, when bug approve gave gates A and B at once, and says nothing otherwise', () => {
+    const text = (state: GoalState) => renderAssuranceText(buildAssuranceReport(state));
+    expect(text({ ...bug, bugApproval: { by: 'human' } })).toContain('duyệt gộp bằng bug approve (Human)');
+    expect(text({ ...bug, bugApproval: { by: 'on-behalf', onBehalf: 'item 1' } })).toContain(
+      'duyệt gộp bằng bug approve (on-behalf:item 1)',
+    );
+    expect(text(bug)).not.toContain('duyệt gộp');
+  });
+  it('adds no line for an ordinary Goal', () => {
+    expect(renderAssuranceText(buildAssuranceReport(base))).not.toMatch(/Lỗi|duyệt gộp/);
   });
 });

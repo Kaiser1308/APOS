@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, watch, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
+import { draftGateDetail } from '../domain/bugfix.js';
 import { UserError } from '../domain/errors.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
 import { ReadOnlyJournal } from '../store/readonly-journal.js';
@@ -27,7 +28,7 @@ export function buildHumanInbox(repo: GoalRepository): HumanInboxItem[] {
       gates.push({
         goalId: state.spec.id,
         kind: 'awaiting-approval',
-        detail: 'gate A: approve the Goal and its appetite',
+        detail: draftGateDetail(state.spec),
         at: [...events].reverse().find(item => item.type === 'goal-drafted' || item.type === 'goal-revised')?.at,
       });
     if (state.status === 'approved')

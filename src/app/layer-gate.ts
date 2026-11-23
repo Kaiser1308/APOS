@@ -273,7 +273,14 @@ export class LayerGate {
       head.push(got.tests);
     }
     const atBase = input.base ? runner.layerTests(input.base, run.part, root, run.layer, [tool]) : undefined;
-    if (maintenance && atBase && !atBase.problems.length) {
+    // The base is the yardstick: a base run that did not give a readable result leaves nothing to measure against, and the
+    // delivery's failures would all look new.
+    if (maintenance && atBase && (atBase.problems.length || atBase.processFailures.length))
+      return unverifiable(
+        checkId,
+        `${label}: the base did not give a readable result, so there is nothing to compare with: ${[...atBase.problems, ...atBase.processFailures].join('; ')}`,
+      );
+    if (maintenance && atBase) {
       const again = runner.layerTests(input.base!, run.part, root, run.layer, [tool]);
       const split = again.problems.length ? [] : baseDisagreement(atBase.tests, again.tests);
       if (again.problems.length || split.length)

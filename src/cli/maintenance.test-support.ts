@@ -8,6 +8,7 @@ import { project } from './bug.test-support.js';
 const CHECK = `
 const fs = require('fs');
 const deps = JSON.parse(fs.readFileSync('deps.json', 'utf8'));
+if (deps.crash) process.exit(2);
 let flip = false;
 if (process.env.APOS_FLAKY) {
   const file = process.env.APOS_FLAKY;

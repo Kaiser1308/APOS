@@ -17,7 +17,13 @@ const same = (a: Finding[], b: Finding[]): boolean => {
 };
 
 /** One scan on one commit, run twice: two runs that show different findings prove nothing. */
-export function scanTwice(runner: ToolRunner, commit: string, tool: LayerSpec, root: string, label: string): Scanned {
+export function scanTwice(
+  runner: Pick<ToolRunner, 'run'>,
+  commit: string,
+  tool: LayerSpec,
+  root: string,
+  label: string,
+): Scanned {
   const runs: Finding[][] = [];
   for (let n = 0; n < 2; n++) {
     const { exec, report } = runner.run(commit, tool, tool.command, root);
@@ -56,7 +62,7 @@ export function sameProject(repo: string, a: string, b: string): boolean {
  * when that was this very commit; otherwise the base is scanned here, twice.
  */
 export function maintenanceScan(input: {
-  runner: ToolRunner;
+  runner: Pick<ToolRunner, 'run'>;
   goal: GoalSpec;
   checkId: string;
   label: string;
@@ -80,7 +86,10 @@ export function maintenanceScan(input: {
   });
   const delivery = scanTwice(runner, head, tool, root, label);
   if ('problem' in delivery) return result('unverifiable', delivery.problem);
-  const recorded = input.recordedIsBase ? goal.baseline?.scans.find(scan => scan.tool === checkId) : undefined;
+  // The record stands for this scanner only: a setup that changed the command since the Goal was opened is scanned again.
+  const recorded = input.recordedIsBase
+    ? goal.baseline?.scans.find(scan => scan.tool === checkId && scan.command === tool.command)
+    : undefined;
   let before: Finding[];
   if (recorded) before = recorded.findings.map(item => ({ ...item, level: item.level }));
   else {

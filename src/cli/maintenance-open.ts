@@ -40,6 +40,7 @@ export function scanBaseline(
     findings.push(...got.findings);
     scans.push({
       tool: key,
+      command: tool.command,
       findings: got.findings.map(({ fingerprint, ruleId, level, file }) => ({
         fingerprint,
         ruleId,

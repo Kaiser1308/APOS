@@ -139,6 +139,8 @@ const goalSchema = z
         scans: z.array(
           z.object({
             tool: namedText,
+            /** The command that scanned: a baseline stands only for the same scanner, so a setup that changes it is scanned again. */
+            command: namedText.optional(),
             findings: z.array(
               z.object({
                 fingerprint: namedText,

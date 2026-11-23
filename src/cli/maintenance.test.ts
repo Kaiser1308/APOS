@@ -263,6 +263,21 @@ describe('the gate of a maintenance Goal', () => {
     ).toHaveLength(2);
   });
 
+  it('is unverifiable when the base gives no readable result, not red for failures the base may have had', async () => {
+    const p = await maintProject({ legacy: true });
+    p.commitFiles('the base tool breaks', { 'deps.json': manifest({ fmt: '1.0.0', crash: 'yes' }) });
+    await p.invoke('maintenance', 'open', 'Bump fmt');
+    await p.invoke('maintenance', 'approve', 'GOAL-MAINT-001', '--on-behalf', 'item 1');
+    await p.invoke('lead', 'propose', '--maintenance', '--goal', 'GOAL-MAINT-001');
+    await p.invoke('lead', 'commit', 'GOAL-MAINT-001');
+    // The delivery's tool runs (the manifest no longer breaks it) and one test fails, as it did before the base tool broke: that proves nothing yet.
+    const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });
+    const got = await submit(p, sha);
+    expect(got.code).toBe(3);
+    expect(got.text).toMatch(/the base did not give a readable result/);
+    expect(p.state('GOAL-MAINT-001')!.packages?.['WP-MAIN']?.attempts).toBe(0);
+  });
+
   it('is unverifiable when two runs of a test layer disagree', async () => {
     const p = await prepare();
     const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });

@@ -114,7 +114,7 @@ export function entryViolations(input: {
     for (const module of asked) {
       if (!module || allow.some(item => item.test(module))) continue;
       const internal = filesOf(module);
-      if (!internal.length || internal.some(path => input.allowed(path))) continue;
+      if (!internal.length || internal.every(path => input.allowed(path))) continue;
       problems.push(
         `${input.file}:${index + 1}: imports "${module}" (${internal[0]}), an internal module that is not a declared entry: a test may call only the entries in stubPaths`,
       );

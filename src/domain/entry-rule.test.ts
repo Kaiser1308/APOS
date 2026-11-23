@@ -72,6 +72,13 @@ describe('entryViolations', () => {
       expect.stringContaining('calc.acceptance.test.ts:3: imports "./inner/deep.js" (src/inner/deep.ts)') as unknown,
     ]);
   });
+  it('typescript: an ambiguous import is allowed only when every possible target is declared', () => {
+    const files = ['src/api.ts', 'src/api/index.ts'];
+    expect(
+      check(ts, 'src/api.acceptance.test.ts', "import { run } from './api.js';\n", files, ['src/api/index.ts']),
+    ).toEqual([expect.stringContaining('imports "./api.js"') as unknown]);
+    expect(check(ts, 'src/api.acceptance.test.ts', "import { run } from './api.js';\n", files, files)).toEqual([]);
+  });
   it('typescript: a library that is not in the repo is never judged, and node: is allowed', () => {
     expect(check(ts, 'src/a.test.ts', "import x from 'lodash';\nimport fs from 'node:fs';\n", [], [])).toEqual([]);
   });

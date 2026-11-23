@@ -10,8 +10,9 @@ export function registerSetup(ctx: CliContext): void {
       '--skills <dir>',
       'folder with apos-core/ and apos-<role>/ skills (default: APOS_SKILLS, else the copy bundled with APOS)',
     )
-    .action(async (flags: { skills?: string }) => {
-      await initProject(repo(), flags.skills, options.codec);
+    .option('--no-agents-md', 'do not write the APOS block into AGENTS.md or point CLAUDE.md at it')
+    .action(async (flags: { skills?: string; agentsMd?: boolean }) => {
+      await initProject(repo(), flags.skills, options.codec, { agentsMd: flags.agentsMd });
       write(`Initialized ${repo()}`);
     });
   program

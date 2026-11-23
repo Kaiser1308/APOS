@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { yamlCodec, type SetupCodec } from '../domain/setup-codec.js';
 import { assertGitRoot } from '../store/project-history.js';
+import { writeAgentFiles } from './agents-md.js';
 
 /** The skill/controller contract this build implements; every APOS skill declares it in frontmatter. */
 export const APOS_CONTRACT = 3;
@@ -42,7 +43,12 @@ export function resolveSkills(skillsRoot: string = process.env.APOS_SKILLS || BU
   };
 }
 
-export async function initProject(repoPath: string, skillsRoot?: string, codec: SetupCodec = yamlCodec): Promise<void> {
+export async function initProject(
+  repoPath: string,
+  skillsRoot?: string,
+  codec: SetupCodec = yamlCodec,
+  options: { agentsMd?: boolean } = {},
+): Promise<void> {
   const repo = assertGitRoot(repoPath);
   const skills = resolveSkills(skillsRoot);
   const dir = join(repo, '.apos');
@@ -74,6 +80,17 @@ export async function initProject(repoPath: string, skillsRoot?: string, codec: 
       writeFileSync(target, content, 'utf8');
       files.push(target);
     }
+  }
+  if (options.agentsMd !== false) {
+    // The user's own uncommitted edits to these files are theirs to commit, not ours to sweep in.
+    const dirty = (path: string) =>
+      execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', relative(repo, path)], {
+        encoding: 'utf8',
+      }).trim() !== '';
+    const before = ['AGENTS.md', 'CLAUDE.md']
+      .map(name => join(repo, name))
+      .filter(path => existsSync(path) && dirty(path));
+    for (const path of writeAgentFiles(repo)) if (!before.includes(path)) files.push(path);
   }
   const paths = files.map(path => relative(repo, path));
   const status = execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', ...paths], { encoding: 'utf8' });

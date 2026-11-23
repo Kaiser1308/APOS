@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanProjects } from './test-lock.test-support.js';
+import { parseGoalSpec } from '../domain/contracts.js';
+import type { GoalState, PackageState } from '../domain/transitions.js';
+import { spec } from '../domain/fixtures.test-support.js';
 import { NO_COUPON, OLD, lockedBy, removalGoal, removalProject } from './removal.test-support.js';
 
 afterEach(cleanProjects);
@@ -91,4 +94,69 @@ describe('a delivery that removes a feature', () => {
       expect(late).toMatchObject({ status: 'fail', reason: `declared removed but still there: ${OLD}::b` });
     }, 60_000);
   });
+});
+
+describe('a Multi-WP package that builds on a package which already removed tests (Codex)', () => {
+  const KEEP = 'app.L1::tests.unit.keep';
+  const goal = parseGoalSpec({
+    ...spec,
+    acceptance: [
+      { ...spec.acceptance[0]!, id: 'AC-1', proof: 'removed', removesTests: [OLD] },
+      { ...spec.acceptance[0]!, id: 'AC-2', proof: 'removed', removesTests: [KEEP] },
+    ],
+    checks: [{ ...spec.checks[0]!, command: 'node -e "process.exit(0)"' }],
+  });
+  const packageOf = (id: string, criterion: string, dependencies: string[], extra: Partial<PackageState> = {}) =>
+    ({
+      spec: {
+        id,
+        goalId: goal.id,
+        goalVersion: 1,
+        version: 1,
+        owner: 'w',
+        outcome: id,
+        scope: ['x'],
+        exclusions: [],
+        dependencies,
+        interfaces: ['x@v1'],
+        acceptance: [{ id: 'WA-1', text: 'x', goalAcceptanceId: criterion }],
+        integration: 'x',
+      },
+      status: 'pending',
+      attempts: 0,
+      ...extra,
+    }) as PackageState;
+  const setup = async () => {
+    const p = await removalProject({
+      goal,
+      tests: {
+        'tests/acceptance/nocoupon.t': 'case absent gone coupon\n',
+        'tests/acceptance/nokeep.t': 'case absent gone coupon\n',
+        '.apos/goals/GOAL-001/tests.json': JSON.stringify([
+          { acceptanceId: 'AC-1', part: 'app', layer: 'L2', testIds: [NO_COUPON] },
+          { acceptanceId: 'AC-2', part: 'app', layer: 'L2', testIds: ['tests.acceptance.nokeep::absent'] },
+        ]),
+      },
+    });
+    const removedA = p.commit({ 'tests/unit/old.t': null, 'src/impl.txt': '' }, 'WP-A removes the old coupon tests');
+    const removedB = p.commit({ 'tests/unit/keep.t': null }, 'WP-B removes the keep tests');
+    const green = packageOf('WP-A', 'AC-1', [], { status: 'green', gate: { deliveryCommit: removedA } as never });
+    const withPackages = (packages: Record<string, PackageState>): GoalState => ({ ...p.state(), packages });
+    const inventory = (state: GoalState, id: string, head: string) =>
+      p.assurance.checks(state, state.packages![id]!, head, p.lockCommit, []).find(c => c.checkId === 'APOS-INVENTORY');
+    return { p, green, removedA, removedB, withPackages, inventory };
+  };
+
+  it('does not call the tests its green dependency removed lost', async () => {
+    const { green, removedB, withPackages, inventory } = await setup();
+    const state = withPackages({ 'WP-A': green, 'WP-B': packageOf('WP-B', 'AC-2', ['WP-A']) });
+    expect(inventory(state, 'WP-B', removedB)).toMatchObject({ status: 'pass' });
+  }, 60_000);
+
+  it('still calls them lost for a package that does not build on that dependency', async () => {
+    const { green, removedB, withPackages, inventory } = await setup();
+    const state = withPackages({ 'WP-A': green, 'WP-C': packageOf('WP-C', 'AC-2', []) });
+    expect(inventory(state, 'WP-C', removedB)).toMatchObject({ status: 'fail' });
+    expect(inventory(state, 'WP-C', removedB)?.reason).toContain(`test missing: ${OLD}::a`);
+  }, 60_000);
 });

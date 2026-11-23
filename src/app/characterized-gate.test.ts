@@ -145,4 +145,53 @@ describe('coverageOfRefactor after a Goal that removed tests (Review Focus 5)', 
     expect(source?.lock.files['tests/a.t']).toBe(hash);
     expect(source?.lock.map[0]?.testIds).toEqual(['tests.a::one', 'tests.a::two']);
   }, 60_000);
+
+  it('ignores a removal the refactor base does not contain (Codex: limit to commits present on the base)', async () => {
+    const p = await testingProject({ files: { 'src/legacy.txt': 'legacy\n' } });
+    const locked = p.commit({ 'tests/a.t': 'case one pass\ncase two pass\n' }, 'lock');
+    const characterize = closed('GOAL-C', locked);
+    characterize.testLock = lockOf(locked, { 'tests/a.t': sha256Of(Buffer.from('case one pass\ncase two pass\n')) });
+    const refactor = refactorOf(locked);
+    const later = p.commit({ 'tests/a.t': 'case one pass\n' }, 'a removal that lands after the refactor base');
+    const goals = [characterize, removal(later, ['tests/a.t'], ['app.L1::tests.a::two']), refactor];
+    const [source] = coverageOfRefactor(p.dir, goals, refactor, undefined, new GitCommitInspector()).sources;
+    expect(source?.lock.map[0]?.testIds).toEqual(['tests.a::one', 'tests.a::two']);
+    // The same removal, once the base holds it, counts.
+    const after = coverageOfRefactor(p.dir, goals, refactorOf(later), undefined, new GitCommitInspector()).sources;
+    expect(after[0]?.lock.map[0]?.testIds).toEqual(['tests.a::one']);
+  }, 60_000);
+
+  it('applies removals in the order of their commits, not of their Goal ids (Codex)', async () => {
+    const p = await testingProject({ files: { 'src/legacy.txt': 'legacy\n' } });
+    const three = 'case one pass\ncase two pass\ncase three pass\n';
+    const locked = p.commit({ 'tests/a.t': three }, 'lock');
+    const characterize = closed('GOAL-C', locked);
+    characterize.testLock = lockOf(locked, { 'tests/a.t': sha256Of(Buffer.from(three)) });
+    characterize.testLock.map = [
+      { acceptanceId: 'AC-1', part: 'app', layer: 'L1', testIds: ['tests.a::one', 'tests.a::two', 'tests.a::three'] },
+    ];
+    const first = p.commit({ 'tests/a.t': 'case one pass\ncase three pass\n' }, 'removes two');
+    const second = p.commit({ 'tests/a.t': 'case one pass\n' }, 'removes three');
+    // The later removal has the smaller Goal id.
+    const early = {
+      ...removal(second, ['tests/a.t'], ['app.L1::tests.a::three']),
+      spec: {
+        ...removal(second, [], ['x']).spec,
+        id: 'GOAL-A-GONE',
+        acceptance: [{ ...spec.acceptance[0]!, proof: 'removed', removesTests: ['app.L1::tests.a::three'] }],
+      },
+    } as GoalState;
+    const late = {
+      ...removal(first, ['tests/a.t'], ['app.L1::tests.a::two']),
+      spec: {
+        ...removal(first, [], ['x']).spec,
+        id: 'GOAL-B-GONE',
+        acceptance: [{ ...spec.acceptance[0]!, proof: 'removed', removesTests: ['app.L1::tests.a::two'] }],
+      },
+    } as GoalState;
+    const goals = [characterize, early, late, refactorOf(second)];
+    const [source] = coverageOfRefactor(p.dir, goals, goals[3]!, undefined, new GitCommitInspector()).sources;
+    expect(source?.lock.map[0]?.testIds).toEqual(['tests.a::one']);
+    expect(source?.lock.files['tests/a.t']).toBe(sha256Of(Buffer.from('case one pass\n')));
+  }, 60_000);
 });

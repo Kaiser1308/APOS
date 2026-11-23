@@ -28,7 +28,7 @@ export function coverageOfRefactor(
   const coverage = refactorCoverage({ paths, files: base ? filesAt(repo, base) : [], characterized: held });
   // A Goal that removed tests after the lock took them out of what a refactor must keep: the Human approved that list.
   if (inspector) {
-    const changed = (item: Characterization) => afterRemovals(repo, goals, item, inspector);
+    const changed = (item: Characterization) => afterRemovals(repo, goals, item, inspector, base);
     coverage.sources = coverage.sources.map(changed);
     coverage.held = coverage.held.map(changed);
   }
@@ -55,11 +55,20 @@ function afterRemovals(
   goals: GoalState[],
   item: Characterization,
   inspector: CommitInspector,
+  base: string | undefined,
 ): Characterization {
   let lock = item.lock;
   const removals = goals
     .filter(state => effectiveStatus(state) === 'closed' && removalOf(state.spec).length && state.verifiedCommit)
-    .sort((a, b) => a.spec.id.localeCompare(b.spec.id));
+    // A removal the base does not hold is not the refactor's to answer for.
+    .filter(state => !base || inspector.contains(repo, state.verifiedCommit!, base))
+    // The newest removal has the last word on a file: apply them in the order of their commits, Goal id only breaks a tie.
+    .sort((a, b) => {
+      const [x, y] = [a.verifiedCommit!, b.verifiedCommit!];
+      if (x !== y && inspector.contains(repo, x, y)) return -1;
+      if (x !== y && inspector.contains(repo, y, x)) return 1;
+      return a.spec.id.localeCompare(b.spec.id);
+    });
   for (const state of removals) {
     const commit = state.verifiedCommit!;
     if (!inspector.contains(repo, lock.commit, commit)) continue;

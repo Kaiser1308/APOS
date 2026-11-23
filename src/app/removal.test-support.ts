@@ -42,6 +42,8 @@ export async function removalProject(
     files?: Record<string, string>;
     others?: GoalState[];
     paths?: string[];
+    /** The Tester's commit, when one test of absence is not enough (a Goal with several removed criteria). */
+    tests?: Record<string, string>;
   } = {},
 ) {
   const goal = options.goal ?? removalGoal();
@@ -51,7 +53,7 @@ export async function removalProject(
     files: { ...baseFiles, ...options.files },
     ...(options.paths ? { paths: options.paths } : {}),
   });
-  const lockCommit = p.commit(absenceTests(p.goalId), 'the test of absence');
+  const lockCommit = p.commit(options.tests ?? absenceTests(p.goalId), 'the test of absence');
   const locked = await p.service.submit(p.goalId, lockCommit, 'tester');
   if (!locked.ok) throw new Error(`fixture tests were refused: ${locked.problems.join('; ')}`);
   const goals = () => [...p.journal.listGoals(), ...(options.others ?? [])];

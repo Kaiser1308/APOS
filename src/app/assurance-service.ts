@@ -212,6 +212,25 @@ export class AssuranceService {
         });
   }
 
+  /** The green packages this one builds on (transitively) whose delivery commit `head` contains. */
+  private dependencies(state: GoalState, item: PackageState, head: string): PackageState[] {
+    const { repo, inspector } = this.deps;
+    const seen = new Set<string>();
+    const out: PackageState[] = [];
+    const todo = [...item.spec.dependencies];
+    while (todo.length) {
+      const id = todo.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const dep = state.packages?.[id];
+      const commit = dep?.gate?.deliveryCommit;
+      if (!dep || dep.status !== 'green' || !commit || !inspector.contains(repo, commit, head)) continue;
+      out.push(dep);
+      todo.push(...dep.spec.dependencies);
+    }
+    return out;
+  }
+
   /**
    * Files a green dependency of this package already changed, still byte for byte as that dependency left them: the
    * delivery contains them, so they are not this package's change.
@@ -246,11 +265,14 @@ export class AssuranceService {
     const { repo } = this.deps;
     const lock = state.testLock;
     const reviews = (state.reviewTests ?? []).filter(review => review.packageId === item.spec.id);
-    // The package answers for the removals of its own criteria: the tests of an old feature go with the package that owns it.
-    const removable = removalEntries(
-      state.spec,
-      item.spec.acceptance.flatMap(criterion => (criterion.goalAcceptanceId ? [criterion.goalAcceptanceId] : [])),
-    );
+    // The package answers for the removals of its own criteria, and for those a green dependency it contains already made:
+    // the tests that dependency took out are gone from this delivery too, and are not this package's loss.
+    const criteriaOf = (pkg: PackageState) =>
+      pkg.spec.acceptance.flatMap(criterion => (criterion.goalAcceptanceId ? [criterion.goalAcceptanceId] : []));
+    const removable = removalEntries(state.spec, [
+      ...criteriaOf(item),
+      ...this.dependencies(state, item, head).flatMap(criteriaOf),
+    ]);
     const wanted = inventoryLayers(setup, lock, removable);
 
     for (const review of reviews)

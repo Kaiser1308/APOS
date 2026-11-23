@@ -1,5 +1,3 @@
-import { execFileSync } from 'node:child_process';
-import { assertGitRoot } from '../store/project-history.js';
 import {
   infraCheck,
   inventoryCheck,
@@ -23,6 +21,7 @@ import type { ToolRunner } from './layer-runner.js';
 import type { LayerId } from '../domain/layers.js';
 import { LayerGate, type LayerGateInput } from './layer-gate.js';
 import { refactorScopeCheck } from '../domain/characterized.js';
+import { addedLines, integrationChecks, judgedByAPackage, unverifiable } from './integration-assurance.js';
 import { characterizeScopeCheck, characterizedResult, coverageOfRefactor } from './characterized-gate.js';
 
 export type AssuranceDeps = {
@@ -35,27 +34,7 @@ export type AssuranceDeps = {
   goals?: () => GoalState[];
 };
 
-/** Lines a diff adds, outside `.apos/`, without the `+` marker. */
-export function addedLines(repo: string, base: string, head: string): string[] {
-  const diff = execFileSync(
-    'git',
-    ['-C', assertGitRoot(repo), 'diff', '-U0', '--no-color', '--no-ext-diff', base, head, '--', '.', ':!.apos'],
-    { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
-  );
-  return diff
-    .split(/\r?\n/)
-    .filter(line => line.startsWith('+') && !line.startsWith('+++'))
-    .map(line => line.slice(1));
-}
-
-const unverifiable = (checkId: string, reason: string): CheckResult => ({
-  checkId,
-  status: 'unverifiable',
-  reason,
-  base: [],
-  delivery: [],
-  newFailures: [],
-});
+export { addedLines };
 
 /**
  * The three checks every package gate adds when its Goal is pinned to a setup: the locked tests are untouched and pass,
@@ -75,6 +54,7 @@ export class AssuranceService {
     // The scope the Human approved with a legacy Goal binds the integration commit and the close stage like a package.
     if (input.stage !== 'submit') ran.checks = [...ran.checks, ...this.legacyChecks(state, input)];
     if (input.stage !== 'integrate') return ran;
+    ran.checks = [...ran.checks, ...this.integration(state, input)];
     // A review of the integration commit locks its tests into every later integration commit, like a package's.
     const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
     const setup = this.deps.loadSetup(state);
@@ -84,6 +64,13 @@ export class AssuranceService {
       for (const test of review.tests) wanted.set(`${test.part}.${test.layer}`, { part: test.part, layer: test.layer });
     const delivery = this.runTests(setup, wanted, input.head);
     return { ...ran, checks: [...ran.checks, this.reviewCheck(state, reviews, input.head, delivery)] };
+  }
+
+  private integration(state: GoalState, input: LayerGateInput): CheckResult[] {
+    const setup = this.deps.loadSetup(state);
+    if (!setup) return [];
+    const runTests = (...args: Parameters<AssuranceService['runTests']>) => this.runTests(...args);
+    return integrationChecks({ repo: this.deps.repo, setup, runTests }, state, input);
   }
 
   /** The checks of a characterize or refactor Goal at a stage that sees the whole Goal (the integration commit, the close). */
@@ -102,14 +89,15 @@ export class AssuranceService {
           paths: state.spec.paths ?? [],
           needsHuman: Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman)),
           lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
-          judged: this.judgedByAPackage(state, input),
+          judged: judgedByAPackage(this.deps.repo, state, input),
         }),
       );
     }
     if (state.spec.kind === 'characterize' && input.base)
       checks.push(characterizeScopeCheck({ repo: this.deps.repo, setup, base: input.base, head: input.head }));
     // What a characterize Goal locked stays as it was locked at these stages too: the integration commit cannot rewrite a captured test.
-    if (state.spec.kind === 'characterize' && lock) {
+    // (At the integrate stage `integrationChecks` runs the same locked-tests check for every Goal.)
+    if (state.spec.kind === 'characterize' && lock && input.stage !== 'integrate') {
       const wanted = new Map<string, { part: string; layer: LayerId }>();
       for (const entry of lock.map)
         wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
@@ -130,23 +118,6 @@ export class AssuranceService {
       );
     }
     return checks;
-  }
-
-  /**
-   * The changed files whose content at `head` is exactly what a package gate judged (its delivery commit changed them and
-   * holds the same bytes): a sensitive file the integration changed again after that is not judged.
-   */
-  private judgedByAPackage(state: GoalState, input: LayerGateInput): string[] {
-    const { repo } = this.deps;
-    const gates = Object.values(state.packages ?? {}).flatMap(item => (item.gate ? [item.gate] : []));
-    return input.changed.filter(file => {
-      const now = fileAt(repo, input.head, file);
-      return gates.some(gate => {
-        if (!gate.changedFiles?.includes(file)) return false;
-        const then = fileAt(repo, gate.deliveryCommit, file);
-        return now === undefined ? then === undefined : then?.equals(now) === true;
-      });
-    });
   }
 
   /** The layers the captured tests of a refactor live in, added to `wanted`: the base and the delivery both run them. */

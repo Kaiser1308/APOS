@@ -4,10 +4,15 @@
 
 ## Hiện gì
 
-- **Cần anh** (`inbox`): cổng A (duyệt Goal), cổng B (chọn Goal), Goal bị chặn (`blocked`), Goal đã verified chờ đóng, các thông báo, và **cảnh báo của gate** (`needs attention: ...`: đổi test, đường dùng chung, file build; chưa có khoá test tới đợt 3). Cùng một hàm `buildInbox` với `apos inbox`, nên hai nơi không lệch nhau.
-- **Mỗi Goal:** trạng thái và ai giữ việc (Human, Lead, xong); gói và phụ thuộc (đồ thị, màu theo `pending/submitted/green/red/needs-human`); finding; kết quả gate kèm log (tra theo hash do APOS ghi); review (chỉ là lời khuyên); ngân sách (phút từ `goal select`, số lần đỏ nhiều nhất ở một gói); dòng thời gian sự kiện; "câu chuyện" Goal.
+- **Cần anh** (`inbox`): cổng A (duyệt Goal), cổng B (chọn Goal), Goal bị chặn (`blocked`), Goal đã verified chờ đóng, các thông báo, và **cảnh báo của gate** (`needs attention: ...`: đổi test, đường dùng chung, file build, đổi hạ tầng test). Cùng một hàm `buildInbox` với `apos inbox`, nên hai nơi không lệch nhau.
+- **Mỗi Goal** có bốn tab: `story`, `overview`, `gates`, `timeline`.
+  - `overview`: các bước trạng thái và ai giữ việc (Human, Lead, xong); ngân sách (số lần đỏ nhiều nhất ở một gói, phút từ `goal select`) kèm **setup đã ghim** (`setup v<n>`, hoặc `không có setup`); gói và phụ thuộc (đồ thị, màu theo `pending/submitted/green/red/needs-human`); **bảng mức bảo đảm**; finding; review (chỉ là lời khuyên, kết quả `pass`/`fail` của lệnh `review`).
+  - `gates`: mỗi cổng gói, cổng của Goal và cổng sau merge, từng kiểm với lý do và log (tra theo hash do APOS ghi). Các kiểm của bằng chứng hiện ở đây: `APOS-LOCKED` (test đã khoá), `APOS-REVIEW` (test của review chặn), `APOS-INVENTORY`, phạm vi, test hạ tầng, và từng lớp `<part>.<layer>.<tool>`.
+  - `timeline`: mọi sự kiện, kể cả khoá test, ngoại lệ và `review-blocked`, mới nhất trước.
+  - `story`: câu chuyện của Goal (quyết định, báo cáo, chặn, finding, review).
+- **Bảng mức bảo đảm** là cùng văn bản với `apos goal show`, dựng từ log bằng `buildAssuranceReport`: số tiêu chí máy chứng minh và số anh xác nhận tay; **test đã khoá** theo lớp và số lần sửa sau khoá; kiểm kê và phạm vi; lớp đã chạy ở từng khâu (submit, ghép, đóng) kèm dấu đạt, đỏ hay chưa kiểm; **review chặn** (số lần chặn bằng test đỏ, số test đã khoá vào lần giao sau, review bị bỏ qua và ai duyệt); **ngoại lệ** đã duyệt; **agent duyệt thay**; những gì tắt hoặc chưa kiểm. Số đo hiện bằng nhãn ngắn (`p99 0.39`, `mutationScore 82`), đường dẫn đầy đủ nằm trong report. UI không nạp setup, nên bảng chỉ có những gì log nói: lớp chưa chạy vì setup thiếu công cụ hiện khi cổng ghi lại điều đó.
 - **Goal `legacy`:** Goal do APOS v2 (có điều phối agent) ghi. Hiện nhãn "chỉ đọc – APOS cũ", đọc được, không chạy tiếp.
-- Không có tab hay cột về agent, terminal, token hay tick của controller (đã bỏ ở đợt 1; thiết kế cũ ở `docs/archive/design/`).
+- Không có tab hay cột về agent, terminal, token hay tick của controller (thiết kế cũ ở `docs/archive/design/`).
 
 ## Bất biến
 

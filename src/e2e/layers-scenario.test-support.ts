@@ -52,6 +52,8 @@ export type Stack = {
   prepare?: (dir: string) => void;
   /** A file the integration test fails on when it exists. */
   breakFlag: string;
+  /** A reviewer's test that is red on any integration commit: where it goes and what it holds. */
+  integrationReview: { file: string; red: string };
 };
 
 export const python: Stack = {
@@ -94,6 +96,7 @@ export const python: Stack = {
     l4: 'pytest -o junit_family=xunit1 e2e --junitxml={report}',
   },
   breakFlag: 'break.flag',
+  integrationReview: { file: 'tests/test_review_integration.py', red: 'def test_review():\n    assert 1 == 2\n' },
 };
 
 export const typescript: Stack = {
@@ -142,6 +145,10 @@ export const typescript: Stack = {
   prepare: dir =>
     symlinkSync(resolve('node_modules'), join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir'),
   breakFlag: 'break.flag',
+  integrationReview: {
+    file: 'src/review.integration-check.test.ts',
+    red: "import { it, expect } from 'vitest';\nit('review', () => expect(1).toBe(2));\n",
+  },
 };
 
 export type Said = { code: number | undefined; text: string };
@@ -228,7 +235,7 @@ export function openProject(stack: Stack, cleanup: string[]) {
   };
 
   /** Draft, then edit as the scenario needs: no linters, benchmark and scan tools, an e2e tool on `system`. */
-  const setUp = async () => {
+  const setUp = async (edit?: (app: { layers: Record<string, unknown[]> }) => void) => {
     commit(stack.files, 'project');
     stack.prepare?.(dir);
     await invoke('init');
@@ -251,6 +258,7 @@ export function openProject(stack: Stack, cleanup: string[]) {
       },
       { id: 'scan', command: 'node scripts/scan.cjs {report}', format: 'sarif' },
     ] as never;
+    edit?.(app as { layers: Record<string, unknown[]> });
     setup.system = { L4: [{ id: 'e2e', command: stack.setup.l4, format: 'junit' }] };
     setup.triggers = [{ when: { changed: ['src/ui/**'] }, at: 'submit', run: ['system.L4'] }];
     const base = commit({ '.apos/project.yaml': yamlCodec.stringify(setup) }, 'setup');

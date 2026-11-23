@@ -1,8 +1,15 @@
 Usage: apos review [options] [command]
 
+a review blocks only with a test that is red when APOS runs it; anything else is
+advice
+
 Options:
-  -h, --help                 display help for command
+  -h, --help                            display help for command
 
 Commands:
-  submit [options] <goalId>
-  help [command]             display help for command
+  block [options] <goalId> [packageId]  run the tests a review added: red for a
+                                        reason in the code puts the package back
+                                        to red; exits 1 then
+  note [options] <goalId> [packageId]   record a remark with no test: advice
+                                        only, it gates nothing
+  help [command]                        display help for command

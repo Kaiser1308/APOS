@@ -1,0 +1,19 @@
+{
+  "id": "EXEC-001",
+  "version": 1,
+  "goalId": "GOAL-001",
+  "goalVersion": 1,
+  "mode": "solo-direct",
+  "approach": "Make on_sensor set the slot to occupied when a car is detected",
+  "rationale": "One function in one file: a single owner is faster than splitting",
+  "risks": ["The old rule about reserved slots lives in the same function and has no test"],
+  "paths": ["parking/sensor.py"],
+  "stubPaths": ["parking/sensor.py"],
+  "entries": ["on_sensor"],
+  "acceptanceMapping": [
+    { "acceptanceId": "AC-1", "verification": "locked acceptance test" },
+    { "acceptanceId": "AC-2", "verification": "locked acceptance test" },
+    { "acceptanceId": "AC-3", "verification": "benchmark at the close stage" }
+  ],
+  "verificationStrategy": "locked acceptance tests, then the benchmark at close"
+}

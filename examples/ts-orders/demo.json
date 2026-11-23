@@ -1,0 +1,11 @@
+{
+  "tools": [
+    "npx"
+  ],
+  "bench": {
+    "id": "bench",
+    "command": "npx vitest bench --run --outputJson={report}",
+    "format": "metric",
+    "metric": "files.0.groups.0.benchmarks.0.p99"
+  }
+}

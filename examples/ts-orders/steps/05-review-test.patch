@@ -1,0 +1,22 @@
+diff --git a/src/cancel.review.test.ts b/src/cancel.review.test.ts
+new file mode 100644
+index 0000000..ed2ae8a
+--- /dev/null
++++ b/src/cancel.review.test.ts
+@@ -0,0 +1,16 @@
++import { expect, it } from 'vitest';
++import { cancelOrder } from './cancel.ts';
++
++// Review of the delivery: the rule that a shipped order cannot be cancelled existed before this change and the
++// acceptance tests do not mention it. Whatever else cancelOrder does, it must never report a shipped order as cancelled.
++// A refusal (a throw) is fine, so this test also holds on the stub the Tester locked.
++it('a shipped order is never reported as cancelled', () => {
++  const shipped = { id: 'O-9', placedAt: '2026-03-30T00:00:00.000Z', status: 'shipped' as const };
++  let result: { status: string } | undefined;
++  try {
++    result = cancelOrder(shipped, new Date('2026-04-01T00:00:00Z'));
++  } catch {
++    result = undefined;
++  }
++  expect(result?.status).not.toBe('cancelled');
++});

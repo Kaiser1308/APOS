@@ -13,7 +13,7 @@ export const STACKS: CatalogEntry[] = [
   {
     stack: 'typescript',
     notes: [
-      'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc.',
+      'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc, Stryker (the mutation score is computed from reports/mutation/mutation.json; needs @stryker-mutator/core and the vitest runner in the project).',
     ],
     detect: { files: ['package.json'], contains: { 'package.json': '"vitest"' } },
     layers: {
@@ -51,7 +51,17 @@ export const STACKS: CatalogEntry[] = [
           runOne: 'npx vitest run "{classname}" --reporter=junit --outputFile={report} -t "^{name|spaced|regex}$"',
         },
       ],
-      L5: [{ id: 'semgrep', command: 'semgrep scan --config auto --sarif-output={report} .', format: 'sarif' }],
+      L5: [
+        { id: 'semgrep', command: 'semgrep scan --config auto --sarif-output={report} .', format: 'sarif' },
+        {
+          id: 'stryker',
+          command:
+            "npx stryker run --mutate \"{changed}\" --reporters json && node -e \"const r=require('./reports/mutation/mutation.json');let k=0,t=0;for(const f of Object.values(r.files))for(const m of f.mutants){if(['Ignored','CompileError','RuntimeError'].includes(m.status))continue;t++;if(['Killed','Timeout'].includes(m.status))k++}require('fs').writeFileSync('{report}',JSON.stringify({mutationScore:t?100*k/t:0}))\"",
+          format: 'metric',
+          metric: 'mutationScore',
+          when: 'flag:mutation',
+        },
+      ],
     },
     loadErrorPatterns: [
       'Failed to load',
@@ -102,7 +112,7 @@ export const STACKS: CatalogEntry[] = [
   {
     stack: 'python',
     notes: [
-      'verified: pytest 9.0.2 (-o junit_family=xunit1 gives the file attribute; runOne by node id "file::Class::name"). Not verified: ruff (--output-format sarif), mypy, bandit.',
+      'verified: pytest 9.0.2 (-o junit_family=xunit1 gives the file attribute; runOne by node id "file::Class::name"). Not verified: ruff (--output-format sarif), mypy, bandit, mutmut 2.x (export-cicd-stats writes mutmut-cicd-stats.json; the score is killed / total).',
     ],
     detect: { files: ['pyproject.toml'] },
     layers: {
@@ -134,7 +144,17 @@ export const STACKS: CatalogEntry[] = [
           runOne: 'pytest -o junit_family=xunit1 "{file}::{within}{name}" --junitxml={report}',
         },
       ],
-      L5: [{ id: 'bandit', command: 'bandit -r . -f sarif -o {report}', format: 'sarif' }],
+      L5: [
+        { id: 'bandit', command: 'bandit -r . -f sarif -o {report}', format: 'sarif' },
+        {
+          id: 'mutmut',
+          command:
+            "python -c \"import json,subprocess as s;s.run(['mutmut','run','--paths-to-mutate','{changed}']);s.run(['mutmut','export-cicd-stats']);d=json.load(open('mutmut-cicd-stats.json'));t=d['total'];json.dump({'mutationScore':100*d['killed']/t if t else 0},open('{report}','w'))\"",
+          format: 'metric',
+          metric: 'mutationScore',
+          when: 'flag:mutation',
+        },
+      ],
     },
     loadErrorPatterns: [
       '^collection failure',

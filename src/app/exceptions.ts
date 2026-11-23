@@ -2,6 +2,7 @@ import { newEvent } from './events.js';
 import { INFRA_CHECK, SCOPE_CHECK } from '../domain/assurance.js';
 import { UserError } from '../domain/errors.js';
 import { AGENT_MAY_APPROVE, EXCEPTION_KINDS, floorRefProblem, type ExceptionKind } from '../domain/exceptions.js';
+import { reviewRef } from '../domain/review-tests.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 import type { GoalState } from '../domain/transitions.js';
 import type { GoalRepository } from '../ports/goal-repository.js';
@@ -54,6 +55,14 @@ export class ExceptionService {
           `--ref must be the commit of a revision waiting for approval${pending ? ` (${pending.commit})` : ': there is none'}`,
         );
       commit = pending.commit;
+    } else if (kind === 'review-overridden') {
+      const blocks = state.reviewTests ?? [];
+      const found = blocks.find(item => reviewRef(item, goalId).toLowerCase() === request.ref.toLowerCase());
+      if (!found)
+        throw new UserError(
+          `--ref for review-overridden is <package>:<review commit> of a review block${blocks.length ? ` (${blocks.map(item => reviewRef(item, goalId)).join(', ')})` : ': there is none'}`,
+        );
+      commit = found.reviewCommit;
     } else {
       // The reduction is read by every gate that runs after this event; it names no commit of the work, so it carries the one the tests were locked on.
       const setup = this.loadSetup?.(state);

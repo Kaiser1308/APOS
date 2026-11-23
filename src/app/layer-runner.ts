@@ -42,13 +42,19 @@ export class ToolRunner {
   }
 
   /** One command of `tool` (its own, or a filled-in `runOne`) at `commit`, in the part's `root`. */
-  run(commit: string, tool: LayerSpec, command: string, root: string): { exec: ExecResult; report?: ParsedReport } {
+  run(
+    commit: string,
+    tool: LayerSpec,
+    command: string,
+    root: string,
+    vars: { changed?: string } = {},
+  ): { exec: ExecResult; report?: ParsedReport } {
     const workspace = this.workspaces.checkout(this.repo, commit);
     try {
       const dir = join(this.artifactRoot, 'runs', randomUUID());
       mkdirSync(dir, { recursive: true });
       const tempReport = join(dir, 'report').replaceAll('\\', '/');
-      const final = command.replaceAll('{report}', tempReport);
+      const final = command.replaceAll('{report}', tempReport).replaceAll('{changed}', vars.changed ?? '');
       const cwd = join(workspace.path, root);
       const exec = this.executor.run(final, cwd, {}, this.timeoutMs);
       if (!tool.format || tool.format === 'exit' || notRunnable(exec)) return { exec };

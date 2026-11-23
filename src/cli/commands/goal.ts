@@ -3,6 +3,7 @@ import { UserError } from '../../domain/errors.js';
 import { readFileSync } from 'node:fs';
 import { newEvent } from '../../app/events.js';
 import { parseAppetite } from '../../domain/contracts.js';
+import { FLAG_PATTERN, MUTATION_FLAG } from '../../domain/goal-flags.js';
 import { sourceDigest } from '../../domain/gate.js';
 import { buildPlan } from '../../domain/plan.js';
 import { GoalRegistryService } from '../../app/registry.js';
@@ -12,6 +13,8 @@ import { buildAssuranceReport, renderAssuranceText } from '../../domain/assuranc
 import { pinnedSetupOf } from '../test-lock-wiring.js';
 import { proofToolProblems } from '../../domain/proof-tools.js';
 import type { CliContext } from '../context.js';
+
+const collect = (value: string, previous: string[]): string[] => [...previous, value];
 
 export function registerGoal(ctx: CliContext): void {
   const { program, write, writeError, withJournal, withJournalAsync, assertHuman, goalWithSource } = ctx;
@@ -91,7 +94,8 @@ export function registerGoal(ctx: CliContext): void {
   };
   appetiteOptions(goal.command('approve').argument('<id>'))
     .option('--setup-version <n|latest>', 'approved setup version to pin the Goal to', 'latest')
-    .action((id: string, flags: AppetiteFlags & { setupVersion: string }) =>
+    .option('--flag <name>', 'switch a setup tool on for this Goal (mutation, perf); repeatable', collect, [])
+    .action((id: string, flags: AppetiteFlags & { setupVersion: string; flag: string[] }) =>
       withJournalAsync(async journal => {
         const appetite = parseAppetite(appetiteOf(flags));
         const approvals = journal.setupHistory().approvals;
@@ -104,6 +108,20 @@ export function registerGoal(ctx: CliContext): void {
               `Setup version ${flags.setupVersion} was never approved (approved: ${approvals.map(item => item.version).join(', ') || 'none'})`,
             );
         }
+        for (const flag of flags.flag)
+          if (!FLAG_PATTERN.test(flag))
+            throw new UserError(`--flag ${flag}: a flag is a word (letters, digits, - and _)`);
+        // Mutation needs a tool: a flag that switches nothing on would look like a guarantee that is not there.
+        if (flags.flag.includes(MUTATION_FLAG)) {
+          const setup = pinnedSetupOf(ctx, journal, setupVersion);
+          const has = Object.values(setup?.parts ?? {}).some(part =>
+            Object.values(part.layers).some(tools => tools?.some(tool => tool.when === `flag:${MUTATION_FLAG}`)),
+          );
+          if (!has)
+            throw new UserError(
+              `${id} cannot be approved with --flag ${MUTATION_FLAG}: the setup has no tool that says \`when: flag:${MUTATION_FLAG}\`. Add one to the setup (see docs/catalog.md, Mutation), approve it, then approve the Goal again`,
+            );
+        }
         // A benchmark or scan criterion names a tool of the setup the Goal is pinned to: approving one the setup lacks proves nothing.
         const goalSpec = journal.getGoal(id)?.spec;
         if (goalSpec?.acceptance.some(item => item.benchmark || item.scan)) {
@@ -114,8 +132,10 @@ export function registerGoal(ctx: CliContext): void {
           if (problems.length) throw new UserError(`${id} cannot be approved:\n- ${problems.join('\n- ')}`);
         }
         const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
-        new GoalRegistryService(journal).approve(id, appetite, undefined, confirmation, setupVersion);
-        write(`Approved ${id}${setupVersion === undefined ? '' : ` on setup v${setupVersion}`}`);
+        new GoalRegistryService(journal).approve(id, appetite, undefined, confirmation, setupVersion, flags.flag);
+        write(
+          `Approved ${id}${setupVersion === undefined ? '' : ` on setup v${setupVersion}`}${flags.flag.length ? ` with flag ${flags.flag.join(', ')}` : ''}`,
+        );
         if (setupVersion === undefined)
           writeError(
             'Goal không có setup: bảo đảm theo setup tắt (approve một setup bằng apos setup approve rồi duyệt lại)',

@@ -12,6 +12,10 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | Owner claims `pass`, gate red | not verified | › rejects a red gate even when the owner reported pass |
 | Gate `unverifiable` (flaky, hung, baseline cannot run) | never green | `verification.test.ts` › rejects an unverifiable gate; `gate.test.ts` (domain) › is unverifiable when repeated runs disagree or a run times out |
 | Wrong log / artifact | the gate writes its own logs and hashes them outside the repo; owner artifacts are never read as proof | `gate-service.test.ts` › goes green … with logs hashed outside the repo |
+| An AI tool wired into the setup that gives a different answer each run | the probe fails (`flaky`), the setup cannot be approved; a stable one passes | `setup-probe.test.ts` › fails an AI tool that writes different tests every time it runs, and passes one that is stable |
+| Mutation score under the floor, or under a Goal criterion that raises it | the close stage is red, the message gives both thresholds and the scores | `mutation-flow.test.ts` |
+| Mutation runs that give scores more than 1 point apart, or a run that fails or leaves no report | `unverifiable`, never green | `mutation-flow.test.ts`; `layer-gate.test.ts` |
+| `goal approve --flag mutation` on a setup without a mutation tool | refused, nothing written | `goal-approve-proof.test.ts` |
 | Stale commit: gate on X, verify or merge of Y | refused | `verification.test.ts` › rejects a green gate that ran on a different commit; `merge.test.ts` › merges only the gated commit |
 | A gate that finishes after its package moved on | rejected | `verification.test.ts` › rejects a gate that finishes after its package moved on |
 | Plan revised after a gate | the gate is dropped | `verification.test.ts` › drops the gate when the Lead revises its plan |
@@ -29,7 +33,11 @@ This file was rewritten in phase 1 of v3, when APOS stopped starting, waking and
 | Intent gap found during execution | Goal parked for PM and Human | `v2-rules.test.ts` › parks the Goal for PM and Human on an intent gap |
 | Manual check confirmed by whoever submitted the work | refused | `gate-service.test.ts` › accepts manual confirmation only for a declared manual check … |
 | Tests, oracles, check-run files or build manifests changed | **warning in the gate report, the inbox and the UI; not blocked** for a Goal with no locked tests (a locked test changing is red: see [phase 3](#locked-tests-inventory-and-scope-phase-3)) | `v2-rules.test.ts` › warns when the gated diff changes tests …; `inbox.test.ts` › shows the warnings a gate report carries |
-| A review says `changes` | recorded as advice; gates nothing | `v2-rules.test.ts` › records a review as advice only; `integration.test.ts` › no longer needs a review to integrate |
+| A review (a person, a model or a tool) says `changes` in words | recorded as advice; gates nothing | `review-flow.test.ts` › advice is not a block; `integration.test.ts` › no longer needs a review to integrate |
+| A review commit with a red test | the package is red (`blocked by review: <ids>`), the Goal executing again; the tests are locked into the next delivery | `review-flow.test.ts` › a red test blocks, is locked into the next delivery, and a fix on top of it passes; `review-tests.test.ts` › review-blocked |
+| A review test that cannot load; a review that edits a test, adds a non-test file, or has another parent | refused, nothing recorded | `review-flow.test.ts` › a review may only add tests that load … |
+| The delivery that was blocked sent again without the review commit; the review's test edited | refused; red `APOS-REVIEW` | `review-flow.test.ts`; `review-tests.test.ts` › the review check of a delivery |
+| A Lead overrides a block | the delivery goes through; the table says `review bị bỏ qua: <ids>, duyệt bởi <by>` | `review-flow.test.ts`; `review-tests.test.ts` › the assurance table |
 
 ## Submitting a package
 
@@ -146,8 +154,8 @@ APOS v2 started, resumed, woke and watched agents through Orca (`controller watc
 
 - **A malicious local process.** The controller home (`~/.apos`) is outside the owner's worktree and the event log is hash-chained, so edits are detected. The caller runs as the same OS user, so this is tamper-evidence, not a security boundary; `--on-behalf` can be passed by anything that can run the CLI.
 - **A delivery that changes or deletes the tests that gate it**, for a Goal with no locked tests (no setup, or a setup without `tests.paths`): only a warning. With locked tests it is red.
-- **A weakened test whose assertion count does not fall**, or a stub-test pair that agrees to prove nothing. The count is a line regex; the second net is mutation testing (phase 5).
-- **Tests that reach inside the code instead of the declared entries.** Not checked until the catalogue has a rule per stack (phase 4).
+- **A weakened test whose assertion count does not fall**, or a stub-test pair that agrees to prove nothing. The count is a line regex; the second net is mutation testing (see [Mutation](../README.md#mutation)).
+- **Tests that reach inside the code instead of the declared entries.** Checked only for the stacks whose catalogue has an `entryRule` (Python, TypeScript); not for Java yet.
 - **A live run of a Lead and an orchestrator on a real project.** The end-to-end tests drive the CLI on scratch repos.
 
 ## Layers by stage, non-functional proof and the assurance table (phase 4)

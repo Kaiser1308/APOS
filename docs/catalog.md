@@ -92,6 +92,31 @@ A missing, empty or broken report is `unverifiable`, never "0 tests, green".
 Commands that Gradle or Maven run need care: Gradle skips an up-to-date `test`, so the shipped commands use `cleanTest test`; both write a directory of XML files, so they set `report` to a glob.
 
 
+## Mutation
+
+A tool with `"when": "flag:mutation"`, `"format": "metric"` and a `metric` path (`mutationScore`) is the mutation tool of its stack: it runs at the close stage for a Goal approved with `--flag mutation`, and the core reads only the number. `{changed}` in its command is the changed source files, comma-separated, so only new code is mutated. The score is on a 0 to 100 scale; the floor is `mutation.minScore` of the setup (70).
+
+| Stack | Tool | How the score is made |
+| --- | --- | --- |
+| typescript | Stryker (`npx stryker run --mutate`) | the JSON reporter writes `reports/mutation/mutation.json`; a one-line `node -e` turns it into `killed + timeout` over the mutants that ran |
+| python | mutmut 2.x | `mutmut export-cicd-stats` writes `mutmut-cicd-stats.json`; a one-line `python -c` turns it into `killed / total` |
+| java | PIT | not shipped: PIT writes XML with no score. Write a small script that runs it and writes `{"mutationScore": n}`, and use the script as the command (see [Adding a stack or a tool](#adding-a-stack-or-a-tool)) |
+
+Neither shipped command has been run on a real project here (see `notes`): the probe is what proves them, and it runs the tool once on one source file of the part.
+
+## AI tools
+
+An AI tool (a model that writes tests, hunts for bugs or reviews a diff) is never a judge: APOS trusts only a command that runs the same way every time and a report it can read. So an AI tool enters the system through the doors that already exist, and nothing it says gets a vote:
+
+| The tool does | It reaches APOS as | Judged by |
+| --- | --- | --- |
+| Writes acceptance, integration or end-to-end tests | a commit sent with `apos tests submit` (or `apos tests revise` for a locked suite), like a Tester's | the same checks: the tests load, are red for the right reason on the stub, are stable over two runs |
+| Finds a bug in a delivery | a test in a review commit, sent with `apos review block` | APOS runs that test; only a red test for a code reason blocks, and it is locked into the next delivery |
+| Reviews a diff in words | `apos review note` | nothing: it is advice |
+| Is wired in as a layer tool in a setup (it writes `apos-json` or `junit`) | a tool of the project's setup | `apos setup probe`: it runs twice on L1 and L2 and the two results must be the same |
+
+The last row is the safeguard against a tool that gives a different answer each time: the probe fails with `two runs gave different results (flaky)` and the setup cannot be approved. If you want a model's output as a layer, fix it first: pin the seed and temperature, or have the model write test files once, commit them, and let a normal runner run them.
+
 ## `entryRule`
 
 A test may call the code only through the entries the plan declares (`stubPaths`). The catalogue says how to see what a test imports; the core knows no language.

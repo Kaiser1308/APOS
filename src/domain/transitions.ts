@@ -12,6 +12,8 @@ import { parseWorkPackage, validatePackageGraph, type WorkPackageSpec } from './
 import { parseReview, type ReviewRecord } from './reviews.js';
 import { applyIntegrationGateRequest } from './integration-gate.js';
 import { applyException, type ExceptionRecord } from './exceptions.js';
+import { FLAG_PATTERN } from './goal-flags.js';
+import { applyReviewBlocked, type ReviewTestLock } from './review-tests.js';
 import { applyTestLockEvent, type TestLock, type TestRevisionPending } from './test-lock.js';
 import { LEGACY_EVENT_TYPES, type LegacyEventType } from './legacy-events.js';
 
@@ -48,6 +50,7 @@ export const GOAL_EVENT_TYPES = [
   'outcome-revised',
   'outcome-stopped',
   'review-submitted',
+  'review-blocked',
   'merge-completed',
   'tests-locked',
   'tests-revision-pending',
@@ -118,6 +121,8 @@ export type GoalState = {
   approvedGoalVersion?: number;
   /** The approved setup version this Goal was pinned to at `goal approve`; absent = no setup, guarantees that depend on one are off. */
   setupVersion?: number;
+  /** Flags the Human added at `goal approve --flag` (`mutation`): they come on top of the ones in the Goal document. */
+  flags?: string[];
   selected: boolean;
   /** When `goal select` happened: the time budget runs from here to `verified`. */
   selectedAt?: string;
@@ -153,6 +158,8 @@ export type GoalState = {
   /** A revision of the locked tests waiting for an approved exception. */
   pendingRevision?: TestRevisionPending;
   exceptions?: ExceptionRecord[];
+  /** The tests reviewers added with `apos review block`: locked into the next delivery of their package. */
+  reviewTests?: ReviewTestLock[];
   /** The latest run of the close-stage layers on the verified commit (only for a Goal pinned to a setup). */
   closeGate?: GateReport;
   /** For a `legacy` Goal: how its old log ended, so closed Goals still count as closed. */
@@ -314,15 +321,22 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.status === 'draft', 'Goal not awaiting approval');
       const blockers = goalApprovalBlockers(state.spec);
       requireThat(!blockers.length, `Goal not approvable: ${blockers.join('; ')}`);
-      const data = event.data as { appetite?: unknown; setupVersion?: unknown } | undefined;
+      const data = event.data as { appetite?: unknown; setupVersion?: unknown; flags?: unknown } | undefined;
       requireThat(data?.appetite, 'Goal approval must include the Human-approved appetite');
       const setupVersion = data?.setupVersion;
       requireThat(
         setupVersion === undefined || (Number.isInteger(setupVersion) && (setupVersion as number) > 0),
         'Goal approval setupVersion must be a positive integer',
       );
+      const flags = data?.flags;
+      requireThat(
+        flags === undefined ||
+          (Array.isArray(flags) && flags.every(flag => typeof flag === 'string' && FLAG_PATTERN.test(flag))),
+        'Goal approval flags must be words',
+      );
       return {
         ...state,
+        ...(Array.isArray(flags) && flags.length ? { flags: flags as string[] } : {}),
         status: 'approved',
         approvedGoalVersion: state.spec.version,
         appetite: parseAppetite(data?.appetite),
@@ -627,6 +641,8 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'review-submitted':
       // Advisory since v3: a review no longer gates anything, so it only needs to be well formed.
       return { ...state, reviews: [...state.reviews, parseReview(event.data)] };
+    case 'review-blocked':
+      return applyReviewBlocked(state, event, attemptLimit(state));
     case 'gate-recorded': {
       const gate = event.data as GateReport;
       if (gate?.phase === 'post-merge') {

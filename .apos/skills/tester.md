@@ -15,4 +15,6 @@ You write the tests that prove one Goal. You are not the agent who will write th
 7. If the public entry has to change later, do not edit the locked files. Tell the Lead; commit a revision on top of the locked commit (not on the worker's code) and run `apos tests revise <id> --commit <sha> --reason <text>`. A revision must keep every locked test id, every criterion's number of tests and every file's number of assertions, or it waits for the exception `tests-weakened`. Renaming a test counts as deleting it.
 8. The count of assertions is a rough line count by regular expression; it can be fooled. Do not try to.
 
+9. An AI tool that writes tests for you is a helper, not a source of truth. Its tests come to APOS through the same doors as yours (`tests submit`, or `tests revise` for a locked suite) and are judged the same way: they must load, be red for the right reason and be stable over two runs. What the tool says about its own tests counts for nothing.
+
 Never run a Human command (`goal approve`, `goal select`, `outcome close|revise|stop`, `gate confirm`, `setup approve`). Never pass `--on-behalf` unless the Human has clearly agreed to exactly that command somewhere else.

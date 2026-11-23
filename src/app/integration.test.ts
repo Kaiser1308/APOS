@@ -8,7 +8,6 @@ import { spec, proposal, gateReport as fixtureGate, approval, BASE } from '../do
 import { attemptKey } from '../domain/gate.js';
 import { GitCommitInspector, IntegrationService } from './integration.js';
 import type { WorkPackageSpec } from '../domain/packages.js';
-import { ReviewService } from './review.js';
 import type { CommitInspector } from '../ports/commit-inspector.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
@@ -69,7 +68,7 @@ const setup = (risks: string[] = []) => {
     add('gate-recorded', gateReport(INTEGRATION));
   };
   const review = () =>
-    new ReviewService(store).submit(spec.id, {
+    add('review-submitted', {
       subject: 'goal',
       reviewer: 'reviewer-agent',
       session: 'review-1',

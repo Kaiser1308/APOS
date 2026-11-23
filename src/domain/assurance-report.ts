@@ -1,9 +1,11 @@
 import type { CheckResult, GateReport } from './gate.js';
 import type { LayerId } from './layers.js';
 import { planLayers, type LayerRun, type LayerWhy, type PlanInput, type Stage } from './layer-plan.js';
+import { reviewOverrideBy } from './review-tests.js';
 import { proofDemands } from './proof-tools.js';
 import type { ProjectSetup } from './project-setup.js';
 import { acceptanceProof } from './test-plan.js';
+import { goalFlagsOf, MUTATION_FLAG } from './goal-flags.js';
 import type { GoalState } from './transitions.js';
 
 export type LayerStatus = 'pass' | 'fail' | 'unverifiable' | 'reduced' | 'not-run';
@@ -33,6 +35,8 @@ export type AssuranceReport = {
     approvedWeakenings: number;
   };
   layers: LayerRow[];
+  /** Present when a review blocked a delivery with a test: how many times, how many tests it locked, and the blocks a Lead overrode. */
+  reviews?: { blocks: number; lockedTests: number; overridden: { ids: string[]; by: string }[] };
   /** `by` is `human`, `on-behalf:<where they agreed>` or `agent:<name>`. */
   exceptions: { kind: string; ref: string; by: string; reason: string }[];
   /** What is off, and why. */
@@ -50,7 +54,10 @@ function noteOf(check: CheckResult): string | undefined {
       : check.findings.lower
         ? `${check.findings.lower} finding dưới mức chặn`
         : undefined;
-  return check.metric ? `${check.metric.name} ${check.metric.value}` : undefined;
+  // A metric read from a deep path (`files.0.groups.0.benchmarks.0.p99`) is labelled by its last segment; the check keeps the path.
+  return check.metric
+    ? `${check.metric.name.split('.').at(-1)} ${Number(check.metric.value.toPrecision(4))}`
+    : undefined;
 }
 
 function rowsOf(stage: Stage, scope: string, gate: GateReport): LayerRow[] {
@@ -124,6 +131,18 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
   const approvedWeakenings = exceptions.filter(entry => entry.kind === 'tests-weakened').length;
   const revisions = state.testRevisions ?? 0;
 
+  const blocks = state.reviewTests ?? [];
+  const reviews = blocks.length
+    ? {
+        blocks: blocks.length,
+        lockedTests: blocks.reduce((sum, block) => sum + block.tests.length, 0),
+        overridden: blocks.flatMap(block => {
+          const by = reviewOverrideBy(state, block);
+          return by ? [{ ids: block.blocking.map(test => test.id), by }] : [];
+        }),
+      }
+    : undefined;
+
   const gates = gatesOf(state);
   const layers = gates.flatMap(({ stage, scope, gate }) => rowsOf(stage, scope, gate));
   const off = new Set<string>();
@@ -143,7 +162,7 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
       setup,
       stage: 'close',
       changed: state.gate?.changedFiles ?? [],
-      goalFlags: state.spec.flags ?? [],
+      goalFlags: goalFlagsOf(state),
       reductions: [],
       requiredTools: proofDemands(state.spec).map(item => item.tool),
     };
@@ -165,6 +184,10 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
     off.add(
       `test chỉ gọi qua cửa: ${part}${setup?.parts[part]?.stack ? ` (${setup.parts[part]!.stack})` : ''} chưa kiểm (danh mục chưa có luật)`,
     );
+  const hasMutationTool = Object.values(setup?.parts ?? {}).some(part =>
+    Object.values(part.layers).some(tools => tools?.some(tool => tool.when === `flag:${MUTATION_FLAG}`)),
+  );
+  if (hasMutationTool && !goalFlagsOf(state).includes(MUTATION_FLAG)) off.add('mutation tắt (Goal không gắn cờ)');
   if (state.setupVersion === undefined) off.add('mọi bảo đảm theo setup tắt: Goal không có setup');
   else if (!state.testLock)
     off.add('khoá test: tắt (setup không khai tests.paths, hoặc Goal không có tiêu chí cần test)');
@@ -190,6 +213,7 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
       approvedWeakenings,
     },
     layers,
+    ...(reviews ? { reviews } : {}),
     exceptions,
     off: [...off],
     exitOnly,
@@ -248,6 +272,10 @@ export function renderAssuranceText(report: AssuranceReport): string {
       );
     }
   }
+  if (report.reviews)
+    lines.push(
+      `${label('Review chặn')}${report.reviews.blocks} lần bằng test đỏ, ${report.reviews.lockedTests} test đã khoá vào lần giao sau${report.reviews.overridden.map(item => `; review bị bỏ qua: ${item.ids.join(', ')}, duyệt bởi ${item.by}`).join('')}`,
+    );
   const agent = report.exceptions.filter(entry => entry.by.startsWith('agent:'));
   if (report.exceptions.length)
     lines.push(

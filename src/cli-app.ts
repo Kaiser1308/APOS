@@ -5,6 +5,7 @@ import { registerIntegration } from './cli/commands/integration.js';
 import { registerLead } from './cli/commands/lead.js';
 import { registerOutcome } from './cli/commands/outcome.js';
 import { registerPackage } from './cli/commands/package.js';
+import { registerReview } from './cli/commands/review.js';
 import { registerTests } from './cli/commands/tests.js';
 import { registerSetup } from './cli/commands/setup.js';
 import { registerSetupFlow } from './cli/commands/setup-flow.js';
@@ -13,7 +14,8 @@ import type { CliOptions } from './cli/options.js';
 
 export type { CliOptions };
 
-export async function runCli(argv: string[], options: CliOptions = {}): Promise<void> {
+/** The whole command tree, registered but not run: `runCli` parses with it, and tests read it. */
+export function buildProgram(options: CliOptions = {}): Command {
   const program = new Command();
   program
     .name('apos')
@@ -29,6 +31,11 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
   registerPackage(ctx);
   registerIntegration(ctx);
   registerChecks(ctx);
+  registerReview(ctx);
   registerOutcome(ctx);
-  await program.parseAsync(argv, { from: 'user' });
+  return program;
+}
+
+export async function runCli(argv: string[], options: CliOptions = {}): Promise<void> {
+  await buildProgram(options).parseAsync(argv, { from: 'user' });
 }

@@ -1,0 +1,19 @@
+diff --git a/tests/test_sensor_review.py b/tests/test_sensor_review.py
+new file mode 100644
+index 0000000..04d8d0f
+--- /dev/null
++++ b/tests/test_sensor_review.py
+@@ -0,0 +1,13 @@
++import contextlib
++
++from parking.sensor import on_sensor
++
++
++# Review of the delivery: a slot held for a booking stays reserved when the sensor sees nothing. That rule existed
++# before this change and the acceptance tests do not mention it. Whatever on_sensor does with a reading, an empty one
++# must not free a reservation. A refusal is fine too, so this test also holds on the stub the Tester locked.
++def test_a_reservation_is_never_freed_by_an_empty_reading():
++    lot = {"A1": "reserved"}
++    with contextlib.suppress(NotImplementedError):
++        on_sensor(lot, "A1", False)
++    assert lot["A1"] == "reserved"

@@ -5,3 +5,4 @@ src/runtime/fixtures/
 src/**/__snapshots__/
 src/store/fixtures/
 *.md
+examples/

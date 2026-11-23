@@ -1,0 +1,64 @@
+{
+  "id": "GOAL-001",
+  "version": 1,
+  "outcome": "A slot becomes occupied when its sensor reports a car",
+  "requirements": [
+    {
+      "id": "R-1",
+      "sourceSpan": "paragraph 2",
+      "text": "When the sensor reports a car, the slot becomes occupied: a free slot, and a reserved one whose booking arrived",
+      "disposition": "acceptance"
+    },
+    {
+      "id": "R-2",
+      "sourceSpan": "paragraph 3",
+      "text": "A reserved slot whose sensor sees nothing stays reserved",
+      "disposition": "excluded",
+      "exclusion": { "kind": "out-of-scope" },
+      "exclusionReason": "this behaviour exists today and has no test; the Goal does not change it"
+    },
+    {
+      "id": "R-3",
+      "sourceSpan": "paragraph 4",
+      "text": "Handling readings must stay fast",
+      "disposition": "acceptance"
+    }
+  ],
+  "scope": ["parking/sensor.py"],
+  "exclusions": ["Reserved slots with an empty reading: the behaviour exists today and is not changed here"],
+  "acceptance": [
+    {
+      "id": "AC-1",
+      "text": "A free slot becomes occupied when the sensor reports a car",
+      "requirementIds": ["R-1"],
+      "given": "a free slot",
+      "when": "its sensor reports a car",
+      "then": "the slot is occupied",
+      "examples": [{ "input": "free slot, car detected", "expected": "occupied" }],
+      "boundaries": ["a second reading of the same car keeps the slot occupied"],
+      "checkIds": ["CHK-1"]
+    },
+    {
+      "id": "AC-2",
+      "text": "A reserved slot becomes occupied when the booked car arrives",
+      "requirementIds": ["R-1"],
+      "given": "a slot reserved for a booking",
+      "when": "its sensor reports a car",
+      "then": "the slot is occupied",
+      "examples": [{ "input": "reserved slot, car detected", "expected": "occupied" }],
+      "checkIds": ["CHK-1"]
+    },
+    {
+      "id": "AC-3",
+      "text": "1000 sensor readings take less than 50 ms at the 95th percentile",
+      "requirementIds": ["R-3"],
+      "proof": "benchmark",
+      "benchmark": { "tool": "app.L5.bench", "metric": "p95_ms", "op": "<", "value": 50 },
+      "given": "a lot of 1000 slots, some free and some reserved",
+      "when": "one reading per slot arrives in a burst",
+      "then": "handling the burst takes under 50 ms at the 95th percentile"
+    }
+  ],
+  "checks": [{ "id": "CHK-1", "kind": "command", "command": "pytest -q", "expect": "pass" }],
+  "priority": 1
+}

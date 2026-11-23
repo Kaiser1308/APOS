@@ -1,7 +1,7 @@
 # APOS tool catalog. See docs/catalog.md before changing commands.
 stack: typescript
 notes:
-  - 'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc.'
+  - 'verified: vitest 4.1.12 (--reporter=junit --outputFile, --exclude, -t with an anchored full name; nested describe ok). Not verified: @microsoft/eslint-formatter-sarif, semgrep, tsc, Stryker (the mutation score is computed from reports/mutation/mutation.json; needs @stryker-mutator/core and the vitest runner in the project).'
 detect:
   files:
     - package.json
@@ -33,6 +33,12 @@ layers:
     - id: semgrep
       command: semgrep scan --config auto --sarif-output={report} .
       format: sarif
+    - id: stryker
+      command: |-
+        npx stryker run --mutate "{changed}" --reporters json && node -e "const r=require('./reports/mutation/mutation.json');let k=0,t=0;for(const f of Object.values(r.files))for(const m of f.mutants){if(['Ignored','CompileError','RuntimeError'].includes(m.status))continue;t++;if(['Killed','Timeout'].includes(m.status))k++}require('fs').writeFileSync('{report}',JSON.stringify({mutationScore:t?100*k/t:0}))"
+      format: metric
+      metric: mutationScore
+      when: flag:mutation
 loadErrorPatterns:
   - Failed to load
   - Cannot find module

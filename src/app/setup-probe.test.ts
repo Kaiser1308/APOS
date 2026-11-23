@@ -173,6 +173,26 @@ describe('probeSetup', () => {
     expect(report.ok).toBe(false);
     expect(report.results[0]?.reason).toMatch(/flaky/);
   }, 90_000);
+  it('fails an AI tool that writes different tests every time it runs, and passes one that is stable', async () => {
+    // A stand-in for an AI test generator wired in as an apos-json tool: a model never writes the same suite twice.
+    // Its tests would join the gate like any other, so a tool whose answer moves between two runs proves nothing.
+    const generator = (ids: string) =>
+      `const fs = require('fs');\nconst ids = ${ids};\nfs.writeFileSync(process.argv[2], JSON.stringify({ tests: ids.map(id => ({ id, status: 'pass' })) }));\n`;
+    for (const [label, ids, ok] of [
+      ['unstable', "[1, 2].map(() => 'ai::case-' + Math.random().toString(36).slice(2))", false],
+      ['stable', "['ai::case-1', 'ai::case-2']", true],
+    ] as const) {
+      const { dir, git } = await repoWith({
+        L2: [{ id: 'ai-tests', command: 'node ai-tests.js {report}', format: 'apos-json' }],
+      });
+      writeFileSync(join(dir, 'ai-tests.js'), generator(ids));
+      git('add', '-A');
+      git('-c', 'user.name=T', '-c', 'user.email=t@local.invalid', 'commit', '-qm', 'ai tool');
+      const report = await probeSetup(dir, git('rev-parse', 'HEAD'), deps());
+      expect(report.ok, label).toBe(ok);
+      if (!ok) expect(report.results[0]?.reason, label).toMatch(/flaky/);
+    }
+  }, 90_000);
   it('fails when the second run of L1 gives an unreadable or missing report, even with the same exit code', async () => {
     for (const mode of ['second-broken', 'second-missing']) {
       const counter = join(temp('apos-probe-counter-'), 'n').replaceAll('\\', '/');

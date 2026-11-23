@@ -1,3 +1,4 @@
+import { MUTATION_FLAG } from '../domain/goal-flags.js';
 import { floorReductions } from '../domain/exceptions.js';
 import type { CheckResult, LayerPlanRecord } from '../domain/gate.js';
 import { judgeFindings, judgeMetric, judgeTests, type Verdict } from '../domain/layer-verdict.js';
@@ -6,7 +7,9 @@ import { proofDemands, stricter, type FailOn, type ProofDemand } from '../domain
 import type { LayerSpec, ProjectSetup } from '../domain/project-setup.js';
 import type { Threshold } from '../domain/threshold.js';
 import type { TestOutcome } from '../domain/results/index.js';
+import { goalFlagsOf } from '../domain/goal-flags.js';
 import type { GoalState } from '../domain/transitions.js';
+import { sourceFilesOf } from './source-files.js';
 import { notRunnable, type ToolRunner } from './layer-runner.js';
 
 export type LayerGateDeps = {
@@ -24,6 +27,9 @@ export type LayerGateInput = {
   base: string | undefined;
   changed: string[];
 };
+
+const DEFAULT_MIN_MUTATION_SCORE = 70;
+const MAX_MUTATION_SPREAD = 1;
 
 const result = (checkId: string, verdict: Verdict, extra: Partial<CheckResult> = {}): CheckResult => ({
   checkId,
@@ -64,7 +70,7 @@ export class LayerGate {
       stage: input.stage,
       changed: input.changed,
       packageLayers: this.packageLayers(state, input.stage, input.scope),
-      goalFlags: state.spec.flags ?? [],
+      goalFlags: goalFlagsOf(state),
       reductions: floorReductions(state, input.scope, input.stage),
       requiredTools: [...demands.keys()],
     };
@@ -106,7 +112,7 @@ export class LayerGate {
       case 'sarif':
         return [this.sarif(checkId, label, tool, root, input.head, demand)];
       case 'metric':
-        return this.metric(checkId, label, tool, root, input.head, demand);
+        return this.metric(checkId, label, tool, root, input, demand, setup, run.part);
       default:
         return [this.tests(state, setup, run, checkId, label, root, input)];
     }
@@ -150,12 +156,23 @@ export class LayerGate {
     label: string,
     tool: LayerSpec,
     root: string,
-    head: string,
+    input: LayerGateInput,
     demand: ProofDemand | undefined,
+    setup: ProjectSetup,
+    part: string,
   ): CheckResult[] {
+    const head = input.head;
+    // Mutation is the tool a Goal switches on with its flag: its floor is the setup's `mutation.minScore` (70 when the
+    // setup says nothing), a Goal criterion can only raise it, and two runs that differ by more than a point prove nothing.
+    const mutation = tool.when === `flag:${MUTATION_FLAG}`;
+    const needsChanged = tool.command.includes('{changed}');
+    const changed = needsChanged ? sourceFilesOf(setup, part, root, input.changed).join(',') : '';
     // The setup's threshold belongs to the metric the tool is configured with: the Goal's numbers for that same metric
     // come on top of it (every one must hold), and a criterion on another metric is judged by its own numbers only.
-    const own: Threshold[] = tool.threshold ? [tool.threshold] : [];
+    const own: Threshold[] = [
+      ...(mutation ? [{ op: '>=' as const, value: setup.mutation?.minScore ?? DEFAULT_MIN_MUTATION_SCORE }] : []),
+      ...(tool.threshold ? [tool.threshold] : []),
+    ];
     const asked: { name: string; thresholds: Threshold[] }[] = (demand?.metrics ?? []).map(item => ({
       name: item.name,
       thresholds: item.thresholds,
@@ -167,9 +184,14 @@ export class LayerGate {
       // `value` is the display name for a scalar report, not an object path to look up.
       const metricPath = wanted.name && (tool.metric || wanted.name !== 'value') ? { metric: wanted.name } : {};
       const measured = { ...tool, ...metricPath };
+      if (needsChanged && !changed)
+        return result(id, {
+          status: 'pass',
+          reason: `${label}: no source file of this part changed from the base, so there is nothing to mutate`,
+        });
       const values: number[] = [];
-      for (let n = 0; n < (tool.runs ?? 3); n++) {
-        const { exec, report } = this.deps.runner.run(head, measured, tool.command, root);
+      for (let n = 0; n < (tool.runs ?? (mutation ? 2 : 3)); n++) {
+        const { exec, report } = this.deps.runner.run(head, measured, tool.command, root, { changed });
         const problem = notRunnable(exec);
         if (problem) return unverifiable(id, `${label}: ${problem}: ${tool.command}`);
         const exitProblem = reportExitProblem(exec.exitCode, tool.reportExitCodes);
@@ -181,6 +203,11 @@ export class LayerGate {
           );
         values.push(report.value);
       }
+      if (mutation && Math.max(...values) - Math.min(...values) > MAX_MUTATION_SPREAD)
+        return unverifiable(
+          id,
+          `${label}: ${wanted.name || tool.metric} differs by more than ${MAX_MUTATION_SPREAD} point between two runs (${values.join(', ')}): nothing is proved`,
+        );
       const verdict = judgeMetric({
         name: wanted.name || tool.metric || 'value',
         values,

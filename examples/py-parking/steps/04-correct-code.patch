@@ -1,0 +1,10 @@
+diff --git a/parking/sensor.py b/parking/sensor.py
+index 8135ba2..6b7b072 100644
+--- a/parking/sensor.py
++++ b/parking/sensor.py
+@@ -1,3 +1,3 @@
+ def on_sensor(lot, slot_id, detected):
+-    """Stub: the Tester commits this so the acceptance tests fail for the right reason. The Worker fills it in."""
+-    raise NotImplementedError(f"on_sensor({slot_id!r}, {detected!r}) is not implemented")
++    """One reading of the sensor above a slot."""
++    lot[slot_id] = "occupied" if detected else "free"

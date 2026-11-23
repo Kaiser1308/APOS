@@ -10,6 +10,8 @@ import type { TestOutcome } from '../domain/results/index.js';
 import type { ProjectJournal } from '../store/journal.js';
 import { assertGitRoot } from '../store/project-history.js';
 import { GitWorktreeFactory, type WorkspaceFactory } from './gate-workspace.js';
+import { filesAt } from './git-files.js';
+import { sourceFilesOf } from './source-files.js';
 import { ShellExecutor, type CommandExecutor } from './shell-executor.js';
 import { ToolRunner, notRunnable } from './layer-runner.js';
 import { fillRunOne } from '../domain/run-one.js';
@@ -62,15 +64,22 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
     executor,
     timeoutMs,
   });
-  const run = (tool: LayerSpec, command: string, root: string) => runner.run(commit, tool, command, root);
+  // A tool that takes `{changed}` is proved on one source file of the part: enough to see that it runs and reports.
+  const sample = (part: string, root: string): string => {
+    const files = sourceFilesOf(parsed.setup, part, root, filesAt(repo, commit));
+    return files.filter(file => !file.split('/').some(segment => segment.startsWith('.'))).sort()[0] ?? '';
+  };
+  const run = (tool: LayerSpec, command: string, root: string, part = '') =>
+    runner.run(commit, tool, command, root, command.includes('{changed}') ? { changed: sample(part, root) } : {});
 
   const probeTool = (
     tool: LayerSpec,
     layer: string,
     root: string,
     patterns: string[],
+    part: string,
   ): { ok: boolean; reason: string } => {
-    const first = run(tool, tool.command, root);
+    const first = run(tool, tool.command, root, part);
     const problem = notRunnable(first.exec);
     if (problem) return { ok: false, reason: `${problem}: ${tool.command}` };
     const report = first.report;
@@ -91,7 +100,7 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
           ok: false,
           reason: `runOne needs the file of ${target.id}, but the report has no file attribute (pytest: add -o junit_family=xunit1)`,
         };
-      const one = run(tool, fillRunOne(tool.runOne, target), root);
+      const one = run(tool, fillRunOne(tool.runOne, target), root, part);
       const oneProblem = notRunnable(one.exec);
       if (oneProblem) return { ok: false, reason: `runOne ${oneProblem}: ${target.id}` };
       if (!one.report || one.report.kind !== 'tests')
@@ -106,7 +115,7 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
       summary += ', runOne ok';
     }
     if (layer === 'L1' || layer === 'L2') {
-      const again = run(tool, tool.command, root);
+      const again = run(tool, tool.command, root, part);
       const againProblem = notRunnable(again.exec);
       if (againProblem) return { ok: false, reason: `second run ${againProblem}: ${tool.command}` };
       if (report.kind === 'tests' && again.report?.kind !== 'tests')
@@ -137,7 +146,7 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
   for (const { part, root, layers, patterns } of scopes)
     for (const layer of LAYER_IDS)
       for (const tool of layers[layer] ?? []) {
-        const outcome = probeTool(tool, layer, root, patterns);
+        const outcome = probeTool(tool, layer, root, patterns, part);
         results.push({ part, layer, tool: tool.id, ...outcome });
       }
   for (const [part, setup] of Object.entries(parsed.setup.parts)) {

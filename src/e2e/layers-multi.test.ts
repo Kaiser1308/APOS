@@ -170,13 +170,75 @@ describe.each([
       expect((await p.invoke('integration', 'complete', spec.id, '--commit', fixed)).code ?? 0).toBe(0);
       expect(p.state(spec.id)).toMatchObject({ status: 'verified', verifiedCommit: fixed });
 
+      // A reviewer blocks the integration commit with a red test. Gating the same commit again does not slip past the
+      // block: the reviewer's test is locked into the next integration commit, and only an exception waives it.
+      p.git('checkout', '-q', '-B', 'integration-review', fixed);
+      const reviewed = p.commit(
+        { [stack.integrationReview.file]: stack.integrationReview.red },
+        'review of the integration',
+      );
+      const blocked = await p.invoke(
+        'review',
+        'block',
+        spec.id,
+        '--integration',
+        '--commit',
+        reviewed,
+        '--by',
+        'reviewer',
+      );
+      expect(blocked.text).toContain('blocked by review');
+      expect(blocked.code).toBe(1);
+      expect(p.state(spec.id).status).toBe('executing');
+      // The next integration commit leaves the reviewer's test out: red, and the check names the file.
+      // APOS rewrote its Goal documents when it recorded the block: they are not part of the integration commit.
+      // The integration branch also carries the milestone commit APOS made when the Goal was verified: merge the review into it.
+      p.git('checkout', '-q', 'integration');
+      p.git('merge', '-q', '--no-edit', 'integration-review');
+      const dropped = p.commit({ [stack.integrationReview.file]: null }, 'drop the review test');
+      const again = await p.invoke(
+        'integration',
+        'gate',
+        spec.id,
+        '--commit',
+        dropped,
+        '--reason',
+        'without the review',
+      );
+      expect(again.text).toContain(`Integration gate red on ${dropped}`);
+      expect(again.text).toContain(`review test modified: ${stack.integrationReview.file}`);
+      expect((await p.invoke('integration', 'complete', spec.id, '--commit', dropped)).code).toBe(1);
+      const waive = await p.invoke(
+        'exception',
+        'approve',
+        spec.id,
+        '--kind',
+        'review-overridden',
+        '--ref',
+        `${spec.id}:${reviewed}`,
+        '--reason',
+        'a defect that was there before the Goal',
+        '--by',
+        'agent:lead',
+      );
+      expect(waive.code ?? 0).toBe(0);
+      const waived = await p.invoke('integration', 'gate', spec.id, '--commit', dropped, '--reason', 'review waived');
+      expect(waived.text).toContain(`Integration gate green on ${dropped}`);
+      expect((await p.invoke('integration', 'complete', spec.id, '--commit', dropped)).code ?? 0).toBe(0);
+      expect(p.state(spec.id)).toMatchObject({ status: 'verified', verifiedCommit: dropped });
+
       const closed = await p.invoke('outcome', 'close', spec.id, ...p.human);
-      expect(closed.text).toContain(`Close-stage layers green on ${fixed}`);
+      expect(closed.text).toContain(`Close-stage layers green on ${dropped}`);
       expect(p.state(spec.id).status).toBe('closed');
 
       const shown = await p.invoke('goal', 'show', spec.id);
       await expect(
-        shown.text.replace(/\r\n/g, '\n').trimEnd().replaceAll(fixed, '<commit>').replaceAll(locked, '<commit>'),
+        shown.text
+          .replace(/\r\n/g, '\n')
+          .trimEnd()
+          .replaceAll(dropped, '<commit>')
+          .replaceAll(reviewed, '<review>')
+          .replaceAll(locked, '<commit>'),
       ).toMatchFileSnapshot(`./__snapshots__/layers-multi-${label}.txt`);
     },
     900_000,

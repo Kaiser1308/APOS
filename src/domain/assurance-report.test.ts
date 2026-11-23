@@ -116,6 +116,21 @@ describe('buildAssuranceReport', () => {
     expect(rows.every(row => row.stage === 'close' && row.scope === 'goal')).toBe(true);
   });
 
+  it('a metric read from a deep path is labelled by its last segment, the path stays in the check', () => {
+    const path = 'files.0.groups.0.benchmarks.0.p99';
+    const state: GoalState = {
+      ...base,
+      status: 'verified',
+      closeGate: gate(
+        { stage: 'close', runs: [run('L5', 'bench', 'metric')], skipped: [] },
+        [check('app.L5.bench', 'pass', { metric: { name: path, value: 0.39 } })],
+        'close',
+      ),
+    };
+    expect(buildAssuranceReport(state).layers.map(row => row.note)).toEqual(['p99 0.39']);
+    expect(state.closeGate?.checks[0]?.metric?.name).toBe(path);
+  });
+
   it('a tool with several metrics shows the worst of its checks, with every note', () => {
     const state: GoalState = {
       ...base,
@@ -259,5 +274,39 @@ describe('renderAssuranceText', () => {
         Agent duyệt thay   1 chỗ: floor-reduced WP-MAIN:submit:L3 (agent:lead)
         Tắt / chưa kiểm    app.L5.mut tắt: Goal không gắn cờ mutation"
     `);
+  });
+});
+
+describe('mutation in the table', () => {
+  const setup = parseSetupObject({
+    schemaVersion: 2,
+    parts: {
+      app: {
+        root: '.',
+        layers: {
+          L1: [{ id: 'pytest', command: 'pytest', format: 'junit' }],
+          L5: [{ id: 'mutate', command: 'x', format: 'metric', metric: 'mutationScore', when: 'flag:mutation' }],
+        },
+      },
+    },
+  });
+  const parsed = setup.version === 2 ? setup.setup : undefined;
+
+  it('says mutation is off when the setup has the tool and the Goal has no flag', () => {
+    const text = renderAssuranceText(buildAssuranceReport(base, parsed));
+    expect(text).toContain('mutation tắt (Goal không gắn cờ)');
+  });
+  it('does not say so when the Goal carries the flag (in its document or from the approval), and lists the layer', () => {
+    for (const goal of [
+      { ...base, spec: { ...spec, flags: ['mutation'] } },
+      { ...base, flags: ['mutation'] },
+    ]) {
+      const text = renderAssuranceText(buildAssuranceReport(goal, parsed));
+      expect(text).not.toContain('mutation tắt');
+      expect(text).toContain('L5 mutate');
+    }
+  });
+  it('says nothing when the setup has no mutation tool', () => {
+    expect(renderAssuranceText(buildAssuranceReport(base))).not.toContain('mutation');
   });
 });

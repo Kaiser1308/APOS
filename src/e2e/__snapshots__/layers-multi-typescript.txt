@@ -10,7 +10,9 @@ GOAL-001  setup v1  (app: typescript)
   Lớp khâu submit    WP-B: L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration (Lead thêm) ✓
   Lớp khâu ghép      L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration ✓
   Lớp khâu đóng      L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration ✓ · L4 system e2e ✓ · L5 scan ✓
-  Agent duyệt thay   0 chỗ
+  Review chặn        1 lần bằng test đỏ, 1 test đã khoá vào lần giao sau; review bị bỏ qua: src/review.integration-check.test.ts::review, duyệt bởi agent:lead
+  Ngoại lệ           review-overridden GOAL-001:<review> (agent:lead): a defect that was there before the Goal
+  Agent duyệt thay   1 chỗ: review-overridden GOAL-001:<review> (agent:lead)
   Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
   Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này
   Tắt / chưa kiểm    app.L5.bench tắt: Goal không gắn cờ perf

@@ -6,6 +6,7 @@ import type { CommitInspector } from '../ports/commit-inspector.js';
 import { summarizeGate, type GateReport, type GateResult } from '../domain/gate.js';
 import { INFRA_CHECK, SCOPE_CHECK } from '../domain/assurance.js';
 import { randomUUID } from 'node:crypto';
+import { reviewOverrideBy, reviewRef } from '../domain/review-tests.js';
 import { UserError } from '../domain/errors.js';
 import type { GateService } from './gate-service.js';
 import { GitCommitInspector } from './integration.js';
@@ -144,6 +145,17 @@ export class PackageService {
           ? `Commit ${commit} does not contain the commit that locked the tests (${base}): rebase ${packageId} onto it, then submit again`
           : `Commit ${commit} does not contain the base ${base} of ${packageId}`,
       );
+
+    // What a review added is locked into the next delivery: build on the review commit (unless the Lead overrode the block).
+    for (const review of state.reviewTests ?? [])
+      if (
+        review.packageId === packageId &&
+        !reviewOverrideBy(state, review) &&
+        !inspector.contains(repoPath, review.reviewCommit, commit)
+      )
+        throw new UserError(
+          `Commit ${commit} does not contain the review commit ${review.reviewCommit}, whose tests are locked into the next delivery of ${packageId}: build on it, or ask for an exception \`review-overridden\` (--ref ${reviewRef(review, goalId)})`,
+        );
 
     const notGreen = item.spec.dependencies.filter(dep => state.packages?.[dep]?.status !== 'green');
     if (notGreen.length)

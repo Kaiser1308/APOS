@@ -24,6 +24,13 @@ export const notRunnable = (result: ExecResult): string | undefined => {
   return undefined;
 };
 
+/** Why a tool's exit code is not one its report may come with (`reportExitCodes`, default 0), or undefined when it is. */
+export function reportExitProblem(exitCode: number | null, accepted: number[] | undefined): string | undefined {
+  const allowed = accepted ?? [0];
+  if (exitCode !== null && allowed.includes(exitCode)) return undefined;
+  return `command exited ${exitCode ?? 'without an exit code'}; accepted report exit codes: ${allowed.join(', ')}`;
+}
+
 /** Runs tool commands in a clean worktree of a commit. */
 export class ToolRunner {
   private readonly executor: CommandExecutor;

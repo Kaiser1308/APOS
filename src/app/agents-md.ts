@@ -13,9 +13,10 @@ const AGENTS_BODY = [
   '- Every code change belongs to a Goal and follows the roles: PM writes the Goal, Lead plans and submits, Tester writes the acceptance tests, Worker writes the code, Reviewer blocks with a red test. Use the matching skill: `apos-pm`, `apos-lead`, `apos-tester`, `apos-worker`, `apos-reviewer`.',
   '- Investigating a bug (reading logs, reproducing, experiments on a scratch branch) needs no Goal. Fixing it does: open a small Goal with `apos bug open` (the Human approves it with `apos bug approve`) whose acceptance test reproduces the bug — red on the current code, locked, then green with the fix.',
   "- Restructuring code that has no tests needs a safety net first: a `characterize` Goal captures what the code does today (`apos goal create --kind characterize --covers <glob>`), then a `refactor` Goal (`--kind refactor --paths <glob>`) restructures only what is captured. Accepting a repo with no tests (`apos setup approve --baseline-missing`) is the Human's decision.",
+  '- Upgrading a dependency or patching a security finding is a `maintenance` Goal: `apos maintenance open` (`--security <finding>` to name the finding the patch must remove, `--from-pr <n>` for a Dependabot pull request); the Human approves it with `apos maintenance approve`. It needs no criterion: the gate holds it to the base (no new failure, no new finding, only manifests, lockfiles and the declared paths).',
   '- Work is done only when `apos package submit` (or the integration gate) is green. "Done" in an agent message does not count.',
   '- Do not edit `.apos/`, locked tests or the test infrastructure.',
-  '- Do not run Human commands: `goal approve|appetite|select`, `bug approve`, `outcome close|revise|stop`, `gate confirm`, `gate run --base`, `blocker resolve`, `setup approve`, `exception approve --human`. Do not pass `--on-behalf` unless the Human has clearly said yes somewhere else.',
+  '- Do not run Human commands: `goal approve|appetite|select`, `bug approve`, `maintenance approve`, `outcome close|revise|stop`, `gate confirm`, `gate run --base`, `blocker resolve`, `setup approve`, `exception approve --human`. Do not pass `--on-behalf` unless the Human has clearly said yes somewhere else.',
   '- `apos inbox` shows what is waiting for the Human. The setup is `.apos/project.yaml`; see APOS `docs/setup.md`.',
 ].join('\n');
 

@@ -1,5 +1,4 @@
 import { newEvent } from '../../app/events.js';
-import { GoalRegistryService } from '../../app/registry.js';
 import {
   BUG_APPETITE,
   BUG_APPROVE_VIA,
@@ -10,10 +9,9 @@ import {
   bugSourceText,
   nextBugId,
 } from '../../domain/bugfix.js';
-import { goalApprovalBlockers, goalKind, parseAppetite } from '../../domain/contracts.js';
 import { UserError } from '../../domain/errors.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
-import { approvalSetupVersion, baselineMissingOf } from '../goal-approval.js';
+import { approveInOneGo } from '../combined-approval.js';
 import { pinnedSetupOf } from '../test-lock-wiring.js';
 import type { CliContext } from '../context.js';
 
@@ -21,7 +19,7 @@ const collect = (value: string, previous: string[]): string[] => [...previous, v
 
 /** apos bug open | approve: fixing a bug as one small Goal. The gates are the ordinary ones; only creating and approving are shorter. */
 export function registerBug(ctx: CliContext): void {
-  const { program, write, writeError, withJournal, withJournalAsync, assertHuman } = ctx;
+  const { program, write, writeError, withJournal, withJournalAsync } = ctx;
   const bug = program.command('bug').description('fix a bug with one small Goal: open it, the Human approves it');
 
   bug
@@ -86,50 +84,20 @@ export function registerBug(ctx: CliContext): void {
     .action(
       (id: string, flags: { appetite: string; minutes: string; attempts: string; flag: string[]; onBehalf?: string }) =>
         withJournalAsync(async journal => {
-          const appetite = parseAppetite({
-            size: flags.appetite,
-            maxWallMinutes: Number(flags.minutes),
-            maxAttempts: Number(flags.attempts),
-            overrun: BUG_APPETITE.overrun,
-          });
-          const state = journal.getGoal(id);
-          if (!state) throw new UserError(`Goal not found: ${id}`);
-          if (goalKind(state.spec) !== 'bugfix')
-            throw new UserError(
-              `${id} is not a bugfix Goal: approve it with \`apos goal approve ${id}\` and \`apos goal select ${id}\``,
-            );
-          if (state.status !== 'draft')
-            throw new UserError(`${id} is ${state.status}: bug approve is for a Goal still in draft`);
-          const blockers = goalApprovalBlockers(state.spec);
-          if (blockers.length) throw new UserError(`${id} cannot be approved:\n- ${blockers.join('\n- ')}`);
-          const registry = new GoalRegistryService(journal);
-          // Everything that could refuse is looked at before the first event: a refusal leaves the log as it was.
-          const pending = registry.selectProblems(id);
-          if (pending.length) throw new UserError(`${id} cannot be selected yet: ${pending.join('; ')}`);
-          const setupVersion = approvalSetupVersion(ctx, journal, id, 'latest', flags.flag);
-          const confirmation = await assertHuman('bug approve', id, flags.onBehalf);
-          registry.approve(
+          const { setupVersion, message } = await approveInOneGo(ctx, journal, {
             id,
-            appetite,
-            undefined,
-            confirmation,
-            setupVersion,
-            flags.flag,
-            BUG_APPROVE_VIA,
-            baselineMissingOf(journal, setupVersion),
-          );
-          journal.append(
-            newEvent(id, 'appetite-set', {
-              appetite,
-              reason: `${BUG_APPROVE_VIA}: the default appetite for a bug`,
-              confirmation,
-              via: BUG_APPROVE_VIA,
-            }),
-          );
-          registry.select(id, confirmation, BUG_APPROVE_VIA);
-          write(
-            `Approved and selected ${id}${setupVersion === undefined ? '' : ` on setup v${setupVersion}`} (${appetite.size}, ${appetite.maxWallMinutes} min, ${appetite.maxAttempts} attempts)`,
-          );
+            kind: 'bugfix',
+            command: BUG_APPROVE_VIA,
+            appetite: {
+              size: flags.appetite,
+              maxWallMinutes: Number(flags.minutes),
+              maxAttempts: Number(flags.attempts),
+              overrun: BUG_APPETITE.overrun,
+            },
+            flags: flags.flag,
+            onBehalf: flags.onBehalf,
+          });
+          write(message);
           write(`Next: the Lead plans it with \`apos lead propose --bugfix --goal ${id}\``);
           if (setupVersion === undefined) writeError('Goal không có setup: bảo đảm theo setup tắt');
         }),

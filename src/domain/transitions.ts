@@ -9,6 +9,7 @@ import {
   type GoalSpec,
 } from './contracts.js';
 import { BUG_APPROVE_VIA } from './bugfix.js';
+import { MAINT_APPROVE_VIA } from './maintenance.js';
 import { attemptKey, type GateReport, type ManualConfirmation } from './gate.js';
 import { parseWorkPackage, validatePackageGraph, type WorkPackageSpec } from './packages.js';
 import { parseReview, type ReviewRecord } from './reviews.js';
@@ -129,6 +130,8 @@ export type GoalState = {
   baselineMissing?: string[];
   /** Set when `bug approve` gave gate A, the appetite and gate B in one go: who confirmed, for the assurance table. */
   bugApproval?: { by: string; onBehalf?: string };
+  /** The same for `maintenance approve`. */
+  maintenanceApproval?: { by: string; onBehalf?: string };
   selected: boolean;
   /** When `goal select` happened: the time budget runs from here to `verified`. */
   selectedAt?: string;
@@ -370,6 +373,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         ...(Array.isArray(missing) ? { baselineMissing: missing as string[] } : {}),
         status: 'approved',
         ...(data?.via === BUG_APPROVE_VIA ? { bugApproval: confirmationOf(data.confirmation) } : {}),
+        ...(data?.via === MAINT_APPROVE_VIA ? { maintenanceApproval: confirmationOf(data.confirmation) } : {}),
         approvedGoalVersion: state.spec.version,
         appetite: parseAppetite(data?.appetite),
         ...(setupVersion === undefined ? {} : { setupVersion: setupVersion as number }),

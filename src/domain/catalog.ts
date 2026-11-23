@@ -65,6 +65,8 @@ export const catalogEntrySchema = z.object({
   testPaths: z.array(z.string().min(1)).default([]),
   /** Globs of files that change how tests run without being tests (conftest, runner config, setup files): changing one needs a decision. */
   testInfra: z.array(z.string().min(1)).default([]),
+  /** Globs, relative to the part's root, of the manifests and lockfiles: what a maintenance Goal (dependency upgrade, security patch) may change. */
+  manifests: z.array(z.string().min(1)).min(1).optional(),
   /** Regexes that count an assertion in a test file, line by line. A rough count, not a parse. */
   assertPatterns: z.array(regex),
   /** Regexes that recognise "not implemented yet" in a failing test's message . */

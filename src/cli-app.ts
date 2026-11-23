@@ -3,6 +3,7 @@ import { registerBug } from './cli/commands/bug.js';
 import { registerChecks } from './cli/commands/checks.js';
 import { registerGoal } from './cli/commands/goal.js';
 import { registerIntegration } from './cli/commands/integration.js';
+import { registerMaintenance } from './cli/commands/maintenance.js';
 import { registerLead } from './cli/commands/lead.js';
 import { registerOutcome } from './cli/commands/outcome.js';
 import { registerPackage } from './cli/commands/package.js';
@@ -28,6 +29,7 @@ export function buildProgram(options: CliOptions = {}): Command {
   registerSetupFlow(ctx);
   registerGoal(ctx);
   registerBug(ctx);
+  registerMaintenance(ctx);
   registerLead(ctx);
   registerTests(ctx);
   registerPackage(ctx);

@@ -15,7 +15,8 @@ export function pinnedSetupOf(ctx: CliContext, journal: ProjectJournal, setupVer
   return loadPinnedSetup(ctx.repo(), journal.setupHistory(), setupVersion, ctx.options.codec ?? yamlCodec);
 }
 
-const runnerFor = (ctx: CliContext, journal: ProjectJournal, goalId: string, dir: string) => {
+/** A tool runner whose logs stay outside the repo, for a Goal. */
+export const runnerFor = (ctx: CliContext, journal: ProjectJournal, goalId: string, dir: string) => {
   const gate = ctx.options.gate;
   return new ToolRunner(ctx.repo(), {
     artifactRoot: join(gate?.artifactRoot ?? journal.artifactRoot(), goalId, dir),

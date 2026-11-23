@@ -11,6 +11,7 @@ import { lockSummary } from '../lock-summary.js';
 import { buildAssuranceReport, renderAssuranceText } from '../../domain/assurance-report.js';
 import { pinnedSetupOf } from '../test-lock-wiring.js';
 import { approvalSetupVersion, baselineMissingOf } from '../goal-approval.js';
+import { maintenanceApprovalProblems } from '../../domain/maintenance.js';
 import { refactorApprovalProblems } from '../legacy-plan.js';
 import type { CliContext } from '../context.js';
 
@@ -132,6 +133,12 @@ export function registerGoal(ctx: CliContext): void {
         const state = journal.getGoal(id);
         const uncovered = state ? refactorApprovalProblems(ctx, journal, state) : [];
         if (uncovered.length) throw new UserError(`${id} cannot be approved:\n- ${uncovered.join('\n- ')}`);
+        // Only a maintenance Goal reads the setup here: the others are approved as they always were.
+        const unscanned =
+          state?.spec.kind === 'maintenance'
+            ? maintenanceApprovalProblems(state.spec, pinnedSetupOf(ctx, journal, setupVersion))
+            : [];
+        if (unscanned.length) throw new UserError(`${id} cannot be approved:\n- ${unscanned.join('\n- ')}`);
         const confirmation = await assertHuman('goal approve', id, flags.onBehalf);
         new GoalRegistryService(journal).approve(
           id,

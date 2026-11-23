@@ -32,6 +32,9 @@ loadErrorPatterns:
   - ClassNotFoundException
   - NoClassDefFoundError
   - ExceptionInInitializerError
+manifests:
+  - pom.xml
+  - '**/pom.xml'
 testPaths:
   - src/test/**
 testInfra:

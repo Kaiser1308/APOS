@@ -9,8 +9,8 @@ describe('sarif', () => {
     expect(readReport('sarif', fixture('eslint.sarif.json'))).toEqual({
       kind: 'findings',
       findings: [
-        { ruleId: 'no-unused-vars', level: 'error', file: 'src/a.ts', line: 3 },
-        { ruleId: 'eqeqeq', level: 'warning', file: 'src/b.ts', line: 9 },
+        { ruleId: 'no-unused-vars', level: 'error', file: 'src/a.ts', line: 3, fingerprint: expect.any(String) },
+        { ruleId: 'eqeqeq', level: 'warning', file: 'src/b.ts', line: 9, fingerprint: expect.any(String) },
       ],
     });
   });
@@ -18,8 +18,14 @@ describe('sarif', () => {
     expect(readReport('sarif', fixture('semgrep.sarif.json'))).toEqual({
       kind: 'findings',
       findings: [
-        { ruleId: 'javascript.lang.security.audit.eval', level: 'warning', file: 'web/app.js', line: 12 },
-        { ruleId: 'generic.secrets.token', level: 'note' },
+        {
+          ruleId: 'javascript.lang.security.audit.eval',
+          level: 'warning',
+          file: 'web/app.js',
+          line: 12,
+          fingerprint: expect.any(String),
+        },
+        { ruleId: 'generic.secrets.token', level: 'note', fingerprint: expect.any(String) },
       ],
     });
   });
@@ -76,8 +82,33 @@ describe('apos-json', () => {
     const content = '{"findings":[{"ruleId":"r","level":"error","file":"f.py","line":2}]}';
     expect(readReport('apos-json', content)).toEqual({
       kind: 'findings',
-      findings: [{ ruleId: 'r', level: 'error', file: 'f.py', line: 2 }],
+      findings: [{ ruleId: 'r', level: 'error', file: 'f.py', line: 2, fingerprint: expect.any(String) }],
     });
+  });
+  it('gives a finding a fingerprint that ignores the line, and keeps one the tool wrote', () => {
+    const at = (line: number) =>
+      `{"findings":[{"ruleId":"r","level":"error","file":"f.py","line":${line},"message":"m"}]}`;
+    const [moved, again] = [at(2), at(40)].map(content => readReport('apos-json', content));
+    expect(moved.kind === 'findings' && moved.findings[0]?.fingerprint).toBe(
+      again.kind === 'findings' && again.findings[0]?.fingerprint,
+    );
+    const own = '{"findings":[{"ruleId":"r","level":"note","fingerprint":"mine"}]}';
+    expect(readReport('apos-json', own)).toEqual({
+      kind: 'findings',
+      findings: [{ ruleId: 'r', level: 'note', fingerprint: 'mine' }],
+    });
+  });
+  it('reads SARIF partialFingerprints and, without them, hashes rule, path and message', () => {
+    const sarif = (extra: string, line: number) =>
+      `{"runs":[{"results":[{"ruleId":"r","level":"error","message":{"text":"m"},${extra}"locations":[{"physicalLocation":{"artifactLocation":{"uri":"a.js"},"region":{"startLine":${line}}}}]}]}]}`;
+    const prints = (content: string) => {
+      const got = readReport('sarif', content);
+      return got.kind === 'findings' ? got.findings.map(item => item.fingerprint) : [];
+    };
+    expect(prints(sarif('"partialFingerprints":{"primaryLocationLineHash":"abc"},', 1))).toEqual([
+      'fp:primaryLocationLineHash=abc',
+    ]);
+    expect(prints(sarif('', 1))).toEqual(prints(sarif('', 99)));
   });
   it('is unreadable when broken, empty, or the wrong shape', () => {
     for (const content of [

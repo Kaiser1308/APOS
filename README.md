@@ -378,6 +378,8 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `goal approve <id> --size <S\|M\|L> --max-minutes <n> --max-attempts <n> [--overrun <stop\|ask>] [--setup-version <n\|latest>] [--flag <name>]...` | **Gate A (H).** Pins the latest approved setup (or the version given). `--flag mutation` switches the setup's mutation tool on for this Goal (see [Mutation](#mutation)). |
 | `goal appetite <id> --reason <text> [--size <S\|M\|L>] [--max-minutes <n>] [--max-attempts <n>] [--overrun <stop\|ask>]` | **H.** Change the budget, not the scope. |
 | `goal select <id>` | **Gate B (H).** Records the choice; starts nothing. |
+| `bug open "<description>" --given <text> --when <text> --then <text> [--repro-hint <path>] [--part <part>] [--check <command>]` | Draft a Solo `bugfix` Goal (`GOAL-BUG-<n>`): one criterion proved by a red-green test, the description and flags as its hashed source. The check comes from the approved setup; `--check` is only for a project with none. |
+| `bug approve <id> [--appetite <S\|M\|L>] [--minutes <n>] [--attempts <n>] [--flag <name>]...` | **Gates A and B (H).** Approve, appetite (default S, 60 min, 3 attempts) and select in one go, with one confirmation. Refuses a Goal that is not a `bugfix`. |
 | `goal revise --file <json> --source <path> [--origin <text>]` | New Goal version; needs re-approval. |
 | `lead propose --file <json> [--by <name>]` | Submit an execution proposal (`baseCommit` required). |
 | `lead commit <id> [--by <name>]` | Accept the plan. Solo gets `WP-MAIN`. A Goal pinned to a setup with test paths goes to `testing` first. |

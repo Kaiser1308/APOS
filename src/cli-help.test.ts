@@ -3,6 +3,7 @@ import { runCli } from './cli.js';
 
 const GROUPS = [
   'goal',
+  'bug',
   'lead',
   'package',
   'integration',

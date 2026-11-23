@@ -1,5 +1,6 @@
 import {
   goalApprovalBlockers,
+  goalKind,
   parseAppetite,
   parseExecutionProposal,
   parseGoalSpec,
@@ -7,6 +8,7 @@ import {
   type ExecutionProposal,
   type GoalSpec,
 } from './contracts.js';
+import { BUG_APPROVE_VIA } from './bugfix.js';
 import { attemptKey, type GateReport, type ManualConfirmation } from './gate.js';
 import { parseWorkPackage, validatePackageGraph, type WorkPackageSpec } from './packages.js';
 import { parseReview, type ReviewRecord } from './reviews.js';
@@ -123,6 +125,8 @@ export type GoalState = {
   setupVersion?: number;
   /** Flags the Human added at `goal approve --flag` (`mutation`): they come on top of the ones in the Goal document. */
   flags?: string[];
+  /** Set when `bug approve` gave gate A, the appetite and gate B in one go: who confirmed, for the assurance table. */
+  bugApproval?: { by: string; onBehalf?: string };
   selected: boolean;
   /** When `goal select` happened: the time budget runs from here to `verified`. */
   selectedAt?: string;
@@ -171,6 +175,15 @@ export const effectiveStatus = (state: GoalState): GoalStatus =>
   state.status === 'legacy' && (state.legacyOutcome === 'closed' || state.legacyOutcome === 'stopped')
     ? state.legacyOutcome
     : state.status;
+
+/** Who confirmed a Human decision, as the log wrote it. */
+const confirmationOf = (value: unknown): { by: string; onBehalf?: string } => {
+  const raw = (value ?? {}) as { by?: unknown; onBehalf?: unknown };
+  return {
+    by: typeof raw.by === 'string' ? raw.by : 'human',
+    ...(typeof raw.onBehalf === 'string' ? { onBehalf: raw.onBehalf } : {}),
+  };
+};
 
 /** The implicit package a Solo plan delivers through. */
 export const SOLO_PACKAGE_ID = 'WP-MAIN';
@@ -321,7 +334,9 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.status === 'draft', 'Goal not awaiting approval');
       const blockers = goalApprovalBlockers(state.spec);
       requireThat(!blockers.length, `Goal not approvable: ${blockers.join('; ')}`);
-      const data = event.data as { appetite?: unknown; setupVersion?: unknown; flags?: unknown } | undefined;
+      const data = event.data as
+        | { appetite?: unknown; setupVersion?: unknown; flags?: unknown; via?: unknown; confirmation?: unknown }
+        | undefined;
       requireThat(data?.appetite, 'Goal approval must include the Human-approved appetite');
       const setupVersion = data?.setupVersion;
       requireThat(
@@ -338,6 +353,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         ...state,
         ...(Array.isArray(flags) && flags.length ? { flags: flags as string[] } : {}),
         status: 'approved',
+        ...(data?.via === BUG_APPROVE_VIA ? { bugApproval: confirmationOf(data.confirmation) } : {}),
         approvedGoalVersion: state.spec.version,
         appetite: parseAppetite(data?.appetite),
         ...(setupVersion === undefined ? {} : { setupVersion: setupVersion as number }),
@@ -349,6 +365,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'goal-revised': {
       const spec = parseGoalSpec(event.data);
       requireThat(spec.id === state.spec.id && spec.version > state.spec.version, 'Goal revision must advance version');
+      requireThat(goalKind(spec) === goalKind(state.spec), 'A Goal revision cannot change the kind of the Goal');
       return fresh(spec, state.appetite);
     }
     case 'appetite-set': {

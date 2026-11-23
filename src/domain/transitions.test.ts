@@ -270,3 +270,15 @@ describe('Goal pins a setup version at approval', () => {
       expect(() => applyEvent(start(), event('goal-approved', { ...approval, setupVersion }))).toThrow(/setupVersion/);
   });
 });
+
+describe('a bugfix Goal revision', () => {
+  const bug = { ...spec, kind: 'bugfix' as const };
+  const drafted = () => applyEvent(undefined, event('goal-drafted', bug));
+  it('cannot turn into a feature, which would lift the one-criterion rule', () => {
+    expect(() => applyEvent(drafted(), event('goal-revised', { ...spec, version: 2 }))).toThrow(/kind/);
+  });
+  it('cannot gain a second criterion', () => {
+    const more = { ...bug, version: 2, acceptance: [spec.acceptance[0], { ...spec.acceptance[0], id: 'AC-2' }] };
+    expect(() => applyEvent(drafted(), event('goal-revised', more))).toThrow(/exactly one/);
+  });
+});

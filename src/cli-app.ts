@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { registerBug } from './cli/commands/bug.js';
 import { registerChecks } from './cli/commands/checks.js';
 import { registerGoal } from './cli/commands/goal.js';
 import { registerIntegration } from './cli/commands/integration.js';
@@ -26,6 +27,7 @@ export function buildProgram(options: CliOptions = {}): Command {
   registerSetup(ctx);
   registerSetupFlow(ctx);
   registerGoal(ctx);
+  registerBug(ctx);
   registerLead(ctx);
   registerTests(ctx);
   registerPackage(ctx);

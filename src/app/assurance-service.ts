@@ -134,6 +134,18 @@ export class AssuranceService {
     return checks;
   }
 
+  /** Review tests a package locked (they may sit outside its paths) that the integration holds byte for byte. */
+  private unchangedPackageReviewFiles(state: GoalState, head: string): string[] {
+    return (state.reviewTests ?? [])
+      .filter(review => review.packageId)
+      .flatMap(review =>
+        Object.entries(review.files).flatMap(([path, hash]) => {
+          const now = fileAt(this.deps.repo, head, path);
+          return now && sha256Of(now) === hash ? [path] : [];
+        }),
+      );
+  }
+
   /**
    * What a package gate judges, asked of the integration commit too: the locked tests are untouched and pass (the Goal
    * answers for all of them), test infrastructure is as locked, no test that ran at the base is lost, and every changed
@@ -207,7 +219,11 @@ export class AssuranceService {
         ...(state.proposal?.stubPaths ?? []),
       ],
       needsHuman: [],
-      lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
+      lockedFiles: [
+        ...Object.keys(lock?.files ?? {}),
+        ...reviews.flatMap(review => Object.keys(review.files)),
+        ...this.unchangedPackageReviewFiles(state, input.head),
+      ],
     });
     checks.push(
       undecided.length

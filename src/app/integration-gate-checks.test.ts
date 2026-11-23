@@ -177,4 +177,45 @@ describe('the integration gate runs the package checks on the integration commit
     expect(check(again, 'APOS-SCOPE').reason).toContain('pyproject.toml');
     expect(check(again, 'APOS-INFRA')).toMatchObject({ status: 'needs-human' });
   }, 120_000);
+
+  it('lets a package review test outside the plan paths stand, byte for byte, and rejects an edit of it', async () => {
+    const p = await project({ paths: ['src/**'] });
+    const review = p.commit({ 'docs/review.t': 'case r pass\n' }, 'package review test');
+    const state: GoalState = {
+      ...p.state(),
+      reviewTests: [
+        {
+          packageId: 'WP-MAIN',
+          deliveryCommit: p.lockCommit,
+          reviewCommit: review,
+          files: { 'docs/review.t': sha256Of(fileAt(p.dir, review, 'docs/review.t')!) },
+          tests: [{ part: 'app', layer: 'L2', id: 'x::r' }],
+          blocking: [{ part: 'app', layer: 'L2', id: 'x::r' }],
+          alsoRedBefore: [],
+          by: 'reviewer',
+        },
+      ],
+    };
+    const assurance = new AssuranceService({
+      repo: p.dir,
+      runner: p.runner,
+      inspector: new GitCommitInspector(),
+      loadSetup: p.loadSetup,
+    });
+    const at = (head: string) =>
+      check(
+        assurance.layerChecks(state, {
+          stage: 'integrate',
+          scope: p.goalId,
+          head,
+          base: p.lockCommit,
+          changed: ['docs/review.t'],
+        }).checks,
+        'APOS-SCOPE',
+      );
+    expect(at(review)).toMatchObject({ status: 'pass' });
+    const edited = at(p.commit({ 'docs/review.t': 'case r pass\ncase more pass\n' }, 'edit'));
+    expect(edited.status).toBe('fail');
+    expect(edited.reason).toContain('docs/review.t');
+  }, 120_000);
 });

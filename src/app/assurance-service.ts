@@ -187,23 +187,36 @@ export class AssuranceService {
           const content = fileAt(repo, input.head, file);
           if (content) now[file] = sha256Of(content);
         }
-      checks.push(infraCheck({ lockInfra: lock.infra, delivery: now }));
+      // Infrastructure a green package changed and had approved, byte for byte, is decided; a new change is not.
+      checks.push(
+        infraCheck({ lockInfra: lock.infra, delivery: now, inherited: new Set(this.judgedByAPackage(state, input)) }),
+      );
     }
     const packages = Object.values(state.packages ?? {});
     const needsHuman = Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman));
     const judged = new Set(this.judgedByAPackage(state, input));
+    const sensitive = input.changed.filter(file => matchesAny(file, needsHuman));
+    // A sensitive file a package gate judged (same bytes) was decided there. Any other one was changed by the integration
+    // itself: there is no approval route at this stage, so it is red (the change goes through a package).
+    const undecided = sensitive.filter(file => !judged.has(file));
+    const scope = scopeCheck({
+      changed: input.changed.filter(file => !sensitive.includes(file)),
+      paths: [
+        ...packages.flatMap(item => [...(item.spec.paths ?? []), ...(item.spec.stubPaths ?? [])]),
+        ...(state.proposal?.paths ?? []),
+        ...(state.proposal?.stubPaths ?? []),
+      ],
+      needsHuman: [],
+      lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
+    });
     checks.push(
-      scopeCheck({
-        // A sensitive file a package gate judged (same bytes) was decided there; any other one falls to the paths.
-        changed: input.changed.filter(file => !(judged.has(file) && matchesAny(file, needsHuman))),
-        paths: [
-          ...packages.flatMap(item => [...(item.spec.paths ?? []), ...(item.spec.stubPaths ?? [])]),
-          ...(state.proposal?.paths ?? []),
-          ...(state.proposal?.stubPaths ?? []),
-        ],
-        needsHuman: [],
-        lockedFiles: [...Object.keys(lock?.files ?? {}), ...reviews.flatMap(review => Object.keys(review.files))],
-      }),
+      undecided.length
+        ? {
+            ...scope,
+            status: 'fail',
+            reason: `${scope.status === 'fail' ? `${scope.reason}; ` : ''}sensitive file(s) changed by the integration itself, which no package gate decided: ${undecided.join(', ')}`,
+          }
+        : scope,
     );
     return checks;
   }

@@ -3,7 +3,8 @@ import { AssuranceService } from './assurance-service.js';
 import { GitCommitInspector } from './integration.js';
 import { cleanProjects, lockedProject, testingProject } from './test-lock.test-support.js';
 import { fileAt, sha256Of } from './git-files.js';
-import { spec } from '../domain/fixtures.test-support.js';
+import { gateReport, proposal, spec } from '../domain/fixtures.test-support.js';
+import type { ExecutionProposal } from '../domain/contracts.js';
 import type { TestLock } from '../domain/test-lock.js';
 import type { GoalState } from '../domain/transitions.js';
 
@@ -13,7 +14,7 @@ afterEach(cleanProjects);
  * The integration commit of a Multi-WP Goal passes the checks a package does: locked tests, test infrastructure, inventory
  * and scope (the union of the green packages' paths, plus the plan's own `paths` for integration files).
  */
-async function project(plan: object = {}) {
+async function project(plan: Partial<ExecutionProposal> = {}) {
   const p = await lockedProject({ plan: { paths: ['src/**', 'tests/unit/**'], ...plan } });
   const changed = (head: string) => p.git('diff', '--name-only', p.base, head).split('\n').filter(Boolean);
   const assurance = new AssuranceService({
@@ -30,13 +31,13 @@ async function project(plan: object = {}) {
       spec: { ...base.packages!['WP-MAIN']!.spec, id, paths, stubPaths: ['src/stub.txt'], dependencies: [] },
       status: 'green' as const,
       attempts: 0,
-      gate: { changedFiles: [], deliveryCommit: p.lockCommit },
+      gate: { ...gateReport(p.lockCommit), changedFiles: [] },
     });
     return {
       ...base,
-      proposal: { ...base.proposal!, mode: 'multi-wp', ...plan },
+      proposal: { ...proposal, ...base.proposal, mode: 'multi-wp', ...plan },
       packages: { 'WP-A': pkg('WP-A', ['src/a/**']), 'WP-B': pkg('WP-B', ['src/b/**']) },
-    } as unknown as GoalState;
+    };
   };
   const run = (head: string) =>
     assurance.layerChecks(state(), {
@@ -110,12 +111,15 @@ describe('the integration gate runs the package checks on the integration commit
       asserts: {},
       map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L2', testIds: ['tests.acceptance.calc::add'] }],
       by: 't',
-    } as TestLock;
-    const closed = {
+    } satisfies TestLock;
+    const closed: GoalState = {
       spec: { ...spec, id: 'GOAL-CAP', kind: 'characterize', covers: ['src/legacy.txt'] },
       status: 'closed',
+      selected: true,
+      evidence: [],
+      reviews: [],
       testLock: lock,
-    } as unknown as GoalState;
+    };
     const assurance = new AssuranceService({
       repo: p.dir,
       runner: p.runner,
@@ -123,7 +127,7 @@ describe('the integration gate runs the package checks on the integration commit
       loadSetup: p.loadSetup,
       goals: () => [closed],
     });
-    const state = { ...p.state(), proposal: { ...p.state().proposal!, baseCommit: captured } } as GoalState;
+    const state: GoalState = { ...p.state(), proposal: { ...proposal, ...p.state().proposal, baseCommit: captured } };
     const at = (head: string) =>
       check(
         assurance.layerChecks(state, { stage: 'integrate', scope: p.goalId, head, base: captured, changed: [] }).checks,
@@ -133,5 +137,44 @@ describe('the integration gate runs the package checks on the integration commit
     const broken = at(p.commit({ 'tests/acceptance/calc.t': 'case add fail nope\n' }, 'break it'));
     expect(broken.status).toBe('fail');
     expect(broken.reason).toContain('GOAL-CAP');
+  }, 120_000);
+
+  it('decides sensitive files: one a package already had approved passes, an integration-only change is red', async () => {
+    const p = await project({ paths: ['src/**', 'pyproject.toml', 'tests/infra.cfg'] });
+    const base = p.state();
+    const delivered = p.commit({ 'pyproject.toml': 'dep\n', 'tests/infra.cfg': 'plain2\n' }, 'package delivery');
+    const withPackage = (): GoalState => {
+      const state = base;
+      const pkg = {
+        spec: { ...state.packages!['WP-MAIN']!.spec, id: 'WP-A', paths: ['src/a/**'], stubPaths: [], dependencies: [] },
+        status: 'green' as const,
+        attempts: 0,
+        gate: { ...gateReport(delivered), changedFiles: ['pyproject.toml', 'tests/infra.cfg'] },
+      };
+      return { ...state, proposal: { ...proposal, ...state.proposal, mode: 'multi-wp' }, packages: { 'WP-A': pkg } };
+    };
+    const assurance = new AssuranceService({
+      repo: p.dir,
+      runner: p.runner,
+      inspector: new GitCommitInspector(),
+      loadSetup: p.loadSetup,
+    });
+    const at = (head: string) =>
+      assurance.layerChecks(withPackage(), {
+        stage: 'integrate',
+        scope: p.goalId,
+        head,
+        base: p.lockCommit,
+        changed: ['pyproject.toml', 'tests/infra.cfg'],
+      }).checks;
+    const same = at(delivered);
+    expect(check(same, 'APOS-SCOPE')).toMatchObject({ status: 'pass' });
+    expect(check(same, 'APOS-INFRA')).toMatchObject({ status: 'pass' });
+    const again = at(
+      p.commit({ 'pyproject.toml': 'another dep\n', 'tests/infra.cfg': 'plain3\n' }, 'integration edits'),
+    );
+    expect(check(again, 'APOS-SCOPE')).toMatchObject({ status: 'fail' });
+    expect(check(again, 'APOS-SCOPE').reason).toContain('pyproject.toml');
+    expect(check(again, 'APOS-INFRA')).toMatchObject({ status: 'needs-human' });
   }, 120_000);
 });

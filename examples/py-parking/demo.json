@@ -1,0 +1,12 @@
+{
+  "tools": [
+    "pytest",
+    "python"
+  ],
+  "bench": {
+    "id": "bench",
+    "command": "python bench.py {report}",
+    "format": "metric",
+    "metric": "p95_ms"
+  }
+}

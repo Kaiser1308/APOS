@@ -218,4 +218,25 @@ describe('the integration gate runs the package checks on the integration commit
     expect(edited.status).toBe('fail');
     expect(edited.reason).toContain('docs/review.t');
   }, 120_000);
+
+  it('leaves a locked test file to APOS-LOCKED even when needsHuman globs match it', async () => {
+    const p = await project();
+    const head = p.commit({ 'src/impl.txt': 'add\n' }, 'integration');
+    const setup = p.loadSetup(p.state());
+    const part = setup.parts.app!;
+    const assurance = new AssuranceService({
+      repo: p.dir,
+      runner: p.runner,
+      inspector: new GitCommitInspector(),
+      loadSetup: () => ({ ...setup, parts: { app: { ...part, needsHuman: ['tests/acceptance/**'] } } }),
+    });
+    const checks = assurance.layerChecks(p.state(), {
+      stage: 'integrate',
+      scope: p.goalId,
+      head,
+      base: p.base,
+      changed: ['tests/acceptance/calc.t', 'src/impl.txt'],
+    }).checks;
+    expect(check(checks, 'APOS-SCOPE')).toMatchObject({ status: 'pass' });
+  }, 120_000);
 });

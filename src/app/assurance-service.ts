@@ -207,7 +207,15 @@ export class AssuranceService {
     const packages = Object.values(state.packages ?? {});
     const needsHuman = Object.values(setup.parts).flatMap(part => rootedGlobs(part.root, part.needsHuman));
     const judged = new Set(this.judgedByAPackage(state, input));
-    const sensitive = input.changed.filter(file => matchesAny(file, needsHuman));
+    const locked = new Set([
+      ...Object.keys(lock?.files ?? {}),
+      ...reviews.flatMap(review => Object.keys(review.files)),
+      ...this.unchangedPackageReviewFiles(state, input.head),
+    ]);
+    // Tester-owned files (the lock commit's) are APOS-LOCKED's to judge, not sensitive-file decisions of a package.
+    const sensitive = input.changed.filter(
+      file => !locked.has(file) && !file.startsWith('.apos/') && matchesAny(file, needsHuman),
+    );
     // A sensitive file a package gate judged (same bytes) was decided there. Any other one was changed by the integration
     // itself: there is no approval route at this stage, so it is red (the change goes through a package).
     const undecided = sensitive.filter(file => !judged.has(file));

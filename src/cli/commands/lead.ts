@@ -75,6 +75,10 @@ export function registerLead(ctx: CliContext): void {
           const state = current;
           const proposal =
             planned.sourceSha256 || !state ? planned : { ...planned, sourceSha256: state.spec.source.sha256 };
+          if (state?.hotfix && proposal.baseCommit?.toLowerCase() !== state.hotfix.before)
+            throw new UserError(
+              `${state.spec.id} answers for the hotfix ${state.hotfix.commit}: its plan starts from the commit before it, ${state.hotfix.before}, where the bug is red`,
+            );
           if (!state || proposal.goalVersion !== state.spec.version)
             throw new Error('Proposal targets stale Goal version');
           const mapped = new Set(proposal.acceptanceMapping.map(item => item.acceptanceId));

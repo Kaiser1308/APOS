@@ -135,7 +135,7 @@ it('names every command guarded by assertHuman in the block', async () => {
   const listed = new Set<string>();
   for (const [, prefix, alts] of block.matchAll(/`((?:[a-z]+ )*[a-z]+) ([a-z-]+(?:\|[a-z-]+)+)`/g))
     for (const alt of alts!.split('|')) listed.add(`${prefix} ${alt}`);
-  for (const [whole, single] of block.matchAll(/`([a-z]+(?: [a-z]+)+)(?: --[a-z-]+)?`/g)) {
+  for (const [whole, single] of block.matchAll(/`([a-z]+(?: [a-z]+)*)(?: --[a-z-]+)?`/g)) {
     listed.add(single!);
     listed.add(whole.slice(1, -1));
   }

@@ -33,7 +33,7 @@
 3. [Install](#install)
 4. [Quick start](#quick-start)
 5. [The Goal contract](#the-goal-contract)
-6. [Delivery flows](#delivery-flows) (Solo, [a bug](#fixing-a-bug-apos-bug), [a removal](#removing-a-feature-a-removed-criterion), [an old repo](#an-old-repo-with-few-tests), Multi-WP)
+6. [Delivery flows](#delivery-flows) (Solo, [a bug](#fixing-a-bug-apos-bug), [a hotfix](#production-is-on-fire-apos-hotfix), [a removal](#removing-a-feature-a-removed-criterion), [an old repo](#an-old-repo-with-few-tests), Multi-WP)
 7. [Project setup](#project-setup), [Layers by stage](#layers-by-stage), [The assurance table](#the-assurance-table) and [Web UI](#web-ui)
 8. [Configuration and state](#configuration-and-state)
 9. [Trust model](#trust-model)
@@ -101,7 +101,7 @@ flowchart TD
 
 ### Human-only commands
 
-`goal approve`, `goal appetite`, `goal select`, `bug approve`, `maintenance approve`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base` and `blocker resolve`) are Human decisions; `setup approve` is one too, and `--baseline-missing` (accepting a repo with no tests) is the Human's to say. Each one makes you **type the Goal id back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
+`goal approve`, `goal appetite`, `goal select`, `bug approve`, `maintenance approve`, `hotfix`, `outcome close`, `outcome revise`, `outcome stop` and `gate confirm` (plus `gate run --base` and `blocker resolve`) are Human decisions; `setup approve` is one too, and `--baseline-missing` (accepting a repo with no tests) is the Human's to say. Each one makes you **type the Goal id (for `hotfix`, the short sha of the commit) back in an interactive terminal**; without a terminal (an agent, a script, a pipe) it is refused and nothing is written. When the Human has said yes elsewhere (say, a click on a task item), pass `--on-behalf "<why>"`: the command runs without asking and the text is recorded. Either way the event carries a `confirmation` entry, so the log shows who decided how.
 
 `goal appetite` is the Human's decision to change the budget, never the scope.
 
@@ -264,6 +264,27 @@ apos outcome close GOAL-BUG-001
 
 Nothing about the gate is shortcut. Two rules are stricter for a bug, because its test must show the bug and not a stub: the Tester's commit may change tests and `tests.json` and nothing else (no code, stub or test infrastructure; so the test is red on the code as it is, the plan's base), and a reproduction that is already green is refused as "test không tái hiện lỗi". A bug that needs more than one criterion, a benchmark or a dependency is an ordinary Goal (a `bugfix` with two criteria is refused, also by `goal revise`). The assurance table ends the story with `lỗi được tái hiện bằng test <id>: đỏ trên <base>, xanh trên <delivery>`, or `lỗi chưa được tái hiện bằng test` while the evidence is not whole. `npm run demo:bug` runs it with vitest; see [docs/demo.md](docs/demo.md).
 
+### Production is on fire (`apos hotfix`)
+
+When production is burning the Human cannot wait for a gate. APOS does not merge anything and does not stand in the way: the Human merges the fix, and tells APOS, which then makes sure the evidence arrives. Two things follow, and neither holds the merge up:
+
+```sh
+apos hotfix "Total is 0 with the code FREE0" --commit <sha> --given "a cart of 40 and FREE0" --when "the total is computed" --then "the total is 40"
+#   the Human: records the hotfix, runs L0 and L1 on the commit (recorded, never a gate), opens and approves the bugfix Goal
+apos hotfix list                       # every hotfix: có bằng chứng | đang chờ | quá hạn | bỏ dở, its deadline, its Goal
+apos lead propose --bugfix --goal GOAL-BUG-001   # base = the commit before the hotfix; paths = the files the hotfix changed
+apos lead commit GOAL-BUG-001
+apos tests submit GOAL-BUG-001 --commit <sha>    # the Tester's test on the commit BEFORE the hotfix: red, locked
+apos package submit GOAL-BUG-001 WP-MAIN --commit <sha>   # the tests commit with the hotfix merged in: green
+apos outcome close GOAL-BUG-001
+```
+
+`hotfix` is a Human command (type the short sha back, or `--on-behalf "<why>"`; an agent with no terminal is refused and nothing is written). It writes `hotfix-accepted` on the Goal it opens, `GOAL-BUG-<n>` of kind `bugfix`, linked to the hotfix (`hotfixOf`: the commit, the commit before it, the deadline). Everything that reads state (the inbox, the table, `hotfix list`) treats the commit as accepted in an emergency and without evidence yet. `--due` is the time allowed for the evidence (`90m`, `24h`, `2d`; a bare number is refused; default `24h`); the absolute deadline is printed. A hotfix commit that is a merge commit, or has no parent, needs `--before <sha>` (an older commit of the hotfix): the commit where the bug must be reproduced. Without `--given/--when/--then` the Goal waits as a sketch: the PM revises it with its one criterion (keeping its `hotfixOf`: a revision cannot drop or change it), then the Human runs `bug approve`. With them, one confirmation covers the hotfix, the approval and the selection (`duyệt gộp bằng hotfix`).
+
+The evidence is the bugfix evidence with the hotfix as the "after": the Tester adds tests only, on the commit before the hotfix, and the test must be red there (green is "test không tái hiện lỗi"); the delivery must **contain the hotfix commit** (`APOS-HOTFIX`, red otherwise: a fix of someone else's is not evidence about the code in production), and may change only the files the hotfix changed. The delivery is therefore a merge of the Tester's commit and the hotfix.
+
+What the Human sees: a hotfix past its deadline is a red line of `apos inbox` (`hotfix <sha> quá hạn <deadline>, chưa có bằng chứng`; the deadline is absolute, so the line does not change as time passes); one that waits is an ordinary line; and while any hotfix has no evidence, `apos inbox` and the top of `apos goal show` of every Goal say `hotfix chưa có bằng chứng: n`. Closing the Goal clears its lines. **Stopping it does not**: that hotfix stays without evidence for good (`bỏ dở`), counted, and the table says so. If L0 or L1 was red on the hotfix commit the inbox adds `hotfix đỏ ở L1`. The table of the hotfix Goal says `hotfix <sha> chấp nhận khẩn cấp bởi <by> lúc <time>; lỗi được tái hiện bằng test <id>: đỏ trên <before>, xanh trên <hotfix> (bản giao <delivery> chứa hotfix)`, or `chưa có bằng chứng, hạn <deadline>`. For a test or a demo, `APOS_NOW=<ISO date>` sets the time deadlines are read at (only `hotfix`, `hotfix list`, `inbox` and `goal show` look at it). Every command that reads it prints `APOS_NOW=<…>: đồng hồ bị ghi đè, chỉ dùng cho test/demo` on stderr, and `hotfix` writes it into `hotfix-accepted` as `clockOverride`: the table of that Goal then adds `(hạn tính theo đồng hồ ghi đè)`. `npm run demo:hotfix` runs it with vitest; see [docs/demo.md](docs/demo.md).
+
 ### Upgrading a dependency or patching a finding (`apos maintenance`)
 
 A dependency upgrade or a security patch adds no behaviour, so there is no criterion to write. It is a Goal of its own kind, `maintenance`, and the evidence is the base itself: the gate runs the same layers on the base and on the delivery and accepts what does not get worse. Two commands, then the ordinary flow without a Tester:
@@ -401,7 +422,7 @@ GOAL-001  setup v1  (app: python)
   Giới hạn           xác nhận Human chỉ chống duyệt nhầm, chưa phải ranh giới bảo mật; --by agent:<x> là tự khai; APOS chứng minh code đạt tiêu chí đã duyệt, không chứng minh tiêu chí hay bộ test là đủ (README.md, mục "What the evidence does not prove")
 ```
 
-A Goal on a setup approved with no baseline opens with a first line, `BẢO ĐẢM THẤP: repo chưa có test nền (app.L1, app.L2)`. A characterize Goal adds `Chụp hành vi` (the code it captures, the tests locked), and a refactor adds `Giữ hành vi` (`giữ nguyên hành vi: <n> test chụp từ <GOAL-…>, xanh trước trên <base>, xanh sau trên <commit>`, or that it is not proved yet).
+A Goal on a setup approved with no baseline opens with a first line, `BẢO ĐẢM THẤP: repo chưa có test nền (app.L1, app.L2)`. A hotfix Goal adds `Hotfix` (who let the commit through, the test red before and green with it, or `chưa có bằng chứng, hạn …`) and `Gate trên hotfix` (L0 and L1 on the hotfix commit, recorded only). A characterize Goal adds `Chụp hành vi` (the code it captures, the tests locked), and a refactor adds `Giữ hành vi` (`giữ nguyên hành vi: <n> test chụp từ <GOAL-…>, xanh trước trên <base>, xanh sau trên <commit>`, or that it is not proved yet).
 
 The last line, `Giới hạn`, is the same on every table: what the evidence above does not prove ([What the evidence does not prove](#what-the-evidence-does-not-prove)).
 
@@ -466,10 +487,12 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `goal select <id>` | **Gate B (H).** Records the choice; starts nothing. |
 | `bug open "<description>" --given <text> --when <text> --then <text> [--repro-hint <path>] [--part <part>] [--check <command>]` | Draft a Solo `bugfix` Goal (`GOAL-BUG-<n>`): one criterion proved by a red-green test, the description and flags as its hashed source. The check comes from the approved setup; `--check` is only for a project with none. |
 | `bug approve <id> [--appetite <S\|M\|L>] [--minutes <n>] [--attempts <n>] [--flag <name>]...` | **Gates A and B (H).** Approve, appetite (default S, 60 min, 3 attempts) and select in one go, with one confirmation. Refuses a Goal that is not a `bugfix`. |
+| `hotfix "<description>" --commit <sha> [--before <sha>] [--due <90m\|24h\|2d>] [--given <text> --when <text> --then <text>] [--part <part>] [--repro-hint <path>] [--check <command>]` | **Human (H).** Let a fix through now: write `hotfix-accepted`, run L0 and L1 on the commit (recorded, never a gate), open the `bugfix` Goal that owes the evidence, with a deadline (`--due`, default `24h`). With `--given/--when/--then` the Goal is approved and selected with the same confirmation (`via: hotfix`); without, it waits for the PM. A merge or root commit needs `--before`. |
+| `hotfix list` | Every hotfix: `có bằng chứng`, `đang chờ`, `quá hạn` or `bỏ dở`, its deadline and Goal, and `hotfix chưa có bằng chứng: n`. |
 | `maintenance open ["<description>"] [--security <finding>]... [--paths <glob>]... [--part <part>] [--from-pr <n> [--remote <name>]]` | Draft a Solo `maintenance` Goal (`GOAL-MAINT-<n>`): no criterion, the gate holds it to the base. `--security` names a finding of the base scan (a fingerprint, or a `ruleId` one finding has) that the delivery must remove; the base scan is recorded in the Goal. `--paths` adds paths the change may touch besides the manifests and lockfiles. `--from-pr` fetches `pull/<n>/head` with git (no `gh`) and records the number and the sha; the description defaults to the title of the first commit. |
 | `maintenance approve <id> [--appetite <S\|M\|L>] [--minutes <n>] [--attempts <n>] [--flag <name>]...` | **Gates A and B (H).** The same one-go approval as `bug approve` (default S, 60 min, 3 attempts); refuses a Goal that is not `maintenance`, and a security Goal whose setup has no scan tool or whose finding the recorded base scan does not show. |
 | `goal revise --file <json> --source <path> [--origin <text>]` | New Goal version; needs re-approval. |
-| `lead propose (--file <json> \| --bugfix --goal <id> [--base <sha>] [--stub <path>]... \| --characterize --goal <id> [--base <sha>] \| --maintenance --goal <id> [--base <sha>]) [--by <name>]` | Submit an execution proposal (`baseCommit` required). `--maintenance` writes the Solo plan of a maintenance Goal: `paths` are the manifests and lockfiles of its part plus the Goal's `paths`; no Tester. `--bugfix` writes the Solo plan of a bug Goal from the Goal and its setup: the Tester reproduces, the Worker fixes. `--characterize` writes the Solo plan of a characterize Goal: the Tester captures the behaviour in tests, no code changes. |
+| `lead propose (--file <json> \| --bugfix --goal <id> [--base <sha>] [--stub <path>]... \| --characterize --goal <id> [--base <sha>] \| --maintenance --goal <id> [--base <sha>]) [--by <name>]` | Submit an execution proposal (`baseCommit` required). `--maintenance` writes the Solo plan of a maintenance Goal: `paths` are the manifests and lockfiles of its part plus the Goal's `paths`; no Tester. `--bugfix` writes the Solo plan of a bug Goal from the Goal and its setup: the Tester reproduces, the Worker fixes (for a hotfix Goal the base is the commit before the hotfix, `paths` the files the hotfix changed, and another `--base` is refused). `--characterize` writes the Solo plan of a characterize Goal: the Tester captures the behaviour in tests, no code changes. |
 | `lead commit <id> [--by <name>]` | Accept the plan. Solo gets `WP-MAIN`. A Goal pinned to a setup with test paths goes to `testing` first. |
 | `tests submit <goalId> --commit <sha> [--by <name>]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
 | `tests revise <goalId> --commit <sha> --reason <text> [--by <name>]` | Replace the lock. Exit 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception. |

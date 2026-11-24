@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs one example Goal (examples/<name>) through the whole APOS v3 flow with the real binary and a real test runner:
-//   node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug|py-legacy|ts-maint|py-remove> [--keep] [--bin <path to cli.js>]
+//   node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug|py-legacy|ts-maint|py-remove|ts-hotfix> [--keep] [--bin <path to cli.js>]
 // It copies the example to a temp directory, `git init`s it, and drives APOS with the commands a Lead, a Tester, a Worker
 // and a Reviewer would run. Every step prints what APOS said and checks the exit code it expected; a surprise exits 1.
 // A machine without a tool the example needs stops at once with exit 2 and says which (it never reports a pass it did not see).
@@ -11,6 +11,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, stringify } from 'yaml';
 import { legacyStory } from './demo-legacy-story.mjs';
+import { hotfixStory } from './demo-hotfix-story.mjs';
 import { maintenanceStory } from './demo-maint-story.mjs';
 import { removalStory } from './demo-remove-story.mjs';
 
@@ -28,10 +29,12 @@ const usage = (message, code) => {
 };
 const hasStory =
   source &&
-  ['goal.json', 'bug.json', 'characterize.json', 'maintenance.json'].some(file => existsSync(join(source, file)));
+  ['goal.json', 'bug.json', 'characterize.json', 'maintenance.json', 'hotfix.json'].some(file =>
+    existsSync(join(source, file)),
+  );
 if (!hasStory)
   usage(
-    'usage: node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug|py-legacy|ts-maint|py-remove> [--keep] [--bin <cli.js>]',
+    'usage: node scripts/demo-goal.mjs <ts-orders|py-parking|ts-bug|py-legacy|ts-maint|py-remove|ts-hotfix> [--keep] [--bin <cli.js>]',
     2,
   );
 if (!existsSync(bin)) usage(`demo: ${bin} does not exist: run \`npm run build\` first`, 2);
@@ -237,6 +240,7 @@ try {
   }
   if (demo.story === 'legacy') console.log('');
   else if (demo.story === 'bugfix') bugStory();
+  else if (demo.story === 'hotfix') hotfixStory({ apos, git, commit, expectText, human, source });
   else if (demo.story === 'maintenance') maintenanceStory({ apos, git, commit, expectText, human, source, repo });
   else if (demo.story === 'removal') removalStory({ apos, git, commit, expectText, human, source, work, base });
   else {

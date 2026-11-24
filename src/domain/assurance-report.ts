@@ -5,6 +5,7 @@ import { goalKind } from './contracts.js';
 import { capturedEvidence, preservedEvidence, type Preserved } from './legacy.js';
 import { reviewOverrideBy } from './review-tests.js';
 import { removalEvidence, removalLines, type RemovalEvidence } from './removal-report.js';
+import { hotfixEvidence, hotfixLines, type HotfixEvidence } from './hotfix-report.js';
 import { maintenanceEvidence, maintenanceLines, type MaintenanceEvidence } from './maintenance-report.js';
 import { MAINT_APPROVE_VIA } from './maintenance.js';
 import { proofDemands } from './proof-tools.js';
@@ -56,6 +57,8 @@ export type AssuranceReport = {
   combinedApproval?: string;
   /** The command that did it; absent means `bug approve`. */
   combinedCommand?: string;
+  /** Only for a Goal that answers for a hotfix: who let the commit through, and whether the bug is reproduced on the commit before it. */
+  hotfix?: HotfixEvidence;
   /** Only for a `maintenance` Goal: what the gate proved against the base. */
   maintenance?: MaintenanceEvidence;
   /** Only for a Goal with `removed` criteria: the test that says the feature is gone, and exactly which old tests went. */
@@ -133,7 +136,7 @@ function who(entry: NonNullable<GoalState['exceptions']>[number]): string {
  * What a Goal's guarantees rest on, derived from the log alone (plus the pinned setup when the caller has it, which adds
  * the layers the close stage will run and the stacks). Nothing here decides anything: it only says what the gates did.
  */
-export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): AssuranceReport {
+export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup, now?: string): AssuranceReport {
   const goalId = state.spec.id;
   const proofs = state.spec.acceptance.map(item => acceptanceProof(item));
   const byProof: Record<string, number> = {};
@@ -217,14 +220,17 @@ export function buildAssuranceReport(state: GoalState, setup?: ProjectSetup): As
   const bugBy = state.bugApproval ?? state.maintenanceApproval;
   const maintenance = maintenanceEvidence(state, setup);
   const removal = removalEvidence(state);
+  const hotfix = hotfixEvidence(state, bug, now);
   return {
     goalId,
     ...(state.baselineMissing?.length ? { lowAssurance: state.baselineMissing } : {}),
     ...(bug ? { bug } : {}),
+    ...(hotfix ? { hotfix } : {}),
     ...(capturedEvidence(state) ? { captured: capturedEvidence(state)! } : {}),
     ...(preservedEvidence(state) ? { preserved: preservedEvidence(state)! } : {}),
     ...(bugBy ? { combinedApproval: bugBy.by === 'on-behalf' ? `on-behalf:${bugBy.onBehalf ?? '?'}` : 'human' } : {}),
     ...(state.maintenanceApproval && !state.bugApproval ? { combinedCommand: MAINT_APPROVE_VIA } : {}),
+    ...(state.bugApproval?.via ? { combinedCommand: state.bugApproval.via } : {}),
     ...(maintenance ? { maintenance } : {}),
     ...(removal ? { removal } : {}),
     ...(state.setupVersion === undefined
@@ -335,6 +341,7 @@ export function renderAssuranceText(report: AssuranceReport): string {
           : 'lỗi chưa được tái hiện bằng test'
       }`,
     );
+  if (report.hotfix) lines.push(...hotfixLines(report.hotfix, label));
   if (report.captured)
     lines.push(
       `${label('Chụp hành vi')}${report.captured.tests} test đã khoá, chụp hành vi hiện tại của ${report.captured.covers.join(', ')} (hành vi lạ ghi thành ghi chú, mở \`apos bug\` sau)`,

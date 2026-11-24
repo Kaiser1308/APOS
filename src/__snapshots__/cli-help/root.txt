@@ -3,39 +3,48 @@ Usage: apos [options] [command]
 Assurance layer for AI-built software: fixed checks on exact commits
 
 Options:
-  -V, --version    output the version number
-  --repo <path>    managed Git project (default: "/repo")
-  -h, --help       display help for command
+  -V, --version                   output the version number
+  --repo <path>                   managed Git project (default: "/repo")
+  -h, --help                      display help for command
 
 Commands:
-  init [options]   initialize .apos in a Git project
-  migrate          import APOS v1 Goal histories from the repo into the
-                   controller log
-  setup            draft, probe and approve the project setup
+  init [options]                  initialize .apos in a Git project
+  migrate                         import APOS v1 Goal histories from the repo
+                                  into the controller log
+  setup                           draft, probe and approve the project setup
   goal
-  plan [options]   show Goal plan and requirement coverage across the brief
-  bug              fix a bug with one small Goal: open it, the Human approves it
-  maintenance      upgrade a dependency or patch a security finding with one
-                   small Goal: open it, the Human approves it
+  plan [options]                  show Goal plan and requirement coverage across
+                                  the brief
+  bug                             fix a bug with one small Goal: open it, the
+                                  Human approves it
+  maintenance                     upgrade a dependency or patch a security
+                                  finding with one small Goal: open it, the
+                                  Human approves it
+  hotfix [options] [description]  Human: let a fix through now without waiting
+                                  for the gate; APOS records it, opens the
+                                  bugfix Goal that owes the evidence, and flags
+                                  it when overdue
   lead
-  tests            the tester submits acceptance tests; APOS checks and locks
-                   them
-  package          the Lead plans packages; delivery goes through `submit`
-  exception        approve what the gate cannot decide: a sensitive file
-                   changed, or locked tests weakened
+  tests                           the tester submits acceptance tests; APOS
+                                  checks and locks them
+  package                         the Lead plans packages; delivery goes through
+                                  `submit`
+  exception                       approve what the gate cannot decide: a
+                                  sensitive file changed, or locked tests
+                                  weakened
   integration
-  gate             controller-run checks on exact commits; owner claims are not
-                   evidence
+  gate                            controller-run checks on exact commits; owner
+                                  claims are not evidence
   metrics
   evidence
   decision
   blocker
-  review           a review blocks only with a test that is red when APOS runs
-                   it; anything else is advice
+  review                          a review blocks only with a test that is red
+                                  when APOS runs it; anything else is advice
   outcome
-  inbox [options]  what needs the Human: notices, blocked Goals, verified Goals
-                   awaiting outcome
-  ui [options]     read-only web view of this project on 127.0.0.1; it never
-                   writes controller state
+  inbox [options]                 what needs the Human: notices, blocked Goals,
+                                  verified Goals awaiting outcome
+  ui [options]                    read-only web view of this project on
+                                  127.0.0.1; it never writes controller state
   finding
-  help [command]   display help for command
+  help [command]                  display help for command

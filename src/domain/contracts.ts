@@ -165,6 +165,18 @@ const goalSchema = z
       .optional(),
     /** `maintenance`: the pull request the delivery comes from (`--from-pr`): its number, remote and the sha fetched when the Goal was opened. */
     fromPr: z.object({ number: z.number().int().positive(), remote: namedText, sha: namedText }).optional(),
+    /**
+     * `bugfix`: the Goal `apos hotfix` opened for a commit the Human let through. `before` is the commit the bug is reproduced
+     * on, `dueAt` the absolute deadline of the evidence. It stays in the spec so a revision cannot drop it.
+     */
+    hotfixOf: z
+      .object({
+        commit: namedText,
+        before: namedText,
+        due: namedText,
+        dueAt: namedText.refine(value => !Number.isNaN(Date.parse(value)), 'dueAt is a date'),
+      })
+      .optional(),
   })
   .superRefine((goal, ctx) => {
     const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
@@ -183,8 +195,12 @@ const goalSchema = z
         ['acceptance'],
         'A maintenance Goal has no criterion or check of its own: the gate holds it to the base (no new failure, no new finding, only manifests and its paths)',
       );
+    if (goal.hotfixOf && goal.kind !== 'bugfix')
+      issue(['hotfixOf'], `hotfixOf belongs to a bugfix Goal, not a ${goal.kind ?? 'feature'} one`);
     if (goal.kind === 'bugfix') {
-      if (goal.acceptance.length !== 1)
+      // A hotfix Goal opened without a Given/When/Then waits as a sketch until the PM revises it with its one criterion.
+      const waiting = goal.hotfixOf !== undefined && goal.acceptance.length === 0 && goal.checks.length === 0;
+      if (goal.acceptance.length !== 1 && !waiting)
         issue(
           ['acceptance'],
           `A bugfix Goal has exactly one acceptance criterion (it has ${goal.acceptance.length}): a bigger bug is an ordinary Goal`,

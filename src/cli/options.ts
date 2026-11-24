@@ -11,6 +11,8 @@ export type CliOptions = {
   codec?: SetupCodec;
   /** Where Human confirmations are asked; the real terminal by default. */
   io?: ConfirmIo;
+  /** The time a hotfix deadline is read at; `APOS_NOW` or the real clock by default. */
+  now?: () => string;
   write?: (line: string) => void;
   /** Diagnostics (warnings) that must not pollute stdout; defaults to stderr. */
   writeError?: (line: string) => void;

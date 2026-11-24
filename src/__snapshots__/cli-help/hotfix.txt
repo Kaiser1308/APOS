@@ -1,0 +1,31 @@
+Usage: apos hotfix [options] [command] [description]
+
+Human: let a fix through now without waiting for the gate; APOS records it,
+opens the bugfix Goal that owes the evidence, and flags it when overdue
+
+Arguments:
+  description          what is on fire, in a sentence
+
+Options:
+  --commit <sha>       the full sha of the hotfix commit the Human merges now
+  --before <sha>       the commit before the hotfix, where the bug must be
+                       reproduced (default: its only parent; required for a
+                       merge or root commit)
+  --due <duration>     when the evidence is due: 90m, 24h, 2d (default: "24h")
+  --given <text>       the situation the bug shows in (with --when and --then
+                       the Goal is approved at once)
+  --when <text>        what is done
+  --then <text>        what should happen
+  --part <part>        the part of the setup the bug lives in (needed when the
+                       setup has several)
+  --repro-hint <path>  where the bug shows (a path); a hint for the Tester and
+                       the plan
+  --check <command>    the test command, only for a project with no approved
+                       setup
+  --on-behalf <text>   Human decision taken on the Human's explicit say-so
+                       elsewhere (recorded in the log)
+  -h, --help           display help for command
+
+Commands:
+  list                 every hotfix: has evidence, waiting, overdue or
+                       abandoned, its deadline and its Goal

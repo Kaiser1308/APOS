@@ -1,6 +1,6 @@
 # Example Goals
 
-Six small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
+Seven small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
 
 | Example | Stack | Goal |
 | --- | --- | --- |
@@ -9,6 +9,7 @@ Six small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow wi
 | `ts-bug` | TypeScript, vitest | A bug: the code `FREE0` (0% off) makes an order's total 0. Run by `npm run demo:bug` through `apos bug` |
 | `ts-maint` | TypeScript, vitest | A dependency upgrade that removes a finding: `fmt` 1.0.0 carries CVE-FMT-1; the Goal must reach a version without it and change nothing else. No network (the dependency is a folder in `vendor/`). Run by `npm run demo:maint` through `apos maintenance` |
 | `py-legacy` | Python, pytest | A repo with **no tests**: approved as low assurance, `pricing.py` captured by a `characterize` Goal, then tidied by a `refactor` Goal. Run by `npm run demo:legacy` |
+| `ts-hotfix` | TypeScript, vitest | Production is on fire: the code `FREE0` makes an order's total 0 (the `ts-bug` bug). The Human lets a fix through with `apos hotfix`; the Goal it opens must show a test red on the commit before the hotfix and green on a delivery that contains it. Run by `npm run demo:hotfix` |
 | `py-remove` | Python, pytest | A feature removed: the shop drops its coupons. The Goal's `removed` criterion names the two old tests that go with them; the gate lets exactly those disappear. Run by `npm run demo:remove` |
 
 Each example has:
@@ -79,3 +80,13 @@ Two notes. `ts-orders/repo/package-lock.json` is a stub with no packages: the de
 | `02-removes-one-too-many` | 01 | The removal, and a test nobody declared | `package submit`: red, `test missing: ...` names it |
 | `03-keeps-a-declared-test` | 01 | The removal, but a declared test is kept | `package submit`: red, `declared removed but still there` |
 | `04-removal` | 01 | The removal and exactly the two declared tests | `package submit`: green, verified |
+
+`ts-hotfix` is the hotfix story: `repo/` is the `ts-bug` repo, `hotfix.json` is what `apos hotfix` is given (the description, the Given/When/Then and `due`), there is no brief, Goal file or plan file, and these steps:
+
+| Patch | On top of | What it is | What APOS says |
+| --- | --- | --- | --- |
+| `00-hotfix` | the repo (on `main`) | The fix: a code change and no test. It is the commit the Human lets through | `apos hotfix`: refused without a Human, then recorded |
+| `00-green-test` | the commit before the hotfix | A test that is green on the bug | `tests submit`: refused, "test không tái hiện lỗi" |
+| `01-repro-test` | the commit before the hotfix | The reproduction: red on the bug | `tests submit`: locked |
+| `02-own-fix` | 01 | A fix of the Worker's own, not the hotfix | `package submit`: red, `APOS-HOTFIX fail` |
+| (merge) | 01 | The hotfix merged into the Tester's commit | `package submit`: green, verified |

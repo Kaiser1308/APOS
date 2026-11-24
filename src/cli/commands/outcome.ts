@@ -93,7 +93,7 @@ export function registerOutcome(ctx: CliContext): void {
       if (!flags.wait && !flags.since && !flags.json) {
         withJournal(journal => {
           // Same item set as --since, --wait and --json: gates A and B included, as in the UI's "Needs you" (#28).
-          const items = buildHumanInbox(journal);
+          const items = buildHumanInbox(journal, ctx.now());
           if (!items.length) write('Inbox is clean: nothing waits for the Human.');
           for (const item of items) write(`${item.goalId}\t${item.kind}\t${item.detail}`);
         });
@@ -103,7 +103,7 @@ export function registerOutcome(ctx: CliContext): void {
       const homeDir = options.home ?? controllerHome(repo());
       const timeoutMs = parseDurationMs(flags.timeout);
       const check = () => {
-        const current = filterInboxSince(buildHumanInbox(readOnlyRepo(homeDir)), flags.since);
+        const current = filterInboxSince(buildHumanInbox(readOnlyRepo(homeDir), ctx.now()), flags.since);
         return current.fresh.length ? current : undefined;
       };
       let hit = check();
@@ -113,7 +113,7 @@ export function registerOutcome(ctx: CliContext): void {
       if (!hit && flags.wait) {
         const snapshot = readOnlyRepo(homeDir);
         const goals = snapshot.listGoals();
-        const cursor = filterInboxSince(buildHumanInbox(snapshot), flags.since).cursor;
+        const cursor = filterInboxSince(buildHumanInbox(snapshot, ctx.now()), flags.since).cursor;
         const summary = goals.length ? goals.map(g => `${g.spec.id}:${g.status}`).join(', ') : 'no Goals';
         if (flags.json)
           write(
@@ -128,7 +128,7 @@ export function registerOutcome(ctx: CliContext): void {
         process.exitCode = 2;
         return;
       }
-      const result = hit ?? filterInboxSince(buildHumanInbox(readOnlyRepo(homeDir)), flags.since);
+      const result = hit ?? filterInboxSince(buildHumanInbox(readOnlyRepo(homeDir), ctx.now()), flags.since);
       process.exitCode = 0;
       if (flags.json) {
         write(JSON.stringify({ cursor: result.cursor, items: result.fresh }));

@@ -6,7 +6,7 @@ import { sourceDigest } from '../domain/gate.js';
 import { controllerHome } from '../store/event-log.js';
 import { ProjectJournal } from '../store/journal.js';
 import { newEvent } from '../app/events.js';
-import { currentTime } from './clock.js';
+import { clockOverride, currentTime } from './clock.js';
 import { confirmHuman, terminalIo, type HumanConfirmation } from './human-confirm.js';
 import type { CliOptions } from './options.js';
 
@@ -19,6 +19,8 @@ export type CliContext = {
   home(): string;
   /** The time deadlines are read at (`APOS_NOW` for a test or a demo): an ISO date. */
   now(): string;
+  /** The `APOS_NOW` that is overriding the clock, or undefined when the clock is the real one. */
+  clockOverride(): string | undefined;
   withJournal<T>(fn: (journal: ProjectJournal) => T): T;
   withJournalAsync<T>(fn: (journal: ProjectJournal) => Promise<T>): Promise<T>;
   /**
@@ -94,6 +96,7 @@ export function createContext(program: Command, options: CliOptions): CliContext
   const io = options.io ?? terminalIo();
   const assertHuman = (command: string, subject: string, onBehalf?: string) =>
     confirmHuman({ command, subject, onBehalf, io });
+  let warned = false;
   const home = () => options.home ?? controllerHome(repo());
   return {
     program,
@@ -102,7 +105,17 @@ export function createContext(program: Command, options: CliOptions): CliContext
     writeError,
     repo,
     home,
-    now: options.now ?? (() => currentTime()),
+    now:
+      options.now ??
+      (() => {
+        const set = clockOverride();
+        if (set && !warned) {
+          warned = true;
+          writeError(`APOS_NOW=${set}: đồng hồ bị ghi đè, chỉ dùng cho test/demo`);
+        }
+        return currentTime();
+      }),
+    clockOverride: () => (options.now ? undefined : clockOverride()),
     withJournal,
     withJournalAsync,
     assertHuman,

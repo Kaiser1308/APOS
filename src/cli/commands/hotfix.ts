@@ -116,6 +116,7 @@ export function registerHotfix(ctx: CliContext): void {
             due: flags.due,
             dueAt: link.dueAt,
             acceptedAt,
+            ...(ctx.clockOverride() ? { clockOverride: ctx.clockOverride() } : {}),
             by: confirmation.by,
             ...(confirmation.onBehalf ? { onBehalf: confirmation.onBehalf } : {}),
             confirmation,

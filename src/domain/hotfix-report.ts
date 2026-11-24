@@ -15,6 +15,8 @@ export type HotfixEvidence = {
   proof?: { test: string; delivery: string };
   /** What L0 and L1 said on the hotfix commit, or why they did not run. */
   gate: string;
+  /** The `APOS_NOW` the hotfix was accepted under: its deadline follows a clock set by hand. */
+  clockOverride?: string;
   /** `hotfix đỏ ở L1` when a layer was red there, else empty. */
   red: string;
   /** The Goal was stopped: the hotfix stays without evidence for good. */
@@ -46,6 +48,7 @@ export function hotfixEvidence(
     gate: ran || item.gateNote || 'L0 và L1 chưa chạy trên hotfix',
     red: redNote(item),
     abandoned: state.status === 'stopped',
+    ...(item.clockOverride ? { clockOverride: item.clockOverride } : {}),
   };
 }
 
@@ -57,7 +60,7 @@ export function hotfixLines(evidence: HotfixEvidence, label: (text: string) => s
       ? `chưa có bằng chứng: Goal đã bị huỷ, hotfix này mãi chưa có bằng chứng (hạn ${evidence.dueAt})`
       : `chưa có bằng chứng, hạn ${evidence.dueAt}${evidence.status === 'overdue' ? ' (QUÁ HẠN)' : ''}`;
   return [
-    `${label('Hotfix')}${head}; ${tail}`,
+    `${label('Hotfix')}${head}; ${tail}${evidence.clockOverride ? ' (hạn tính theo đồng hồ ghi đè)' : ''}`,
     `${label('Gate trên hotfix')}${evidence.gate}${evidence.red ? ` (${evidence.red})` : ''} (chỉ ghi, không chặn)`,
   ];
 }

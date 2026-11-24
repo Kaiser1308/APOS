@@ -53,6 +53,8 @@ export const hotfixAcceptedSchema = z.object({
   acceptedAt: z.string().min(1),
   by: z.enum(['human', 'on-behalf']),
   onBehalf: z.string().optional(),
+  /** The `APOS_NOW` the Human's command ran under: `acceptedAt` and the deadline then follow a clock that was set by hand. */
+  clockOverride: z.string().optional(),
   confirmation: z.unknown().optional(),
 });
 /** Data of `hotfix-gated`: the layers run on the hotfix commit, or why none ran. */

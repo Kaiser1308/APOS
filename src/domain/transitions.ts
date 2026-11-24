@@ -866,6 +866,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           acceptedAt: data.acceptedAt,
           by: data.by,
           ...(data.onBehalf ? { onBehalf: data.onBehalf } : {}),
+          ...(data.clockOverride ? { clockOverride: data.clockOverride } : {}),
         },
       };
     }

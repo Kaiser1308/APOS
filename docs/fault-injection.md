@@ -272,6 +272,7 @@ A Goal with a `removed` criterion may lose the tests it declared (`removesTests`
 | The Goal is closed with a green gate (focus 5) | the hotfix is `có bằng chứng`, its lines and the count go away, the table says the test, red on the commit before and green with the hotfix | `hotfix-evidence.test.ts` › goes green only on a delivery that contains the hotfix commit …; `npm run demo:hotfix` |
 | The Goal is stopped (`outcome stop`) (focus 5) | the overdue line goes, the count stays, `hotfix list` says `bỏ dở`, the table says the hotfix stays without evidence for good | `hotfix-inbox.test.ts` › a hotfix that is stopped … |
 | L0 or L1 is red on the hotfix commit (focus 6) | recorded in `hotfix-gated`, the hotfix is accepted all the same; the inbox line adds `hotfix đỏ ở L1` | `hotfix.test.ts` › says in the log when L1 is red on the hotfix, and does not hold the hotfix up; `hotfix-inbox.test.ts` › adds "hotfix đỏ ở L1" … |
+| `APOS_NOW` is set (a clock overridden by hand) | every command that reads it warns on stderr, once; `apos hotfix` records `clockOverride` in `hotfix-accepted`, and the table of the Goal says `hạn tính theo đồng hồ ghi đè` | `clock-override.test.ts` |
 | The project has no approved setup, or another gate holds the lease | the hotfix is accepted; the log says L0 and L1 did not run, and why | `hotfix.test.ts` › takes the check from --check when the project has no setup, and says no layer ran |
 
 ## What the table does not claim (v3.2 T0, #50)

@@ -106,6 +106,9 @@ export function inventoryCheck(input: {
     if (now === undefined) problems.push(`test missing: ${key}`);
     else if (now === 'skip') problems.push(`test now skipped: ${key}`);
   }
+  // A declared file or test that reports a test the base did not have (a renamed one, another parameterization) is still there.
+  for (const key of Object.keys(input.delivery))
+    if (!(key in input.base) && isDeclared(key)) problems.push(`declared removed but still there: ${key}`);
   for (const item of declared)
     if (!Object.keys(input.base).some(key => entryMatches(item.entry, key)))
       problems.push(`declared removed but not on the base: ${item.entry}`);

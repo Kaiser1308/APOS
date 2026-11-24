@@ -117,6 +117,15 @@ describe('inventoryCheck with declared removals', () => {
     expect(check.reason).toBe('declared removed but still there: app.L1::tests.old::a');
     expect(run({ ...delivery, 'app.L1::tests.old::a': 'skip' }).reason).toMatch(/still there: app.L1::tests.old::a/);
   });
+  it('is red for a test under a declared file that the base did not have: a rename does not remove it (Codex)', () => {
+    const check = run({
+      'app.L1::tests.old::renamed': 'pass',
+      'app.L1::tests.keep::c': 'pass',
+      'app.L1::tests.keep::d': 'pass',
+    });
+    expect(check.status).toBe('fail');
+    expect(check.reason).toBe('declared removed but still there: app.L1::tests.old::renamed');
+  });
   it('is red for a declared test the base does not have', () => {
     const check = run(
       { 'app.L1::tests.keep::c': 'pass', 'app.L1::tests.keep::d': 'pass' },

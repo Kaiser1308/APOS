@@ -2,6 +2,7 @@ import { entryViolations } from '../domain/entry-rule.js';
 import { matchesAny, rootedGlobs } from '../domain/glob.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 import { goalKind } from '../domain/contracts.js';
+import { removalOf } from '../domain/removal.js';
 import { acceptanceProof, needsTest } from '../domain/test-plan.js';
 import {
   countAsserts,
@@ -184,6 +185,7 @@ export function inspectTests(input: InspectInput): Inspection {
         outcomes,
         bugfix,
         characterize,
+        declared: removalOf(state.spec).map(item => item.entry),
         patterns: Object.fromEntries(
           Object.entries(setup.parts).map(([name, part]) => [
             name,

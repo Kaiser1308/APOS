@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InvariantError } from './errors.js';
+import { entryMatches } from './removal-match.js';
 import type { TestOutcome } from './results/index.js';
 import type { GoalEvent, GoalState } from './transitions.js';
 
@@ -129,6 +130,8 @@ export function judgeSuite(input: {
   bugfix?: boolean;
   /** A characterize test captures what the code does: it must be green on it as it is. */
   characterize?: boolean;
+  /** The tests the Goal declares removed (`<part>.<layer>::<id>`): a test of absence may not share a file with one. */
+  declared?: string[];
 }): string[] {
   const problems: string[] = [];
   const loadBroken = new Set<string>();
@@ -149,6 +152,19 @@ export function judgeSuite(input: {
     const proof = input.proofOf(entry.acceptanceId);
     for (const id of entry.testIds) {
       const label = `${entry.acceptanceId} ${entry.part}.${entry.layer} ${id}`;
+      if (proof === 'removed') {
+        // Locking the file would lock the old tests with it, and the Worker could neither keep them nor delete them.
+        const prefix = id.split('::')[0];
+        const shares = (outcome?.tests ?? []).some(
+          other =>
+            other.id.split('::')[0] === prefix &&
+            (input.declared ?? []).some(item => entryMatches(item, testKey(entry.part, entry.layer, other.id))),
+        );
+        if (shares)
+          problems.push(
+            `${label}: this test of absence is in a file that holds a test the Goal declares removed: put it in a file of its own, or the old tests would be locked with it`,
+          );
+      }
       const test = outcome?.tests.find(item => item.id === id);
       if (!test) {
         problems.push(

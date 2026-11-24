@@ -1,5 +1,8 @@
 import type { GoalSpec } from './contracts.js';
+import { entryMatches } from './removal-match.js';
 import { testKey, type TestLock } from './test-lock.js';
+
+export { entryMatches };
 
 /** One old test (or file of tests) a criterion of the Goal says goes away. */
 export type RemovedTest = { acceptanceId: string; entry: string };
@@ -11,13 +14,6 @@ export const removalOf = (goal: GoalSpec): RemovedTest[] =>
 /** The declared tests of the given criteria only: a package answers for its own. */
 export const removalEntries = (goal: GoalSpec, acceptanceIds: string[]): RemovedTest[] =>
   removalOf(goal).filter(item => acceptanceIds.includes(item.acceptanceId));
-
-/**
- * Whether a declared test covers a test key (`<part>.<layer>::<id>`): the same id, every test of a file (`<file>::<name>`),
- * a repeated id (`#2`) or a parametrized one (`name[...]`). A neighbour that merely starts with the same letters is not covered.
- */
-export const entryMatches = (entry: string, key: string): boolean =>
-  key === entry || ['::', '#', '['].some(next => key.startsWith(entry + next));
 
 /**
  * Why a Goal's removed tests cannot be approved against a base: the layer is not one the base ran, or the declared test

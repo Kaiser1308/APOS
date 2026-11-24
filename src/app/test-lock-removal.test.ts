@@ -41,4 +41,16 @@ describe('locking the test of absence of a removed feature', () => {
     expect(result.ok ? '' : result.problems.join('\n')).toMatch(/src\/stub.txt: removal: the Tester adds tests only/);
     expect(p.state().testLock).toBeUndefined();
   }, 60_000);
+
+  it('refuses a test of absence that sits in a file with a declared old test: the old tests would be locked with it (Codex)', async () => {
+    const goal = removalGoal(['app.L2::tests.acceptance.nocoupon::old']);
+    const p = await testingProject({ goal, setup: setupDocument, files: baseFiles });
+    const shared = p.commit(
+      { ...absenceTests(p.goalId), 'tests/acceptance/nocoupon.t': 'case absent gone coupon\ncase old pass\n' },
+      'one file for both',
+    );
+    const result = await p.service.submit(p.goalId, shared, 'tester');
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.problems.join('\n')).toMatch(/put it in a file of its own/);
+  }, 60_000);
 });

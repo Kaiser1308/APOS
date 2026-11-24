@@ -1,6 +1,6 @@
-# Demo: six example stories, run for real
+# Demo: seven example stories, run for real
 
-`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug`, `npm run demo:maint`, `npm run demo:legacy` and `npm run demo:remove` copy an example from `examples/` to a temp directory, `git init` it and drive the **real** APOS binary (`dist/cli.js`, so run `npm run build` first) with a real test runner (vitest, pytest). Every step prints the command, its exit code and what APOS said, and checks the exit code it expected; a surprise exits 1. A machine without a tool the example needs (`git`, `npx`/vitest, `python`/pytest) stops at once with exit 2 and names it: the script never reports a pass it did not see. `--keep` leaves the temp directory in place. See `examples/README.md` for the files of an example.
+`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug`, `npm run demo:maint`, `npm run demo:legacy`, `npm run demo:remove` and `npm run demo:hotfix` copy an example from `examples/` to a temp directory, `git init` it and drive the **real** APOS binary (`dist/cli.js`, so run `npm run build` first) with a real test runner (vitest, pytest). Every step prints the command, its exit code and what APOS said, and checks the exit code it expected; a surprise exits 1. A machine without a tool the example needs (`git`, `npx`/vitest, `python`/pytest) stops at once with exit 2 and names it: the script never reports a pass it did not see. `--keep` leaves the temp directory in place. See `examples/README.md` for the files of an example.
 
 The story, in order: setup draft, probe, approve; Goal create, approve, select; the Lead proposes and commits a plan; the Tester submits the acceptance tests (locked); a delivery that edits a locked test is red; a delivery with wrong code is red; the right code is green; a reviewer blocks with a red test; the final fix (the review's test is now locked and green) is green; the Human closes the Goal; `goal show` prints the assurance table.
 
@@ -712,4 +712,122 @@ GOAL-001  setup v1  (app: python)
   Giới hạn           xác nhận Human chỉ chống duyệt nhầm, chưa phải ranh giới bảo mật; --by agent:<x> là tự khai; APOS chứng minh code đạt tiêu chí đã duyệt, không chứng minh tiêu chí hay bộ test là đủ (README.md, mục "What the evidence does not prove")
 
 demo py-remove: every step ended as expected.
+```
+
+## A hotfix (`ts-hotfix`: the same `FREE0` bug, but production is on fire)
+
+`npm run demo:hotfix` is the bug story told when the Human cannot wait for a gate. The Human lets a fix through with `apos hotfix`, and APOS makes sure the evidence arrives. The story: setup; the hotfix commit lands on `main` (it changes `src/orders.ts`, with no test); `apos hotfix` with no confirmation is refused, because it is a Human command; with `--on-behalf demo` it is recorded, L1 runs on the commit and the bugfix Goal is opened, approved and selected with the same confirmation; the inbox shows the hotfix waiting, with an absolute deadline; with the clock set a day ahead (`APOS_NOW`, which only `hotfix`, `hotfix list`, `inbox` and `goal show` read) the inbox turns red; the Lead plans from the commit **before** the hotfix; a test that is green there is refused; one that is red there is locked; a Worker's fix of their own, which does not contain the hotfix commit, is red (`APOS-HOTFIX`); the Tester's commit with the hotfix merged in is green and the Goal is verified; the Human closes it; `hotfix list` says `có bằng chứng`, and the table says who let the commit through and which test was red before it and green with it. The commit ids change from run to run. Output as printed:
+
+```text
+demo ts-hotfix: working in <tmp> (a temp directory; --keep leaves it)
+
+# init the project
+$ apos init  # exit 0
+Initialized <repo>
+
+# draft the setup from the catalog
+$ apos setup draft  # exit 0
+Wrote .apos/project.yaml: app
+Not committed. Edit it, commit it, then: apos setup probe --commit <sha>
+
+# probe every tool of the setup in a clean worktree
+$ apos setup probe --commit bd8c51f945  # exit 0
+ok   app.L1 vitest: 2 tests, stable over 2 runs
+ok   app.L2 vitest-acceptance: 1 tests, runOne ok, stable over 2 runs
+ok   app.L3 vitest-integration: 1 tests, runOne ok
+ok   app.tests patterns: 13 patterns compile; tests under **/*.test.ts, **/*.spec.ts, tests/**
+setup ed636e173052 at bd8c51f94523: probe passed
+
+# the Human approves the probed setup
+$ apos setup approve --commit bd8c51f945 --on-behalf demo  # exit 0
+Approved setup v1 (ed636e173052) at bd8c51f94523
+
+# an agent with no terminal and no --on-behalf runs apos hotfix: it is a Human command, so it is refused
+$ apos hotfix Production: an order's total is 0 when the customer types the code FREE0, so the shop gives its goods away --commit 0c0c7432d5 --due 24h --given a cart of 40 and the discount code FREE0 (0% off) --when the total of the order is computed --then the total is 40: a 0% code takes nothing off  # exit 1
+hotfix is a Human decision: confirm in an interactive terminal or pass --on-behalf "<why>"
+
+# nothing was recorded
+$ apos hotfix list  # exit 0
+No hotfix yet.
+
+# the Human lets the hotfix through (the demo says so with --on-behalf): recorded, L1 runs on it, the Goal is opened and approved
+$ apos hotfix Production: an order's total is 0 when the customer types the code FREE0, so the shop gives its goods away --commit 0c0c7432d5 --due 24h --given a cart of 40 and the discount code FREE0 (0% off) --when the total of the order is computed --then the total is 40: a 0% code takes nothing off --on-behalf demo  # exit 0
+Hotfix 0c0c743 accepted: merge it now (APOS merges nothing). Goal GOAL-BUG-001 (bugfix) owes the evidence.
+Evidence due: 2026-11-25T08:00:00.000Z (24h); the bug is reproduced on bd8c51f
+  hotfix app.L1 vitest: pass
+Approved and selected GOAL-BUG-001 on setup v1 (S, 60 min, 3 attempts) (duyệt gộp bằng hotfix)
+Next: the Lead plans it with `apos lead propose --bugfix --goal GOAL-BUG-001`
+
+# the inbox shows the hotfix as waiting for its evidence, with the absolute deadline
+$ apos inbox  # exit 0
+GOAL-BUG-001	notice	{"kind":"hotfix-waiting","note":"hotfix 0c0c743 đang chờ bằng chứng, hạn 2026-11-25T08:00:00.000Z"}
+PROJECT	notice	{"kind":"hotfix-unproven","count":1,"note":"hotfix chưa có bằng chứng: 1"}
+
+# a day later the hotfix is overdue and the inbox says so, in red
+$ apos inbox  # exit 0
+GOAL-BUG-001	needs-decision	{"why":"hotfix-overdue","note":"hotfix 0c0c743 quá hạn 2026-11-25T08:00:00.000Z, chưa có bằng chứng"}
+PROJECT	notice	{"kind":"hotfix-unproven","count":1,"note":"hotfix chưa có bằng chứng: 1"}
+
+# the Lead plans it: base is the commit before the hotfix, paths are the files the hotfix changed
+$ apos lead propose --bugfix --goal GOAL-BUG-001  # exit 0
+Proposed EXEC-BUG-001
+
+# the Lead commits the plan: the Goal waits for the reproduction test
+$ apos lead commit GOAL-BUG-001  # exit 0
+Accepted GOAL-BUG-001. Next the tester writes the acceptance tests and stubs: `apos tests submit GOAL-BUG-001 --commit <sha>`. Packages open once they are locked.
+
+# a Tester hands over a test that is green on the commit before the hotfix: it does not reproduce the bug, so it is refused
+$ apos tests submit GOAL-BUG-001 --commit 0aff6b1dce  # exit 1
+tests refused on 0aff6b1dce2b9de9c8f433bf062a5280a04dba62: nothing is locked
+  AC-1 app.L2 src/orders.acceptance.test.ts::AC-1: the code FREE0 takes nothing off the total: the test does not reproduce the bug (test không tái hiện lỗi): it is already green on the current code. Make it fail on the bug, for the reason in the bug report
+
+# the Tester hands over a test that is red on the commit before the hotfix: it is locked
+$ apos tests submit GOAL-BUG-001 --commit ef4c65a5c7  # exit 0
+Locked 1 tests in 1 files on ef4c65a5c7da6b57dcb15ebc05a1c4275fdbdfe6. Packages are gated on top of this commit.
+
+# a Worker delivers a fix of their own instead of the hotfix: the evidence is not about the code in production, so it is red
+$ apos package submit GOAL-BUG-001 WP-MAIN --commit 14bf14adc9  # exit 1
+WP-MAIN red on 14bf14adc9f8f0d59fbfae0e115decc9b2b4f800
+  APOS-HOTFIX fail: the delivery does not contain the hotfix commit 0c0c7432d574a16d9dc203acbdb5c9992cd5993f: the evidence must be the hotfix plus the tests, so build the delivery on it (merge the hotfix into the tests commit)
+  needs attention: declared risks: The test passes for another reason than the bug, or the fix reaches past the bug
+
+# the delivery is the Tester’s commit with the hotfix merged in: the locked test is green on it, the Goal is verified
+$ apos package submit GOAL-BUG-001 WP-MAIN --commit b4181498f2  # exit 0
+WP-MAIN green on b4181498f28cc12b2c89f39f3333026c1e5c006d; GOAL-BUG-001 verified
+  needs attention: declared risks: The test passes for another reason than the bug, or the fix reaches past the bug
+
+# the Human closes the Goal on the commit that passed the gate
+$ apos outcome close GOAL-BUG-001 --on-behalf demo  # exit 0
+Close-stage layers green on b4181498f28cc12b2c89f39f3333026c1e5c006d
+close GOAL-BUG-001
+
+# every hotfix, with its state
+$ apos hotfix list  # exit 0
+GOAL-BUG-001	có bằng chứng	0c0c743	hạn 2026-11-25T08:00:00.000Z	Production: an order's total is 0 when the customer types the code FREE0, so the shop gives its goods away
+hotfix chưa có bằng chứng: 0
+
+# the table says who let the hotfix through and which test is red before it and green with it
+$ apos goal show GOAL-BUG-001  # exit 0
+GOAL-BUG-001	closed	Production: an order's total is 0 when the customer types the code FREE0, so the shop gives its goods away
+setup v1
+khoá test: commit ef4c65a5c7da6b57dcb15ebc05a1c4275fdbdfe6, 1 test, 1 file, 1 assert (đếm dòng, chỉ gần đúng)
+
+GOAL-BUG-001  setup v1  (app: typescript)
+  Tiêu chí           1   máy chứng minh 1 · anh xác nhận tay 0
+  Test đã khoá       L2 1
+  Kiểm kê / phạm vi  bật
+  Lớp khâu submit    WP-MAIN: L1 vitest ✓ · L2 vitest-acceptance ✓
+  Lớp khâu đóng      L1 vitest ✓ · L2 vitest-acceptance ✓ · L3 vitest-integration ✓
+  Lỗi                lỗi được tái hiện bằng test app.L2::src/orders.acceptance.test.ts::AC-1: the code FREE0 takes nothing off the total: đỏ trên bd8c51f, xanh trên b418149
+  Hotfix             hotfix 0c0c743 chấp nhận khẩn cấp bởi on-behalf:demo lúc 2026-11-24T08:00:00.000Z; lỗi được tái hiện bằng test app.L2::src/orders.acceptance.test.ts::AC-1: the code FREE0 takes nothing off the total: đỏ trên bd8c51f, xanh trên 0c0c743 (bản giao b418149 chứa hotfix)
+  Gate trên hotfix   app.L1 vitest ✓ (chỉ ghi, không chặn)
+  Duyệt              duyệt gộp bằng hotfix (on-behalf:demo)
+  Agent duyệt thay   0 chỗ
+  Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L4 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Tắt / chưa kiểm    L5 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Giới hạn           xác nhận Human chỉ chống duyệt nhầm, chưa phải ranh giới bảo mật; --by agent:<x> là tự khai; APOS chứng minh code đạt tiêu chí đã duyệt, không chứng minh tiêu chí hay bộ test là đủ (README.md, mục "What the evidence does not prove")
+
+demo ts-hotfix: every step ended as expected.
 ```

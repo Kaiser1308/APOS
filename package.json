@@ -16,6 +16,7 @@
     "demo:maint": "npm run build && node scripts/demo-goal.mjs ts-maint",
     "demo:legacy": "npm run build && node scripts/demo-goal.mjs py-legacy",
     "demo:remove": "npm run build && node scripts/demo-goal.mjs py-remove",
+    "demo:hotfix": "npm run build && node scripts/demo-goal.mjs ts-hotfix",
     "skills:check": "node scripts/promote-skills.mjs --check",
     "skills:promote": "node scripts/promote-skills.mjs",
     "format": "prettier --write .",

@@ -77,15 +77,24 @@ export function bugPart(setup: ProjectSetup, asked?: string): string {
 }
 
 /** The Goal of a bug report: one requirement, one red-green criterion, one check, a scope the hint or the part names. */
-export function bugGoalSpec(input: { id: string; report: BugReport; check: BugCheck; now: string }): GoalSpec {
+export function bugGoalSpec(input: {
+  id: string;
+  report: BugReport;
+  check: BugCheck;
+  now: string;
+  /** `apos hotfix`: the source of the Goal is the hotfix report, and the Goal is linked to the commit let through. */
+  sourceText?: string;
+  hotfixOf?: GoalSpec['hotfixOf'];
+}): GoalSpec {
   const { id, report, check } = input;
-  const text = bugSourceText(report);
+  const text = input.sourceText ?? bugSourceText(report);
   return parseGoalSpec({
     id,
     version: 1,
     kind: 'bugfix',
     ...(report.reproHint ? { reproHint: report.reproHint } : {}),
     ...(report.part ? { part: report.part } : {}),
+    ...(input.hotfixOf ? { hotfixOf: input.hotfixOf } : {}),
     outcome: report.description,
     source: { path: 'bug-report', sha256: sourceDigest(text), capturedAt: input.now, origin: 'human' },
     requirements: [{ id: 'R-1', sourceSpan: 'bug report', text: report.description, disposition: 'acceptance' }],
@@ -125,6 +134,8 @@ export function bugfixProposal(input: {
   baseCommit: string;
   root?: string;
   stubs: string[];
+  /** A hotfix Goal: the files the hotfix changed, which the delivery may change and nothing else (they replace the part's root). */
+  paths?: string[];
 }): ExecutionProposal {
   const { goal, root } = input;
   const stubs = input.stubs.length ? input.stubs : goal.reproHint ? [goal.reproHint] : [];
@@ -144,7 +155,11 @@ export function bugfixProposal(input: {
     risks: ['The test passes for another reason than the bug, or the fix reaches past the bug'],
     baseCommit: input.baseCommit,
     sourceSha256: goal.source.sha256,
-    ...(root === undefined ? {} : { paths: [root === '.' ? '**' : `${root}/**`] }),
+    ...(input.paths
+      ? { paths: input.paths }
+      : root === undefined
+        ? {}
+        : { paths: [root === '.' ? '**' : `${root}/**`] }),
     stubPaths: stubs,
     acceptanceMapping: goal.acceptance.map(item => ({
       acceptanceId: item.id,

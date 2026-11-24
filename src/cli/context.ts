@@ -6,6 +6,7 @@ import { sourceDigest } from '../domain/gate.js';
 import { controllerHome } from '../store/event-log.js';
 import { ProjectJournal } from '../store/journal.js';
 import { newEvent } from '../app/events.js';
+import { currentTime } from './clock.js';
 import { confirmHuman, terminalIo, type HumanConfirmation } from './human-confirm.js';
 import type { CliOptions } from './options.js';
 
@@ -16,6 +17,8 @@ export type CliContext = {
   writeError(line: string): void;
   repo(): string;
   home(): string;
+  /** The time deadlines are read at (`APOS_NOW` for a test or a demo): an ISO date. */
+  now(): string;
   withJournal<T>(fn: (journal: ProjectJournal) => T): T;
   withJournalAsync<T>(fn: (journal: ProjectJournal) => Promise<T>): Promise<T>;
   /**
@@ -99,6 +102,7 @@ export function createContext(program: Command, options: CliOptions): CliContext
     writeError,
     repo,
     home,
+    now: options.now ?? (() => currentTime()),
     withJournal,
     withJournalAsync,
     assertHuman,

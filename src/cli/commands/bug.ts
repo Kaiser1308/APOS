@@ -1,18 +1,8 @@
 import { newEvent } from '../../app/events.js';
-import {
-  BUG_APPETITE,
-  BUG_APPROVE_VIA,
-  type BugCheck,
-  bugCheckFromSetup,
-  bugGoalSpec,
-  bugPart,
-  bugSourceText,
-  nextBugId,
-} from '../../domain/bugfix.js';
-import { UserError } from '../../domain/errors.js';
+import { BUG_APPETITE, BUG_APPROVE_VIA, bugGoalSpec, bugSourceText, nextBugId } from '../../domain/bugfix.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import { approveInOneGo } from '../combined-approval.js';
-import { pinnedSetupOf } from '../test-lock-wiring.js';
+import { bugCheckOf } from '../bug-check.js';
 import type { CliContext } from '../context.js';
 
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
@@ -38,24 +28,7 @@ export function registerBug(ctx: CliContext): void {
         flags: { given: string; when: string; then: string; reproHint?: string; part?: string; check?: string },
       ) =>
         withJournal(journal => {
-          const version = journal.setupHistory().approvals.at(-1)?.version;
-          const setup = pinnedSetupOf(ctx, journal, version);
-          let part = flags.part;
-          let check: BugCheck;
-          if (setup) {
-            if (flags.check)
-              throw new UserError(
-                '--check is for a project with no approved setup: here the check comes from the setup (change the setup to change it)',
-              );
-            part = bugPart(setup, flags.part);
-            check = bugCheckFromSetup(setup, part);
-          } else {
-            if (!flags.check)
-              throw new UserError(
-                'this project has no approved setup: pass --check "<test command>" (or `apos setup draft`, probe and approve one)',
-              );
-            check = { command: flags.check };
-          }
+          const { part, check } = bugCheckOf(ctx, journal, flags);
           const report = {
             description,
             given: flags.given,

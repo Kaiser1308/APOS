@@ -10,6 +10,13 @@ import {
 } from './contracts.js';
 import { BUG_APPROVE_VIA } from './bugfix.js';
 import { MAINT_APPROVE_VIA } from './maintenance.js';
+import {
+  HOTFIX_APPROVE_VIA,
+  hotfixAcceptedSchema,
+  hotfixGatedSchema,
+  sameHotfix,
+  type HotfixRecord,
+} from './hotfix.js';
 import { attemptKey, type GateReport, type ManualConfirmation } from './gate.js';
 import { parseWorkPackage, validatePackageGraph, type WorkPackageSpec } from './packages.js';
 import { parseReview, type ReviewRecord } from './reviews.js';
@@ -59,6 +66,8 @@ export const GOAL_EVENT_TYPES = [
   'tests-revision-pending',
   'exception-approved',
   'close-gate-recorded',
+  'hotfix-accepted',
+  'hotfix-gated',
 ] as const;
 export type GoalEventType = (typeof GOAL_EVENT_TYPES)[number];
 const WRITABLE: ReadonlySet<string> = new Set(GOAL_EVENT_TYPES);
@@ -129,7 +138,9 @@ export type GoalState = {
   /** The layers the setup this Goal is pinned to had no tests in (it was approved with `--baseline-missing`): the Goal is low assurance. */
   baselineMissing?: string[];
   /** Set when `bug approve` gave gate A, the appetite and gate B in one go: who confirmed, for the assurance table. */
-  bugApproval?: { by: string; onBehalf?: string };
+  bugApproval?: { by: string; onBehalf?: string; via?: string };
+  /** The hotfix this Goal answers for (`apos hotfix`): who let the commit through, by when the evidence is due, what L0 and L1 said. It outlives a revision of the Goal. */
+  hotfix?: HotfixRecord;
   /** The same for `maintenance approve`. */
   maintenanceApproval?: { by: string; onBehalf?: string };
   selected: boolean;
@@ -373,6 +384,9 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
         ...(Array.isArray(missing) ? { baselineMissing: missing as string[] } : {}),
         status: 'approved',
         ...(data?.via === BUG_APPROVE_VIA ? { bugApproval: confirmationOf(data.confirmation) } : {}),
+        ...(data?.via === HOTFIX_APPROVE_VIA
+          ? { bugApproval: { ...confirmationOf(data.confirmation), via: HOTFIX_APPROVE_VIA } }
+          : {}),
         ...(data?.via === MAINT_APPROVE_VIA ? { maintenanceApproval: confirmationOf(data.confirmation) } : {}),
         approvedGoalVersion: state.spec.version,
         appetite: parseAppetite(data?.appetite),
@@ -386,7 +400,11 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       const spec = parseGoalSpec(event.data);
       requireThat(spec.id === state.spec.id && spec.version > state.spec.version, 'Goal revision must advance version');
       requireThat(goalKind(spec) === goalKind(state.spec), 'A Goal revision cannot change the kind of the Goal');
-      return fresh(spec, state.appetite);
+      requireThat(
+        sameHotfix(spec.hotfixOf, state.spec.hotfixOf),
+        'A Goal revision cannot add, drop or change the hotfix the Goal answers for',
+      );
+      return { ...fresh(spec, state.appetite), ...(state.hotfix ? { hotfix: state.hotfix } : {}) };
     }
     case 'appetite-set': {
       const data = event.data as { appetite?: unknown; reason?: unknown };
@@ -818,6 +836,7 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       requireThat(state.status === 'verified', 'Technical verification required');
       return {
         ...fresh(state.spec, state.appetite),
+        ...(state.hotfix ? { hotfix: state.hotfix } : {}),
         findings: [],
         manualConfirmations: [],
       };
@@ -828,6 +847,36 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
       return applyTestLockEvent(state, event);
     case 'exception-approved':
       return applyException(state, event);
+    case 'hotfix-accepted': {
+      const data = hotfixAcceptedSchema.parse(event.data);
+      const link = state.spec.hotfixOf;
+      requireThat(
+        link && link.commit === data.commit && link.before === data.before && link.dueAt === data.dueAt,
+        'A hotfix is accepted for the commit its Goal is linked to',
+      );
+      requireThat(!state.hotfix, 'The hotfix of this Goal is already accepted');
+      return {
+        ...state,
+        hotfix: {
+          commit: data.commit,
+          before: data.before,
+          description: data.description,
+          due: data.due,
+          dueAt: data.dueAt,
+          acceptedAt: data.acceptedAt,
+          by: data.by,
+          ...(data.onBehalf ? { onBehalf: data.onBehalf } : {}),
+        },
+      };
+    }
+    case 'hotfix-gated': {
+      const data = hotfixGatedSchema.parse(event.data);
+      requireThat(state.hotfix?.commit === data.commit, 'Layers are recorded for the accepted hotfix commit');
+      return {
+        ...state,
+        hotfix: { ...state.hotfix!, layers: data.layers, ...(data.note ? { gateNote: data.note } : {}) },
+      };
+    }
     case 'close-gate-recorded': {
       const gate = event.data as GateReport | undefined;
       requireThat(state.status === 'verified' && state.verifiedCommit, 'The close stage runs on a verified Goal');

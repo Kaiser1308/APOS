@@ -6,6 +6,7 @@ import type { GoalState } from '../domain/transitions.js';
 import type { ProjectJournal } from '../store/journal.js';
 import { approvalSetupVersion, baselineMissingOf } from './goal-approval.js';
 import type { CliContext } from './context.js';
+import type { HumanConfirmation } from './human-confirm.js';
 
 export type CombinedApproval = {
   id: string;
@@ -16,6 +17,8 @@ export type CombinedApproval = {
   appetite: { size: string; maxWallMinutes: number; maxAttempts: number; overrun: string };
   flags: string[];
   onBehalf?: string;
+  /** A confirmation the caller already has (`apos hotfix` asked once for the hotfix and this approval): not asked again. */
+  confirmed?: HumanConfirmation;
   /** Looked at before the first event, with the setup version the Goal would be pinned to: what else refuses the approval. */
   problems?: (state: GoalState, setupVersion: number | undefined) => string[];
 };
@@ -48,7 +51,7 @@ export async function approveInOneGo(
   const setupVersion = approvalSetupVersion(ctx, journal, id, 'latest', input.flags);
   const extra = input.problems?.(state, setupVersion) ?? [];
   if (extra.length) throw new UserError(`${id} cannot be approved:\n- ${extra.join('\n- ')}`);
-  const confirmation = await ctx.assertHuman(command, id, input.onBehalf);
+  const confirmation = input.confirmed ?? (await ctx.assertHuman(command, id, input.onBehalf));
   registry.approve(
     id,
     appetite,

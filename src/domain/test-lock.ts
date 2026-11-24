@@ -167,7 +167,7 @@ export function judgeSuite(input: {
           );
       } else if (
         proof === 'removed' &&
-        (test.status === 'error' || !failedAnAssertion(test.message, input.patterns[entry.part]))
+        (test.status === 'error' || !failedAnAssertion(test.message, input.patterns[entry.part], test.failureType))
       )
         problems.push(
           `${label}: a test that says the feature is gone must fail on an assertion while it is still there, and it ${test.status === 'error' ? 'errored' : 'raised'}: ${firstLine(test.message) || 'no message'}. Import the code that stays and call the entry the feature was reached by; an import, attribute or type error says nothing about the feature`,
@@ -201,8 +201,11 @@ export function judgeSuite(input: {
 export function failedAnAssertion(
   message: string | undefined,
   where: { notImplemented: string[]; loadError: string[] } | undefined,
+  failureType?: string,
 ): boolean {
   if (matchesAnyPattern(message, [...(where?.loadError ?? []), ...(where?.notImplemented ?? [])])) return false;
+  // A runner that says the exception class (vitest, Surefire) is believed over the wording of the message.
+  if (failureType) return /Assert/.test(failureType);
   const line = firstLine(message);
   // Jest words a failed assertion as `Error: expect(received).toBe(expected)`.
   if (/^\s*(?:Error:\s*)?expect\(/.test(line)) return true;

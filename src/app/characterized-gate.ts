@@ -2,7 +2,8 @@ import { characterizedCheck } from '../domain/characterized.js';
 import type { TestSet } from '../domain/assurance.js';
 import type { CheckResult } from '../domain/gate.js';
 import { characterizations, refactorCoverage, type Characterization, type Coverage } from '../domain/legacy.js';
-import { removalOf, withoutRemoved } from '../domain/removal.js';
+import { entryMatches, removalOf, withoutRemoved, type RemovedTest } from '../domain/removal.js';
+import { testKey } from '../domain/test-lock.js';
 import { effectiveStatus, type GoalState } from '../domain/transitions.js';
 import { rootedGlobs, matchesAny } from '../domain/glob.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
@@ -48,6 +49,29 @@ export function coverageOfRefactor(
 }
 
 /**
+ * The files of a lock that hold a test the removal declared: a test id starts with the report's classname, which is the file
+ * (vitest), the file as a dotted module (pytest) or a class that ends the file's path (Java). A test no file is found for
+ * adjusts nothing: its file stays held to what was locked.
+ */
+function filesOfRemoved(lock: Characterization['lock'], removed: RemovedTest[]): string[] {
+  const prefixes = lock.map.flatMap(entry =>
+    entry.testIds
+      .filter(id => removed.some(item => entryMatches(item.entry, testKey(entry.part, entry.layer, id))))
+      .map(id => id.split('::')[0]!),
+  );
+  return Object.keys(lock.files).filter(path => {
+    const bare = path.replace(/\.[^./]+$/, '');
+    return prefixes.some(
+      prefix =>
+        prefix === path ||
+        prefix === bare ||
+        prefix === bare.replaceAll('/', '.') ||
+        bare.endsWith(`/${prefix.replaceAll('.', '/')}`),
+    );
+  });
+}
+
+/**
  * A characterization with the tests the closed removal Goals took out since its lock (those whose verified commit holds
  * the lock) left out, and the files they changed held as they left them. Goals that removed tests before the lock count for nothing.
  */
@@ -80,11 +104,12 @@ function afterRemovals(
     const removed = removalOf(state.spec);
     const count = (one: typeof lock) => one.map.reduce((sum, entry) => sum + entry.testIds.length, 0);
     const lost = (one: typeof lock) => count(withoutRemoved(one, removed, {})) !== count(one);
-    const shared = new Set(all.filter(other => lost(other.lock)).flatMap(other => Object.keys(other.lock.files)));
+    // Only the files that held a removed test are rehashed: a captured test weakened in another file stays protected.
+    const holders = new Set(all.flatMap(other => (lost(other.lock) ? filesOfRemoved(other.lock, removed) : [])));
     const mine = lost(lock);
     const files = Object.fromEntries(
       Object.keys(lock.files)
-        .filter(path => (mine || shared.has(path)) && state.gate?.changedFiles?.includes(path))
+        .filter(path => holders.has(path) && state.gate?.changedFiles?.includes(path))
         .map(path => {
           const content = fileAt(repo, commit, path);
           return [path, content ? sha256Of(content) : undefined];

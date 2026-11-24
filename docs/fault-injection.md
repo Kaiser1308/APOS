@@ -246,6 +246,8 @@ A Goal with a `removed` criterion may lose the tests it declared (`removesTests`
 | Two removals took different tests out of the same captured file, and their Goal ids sort the other way round | applied in the order of their commits: the newest removal's file stands | `characterized-gate.test.ts` › applies removals in the order of their commits |
 | A test of absence fails with Jest's `Error: expect(received).toBe(expected)` | an assertion: accepted (only other exception classes are refused) | `test-lock.test.ts` › accepts a removed test that failed an assertion |
 | Two characterize locks share a test file and a removal took a test of only one of them | the file's post-removal version is held for both locks, each keeps its surviving tests | `characterized-gate.test.ts` › holds a file two characterize locks share as the removal left it |
+| A removal deletes a test of one captured file and weakens a kept test in another | only the file that held a removed test is rehashed; the other stays held to what was locked | `characterized-gate.test.ts` › rehashes only the files that held a removed test |
+| A test of absence crashes with a runner-reported exception class (vitest `type="TypeError"`) | refused: the reported class is believed over the message | `test-lock.test.ts` › believes the exception class a runner reports |
 
 ## What the table does not claim (v3.2 T0, #50)
 

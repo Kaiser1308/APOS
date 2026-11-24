@@ -213,4 +213,28 @@ describe('coverageOfRefactor after a Goal that removed tests (Review Focus 5)', 
     expect(sources.map(item => item.lock.files['tests/a.t'])).toEqual([hash, hash]);
     expect(sources.map(item => item.lock.map.length)).toEqual([0, 1]);
   }, 60_000);
+
+  it('rehashes only the files that held a removed test: a weakened captured test in another file stays protected (Codex)', async () => {
+    const p = await testingProject({ files: { 'src/legacy.txt': 'legacy\n' } });
+    const locked = p.commit({ 'tests/a.t': 'case one pass\ncase two pass\n', 'tests/b.t': 'case x pass\n' }, 'lock');
+    const characterize = closed('GOAL-C', locked);
+    characterize.testLock = {
+      ...lockOf(locked, {
+        'tests/a.t': sha256Of(Buffer.from('case one pass\ncase two pass\n')),
+        'tests/b.t': sha256Of(Buffer.from('case x pass\n')),
+      }),
+      map: [
+        { acceptanceId: 'AC-1', part: 'app', layer: 'L1', testIds: ['tests.a::one', 'tests.a::two', 'tests.b::x'] },
+      ],
+    };
+    const after = p.commit({ 'tests/a.t': 'case one pass\n', 'tests/b.t': '# weaker\n' }, 'removes two, weakens x');
+    const goals = [
+      characterize,
+      removal(after, ['tests/a.t', 'tests/b.t'], ['app.L1::tests.a::two']),
+      refactorOf(after),
+    ];
+    const [source] = coverageOfRefactor(p.dir, goals, goals[2]!, undefined, new GitCommitInspector()).sources;
+    expect(source?.lock.files['tests/a.t']).toBe(sha256Of(Buffer.from('case one pass\n')));
+    expect(source?.lock.files['tests/b.t']).toBe(sha256Of(Buffer.from('case x pass\n')));
+  }, 60_000);
 });

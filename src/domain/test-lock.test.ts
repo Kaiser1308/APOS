@@ -196,6 +196,19 @@ describe('judgeSuite', () => {
     ])
       expect(judge([{ id: 'a', status: 'fail', message }], 'removed'), message).toEqual([]);
   });
+  it('believes the exception class a runner reports over the words of the message (vitest, Surefire)', () => {
+    const fail = (message: string, failureType: string) =>
+      judgeSuite({
+        map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L2', testIds: ['a'] }],
+        proofOf: () => 'removed',
+        outcomes: [{ part: 'app', layer: 'L2', tests: [{ id: 'a', status: 'fail', message, failureType }] }],
+        patterns: { app: { notImplemented: [], loadError: [] } },
+      });
+    expect(fail("Cannot read properties of undefined (reading 'coupon')", 'TypeError')[0]).toMatch(
+      /must fail on an assertion/,
+    );
+    expect(fail('expected true to be false', 'AssertionError')).toEqual([]);
+  });
   it('names a test that is already green', () => {
     expect(judge([{ id: 'a', status: 'pass' }])).toEqual([
       expect.stringContaining('AC-1 app.L2 a: already green') as unknown,

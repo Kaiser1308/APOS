@@ -61,11 +61,14 @@ function filesOfRemoved(lock: Characterization['lock'], removed: RemovedTest[]):
   );
   return Object.keys(lock.files).filter(path => {
     const bare = path.replace(/\.[^./]+$/, '');
+    const dotted = bare.replaceAll('/', '.');
+    // A class inside the module (pytest `tests.test_calc.TestCalc`) continues the dotted path.
     return prefixes.some(
       prefix =>
         prefix === path ||
         prefix === bare ||
-        prefix === bare.replaceAll('/', '.') ||
+        prefix === dotted ||
+        prefix.startsWith(`${dotted}.`) ||
         bare.endsWith(`/${prefix.replaceAll('.', '/')}`),
     );
   });

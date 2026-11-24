@@ -237,4 +237,30 @@ describe('coverageOfRefactor after a Goal that removed tests (Review Focus 5)', 
     expect(source?.lock.files['tests/a.t']).toBe(sha256Of(Buffer.from('case one pass\n')));
     expect(source?.lock.files['tests/b.t']).toBe(sha256Of(Buffer.from('case x pass\n')));
   }, 60_000);
+
+  it('finds the file of a test defined inside a class (pytest tests.test_calc.TestCalc::test_mul) (Codex)', async () => {
+    const p = await testingProject({ files: { 'src/legacy.txt': 'legacy\n' } });
+    const before = 'class TestCalc:\n  mul\n  add\n';
+    const locked = p.commit({ 'tests/test_calc.py': before }, 'lock');
+    const characterize = closed('GOAL-C', locked);
+    characterize.testLock = {
+      ...lockOf(locked, { 'tests/test_calc.py': sha256Of(Buffer.from(before)) }),
+      map: [
+        {
+          acceptanceId: 'AC-1',
+          part: 'app',
+          layer: 'L1',
+          testIds: ['tests.test_calc.TestCalc::test_mul', 'tests.test_calc.TestCalc::test_add'],
+        },
+      ],
+    };
+    const after = p.commit({ 'tests/test_calc.py': 'class TestCalc:\n  add\n' }, 'removes mul');
+    const goals = [
+      characterize,
+      removal(after, ['tests/test_calc.py'], ['app.L1::tests.test_calc.TestCalc::test_mul']),
+      refactorOf(after),
+    ];
+    const [source] = coverageOfRefactor(p.dir, goals, goals[2]!, undefined, new GitCommitInspector()).sources;
+    expect(source?.lock.files['tests/test_calc.py']).toBe(sha256Of(Buffer.from('class TestCalc:\n  add\n')));
+  }, 60_000);
 });

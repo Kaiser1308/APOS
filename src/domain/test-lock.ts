@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InvariantError } from './errors.js';
+import { entryMatches } from './removal-match.js';
 import type { TestOutcome } from './results/index.js';
 import type { GoalEvent, GoalState } from './transitions.js';
 
@@ -117,17 +118,20 @@ const matchesAnyPattern = (text: string | undefined, patterns: string[]) =>
  * Why the suite a tester submitted is not ready to lock; empty when it is. Every mapped test must be in its layer's
  * report (so it loaded). A `red-green` test must be red for the right reason: it failed, or errored with "not
  * implemented"; an error that is a load error, or any other error, does not count. A `stays-green` test must pass.
+ * A `removed` test (the feature goes away) must fail on an assertion: the feature is there, and the test says it is not.
  * A test that loaded wrongly anywhere in a mapped layer is a problem even when no criterion names it.
  */
 export function judgeSuite(input: {
   map: TestMapEntry[];
-  proofOf: (acceptanceId: string) => 'red-green' | 'stays-green' | 'manual' | undefined;
+  proofOf: (acceptanceId: string) => 'red-green' | 'stays-green' | 'removed' | 'manual' | undefined;
   outcomes: LayerOutcome[];
   patterns: Record<string, Patterns>;
   /** A bugfix test is red because the bug is there: one that is green does not reproduce it. */
   bugfix?: boolean;
   /** A characterize test captures what the code does: it must be green on it as it is. */
   characterize?: boolean;
+  /** The tests the Goal declares removed (`<part>.<layer>::<id>`): a test of absence may not share a file with one. */
+  declared?: string[];
 }): string[] {
   const problems: string[] = [];
   const loadBroken = new Set<string>();
@@ -148,6 +152,19 @@ export function judgeSuite(input: {
     const proof = input.proofOf(entry.acceptanceId);
     for (const id of entry.testIds) {
       const label = `${entry.acceptanceId} ${entry.part}.${entry.layer} ${id}`;
+      if (proof === 'removed') {
+        // Locking the file would lock the old tests with it, and the Worker could neither keep them nor delete them.
+        const prefix = id.split('::')[0];
+        const shares = (outcome?.tests ?? []).some(
+          other =>
+            other.id.split('::')[0] === prefix &&
+            (input.declared ?? []).some(item => entryMatches(item, testKey(entry.part, entry.layer, other.id))),
+        );
+        if (shares)
+          problems.push(
+            `${label}: this test of absence is in a file that holds a test the Goal declares removed: put it in a file of its own, or the old tests would be locked with it`,
+          );
+      }
       const test = outcome?.tests.find(item => item.id === id);
       if (!test) {
         problems.push(
@@ -164,11 +181,20 @@ export function judgeSuite(input: {
               ? `${label}: chụp hành vi phải xanh trên code như hiện tại: the test is ${test.status}. Describe what the code does today, odd behaviour included; a wrong-looking result is a note for a later \`apos bug\`, not a failing test`
               : `${label}: a stays-green test must pass, it is ${test.status}`,
           );
-      } else if (test.status === 'pass')
+      } else if (
+        proof === 'removed' &&
+        (test.status === 'error' || !failedAnAssertion(test.message, input.patterns[entry.part], test.failureType))
+      )
         problems.push(
-          input.bugfix
-            ? `${label}: the test does not reproduce the bug (test không tái hiện lỗi): it is already green on the current code. Make it fail on the bug, for the reason in the bug report`
-            : `${label}: already green: a stub that happens to work, or a test that never calls it. A red-green test must fail first`,
+          `${label}: a test that says the feature is gone must fail on an assertion while it is still there, and it ${test.status === 'error' ? 'errored' : 'raised'}: ${firstLine(test.message) || 'no message'}. Import the code that stays and call the entry the feature was reached by; an import, attribute or type error says nothing about the feature`,
+        );
+      else if (test.status === 'pass')
+        problems.push(
+          proof === 'removed'
+            ? `${label}: already green: the feature is gone already, or the test never asks for it. A test of absence must fail while the feature is there`
+            : input.bugfix
+              ? `${label}: the test does not reproduce the bug (test không tái hiện lỗi): it is already green on the current code. Make it fail on the bug, for the reason in the bug report`
+              : `${label}: already green: a stub that happens to work, or a test that never calls it. A red-green test must fail first`,
         );
       else if (
         test.status === 'error' &&
@@ -180,6 +206,26 @@ export function judgeSuite(input: {
     }
   }
   return problems;
+}
+
+/**
+ * Whether a failed test's message reads as an assertion that did not hold, and not as an exception from somewhere else:
+ * pytest and JUnit report an `AttributeError` raised in a test body as a failure, like an assertion. Rough on purpose, it
+ * reads the first line: an exception class (`TypeError: ...`, `java.lang.NullPointerException`) that is not an assertion
+ * one, or a message the stack's patterns call a load error or "not implemented", is not a failed assertion.
+ */
+export function failedAnAssertion(
+  message: string | undefined,
+  where: { notImplemented: string[]; loadError: string[] } | undefined,
+  failureType?: string,
+): boolean {
+  if (matchesAnyPattern(message, [...(where?.loadError ?? []), ...(where?.notImplemented ?? [])])) return false;
+  // A runner that says the exception class (vitest, Surefire) is believed over the wording of the message.
+  if (failureType) return /Assert/.test(failureType);
+  const line = firstLine(message);
+  // Jest words a failed assertion as `Error: expect(received).toBe(expected)`.
+  if (/^\s*(?:Error:\s*)?expect\(/.test(line)) return true;
+  return !/^\s*(?:[\w$]+\.)*(?!Assert)\w*(?:Error|Exception)\b/.test(line);
 }
 
 /** `<id>:<status>` of every test, sorted: two runs of the same commit must give the same text. */

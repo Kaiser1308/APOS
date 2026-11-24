@@ -1,6 +1,6 @@
 # Example Goals
 
-Five small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
+Six small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
 
 | Example | Stack | Goal |
 | --- | --- | --- |
@@ -9,6 +9,7 @@ Five small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow w
 | `ts-bug` | TypeScript, vitest | A bug: the code `FREE0` (0% off) makes an order's total 0. Run by `npm run demo:bug` through `apos bug` |
 | `ts-maint` | TypeScript, vitest | A dependency upgrade that removes a finding: `fmt` 1.0.0 carries CVE-FMT-1; the Goal must reach a version without it and change nothing else. No network (the dependency is a folder in `vendor/`). Run by `npm run demo:maint` through `apos maintenance` |
 | `py-legacy` | Python, pytest | A repo with **no tests**: approved as low assurance, `pricing.py` captured by a `characterize` Goal, then tidied by a `refactor` Goal. Run by `npm run demo:legacy` |
+| `py-remove` | Python, pytest | A feature removed: the shop drops its coupons. The Goal's `removed` criterion names the two old tests that go with them; the gate lets exactly those disappear. Run by `npm run demo:remove` |
 
 Each example has:
 
@@ -69,3 +70,12 @@ Two notes. `ts-orders/repo/package-lock.json` is a stub with no packages: the de
 | `fmt` 2.0.0 | The breaking release | `package submit`: red, four tests that were green on the base are red now |
 | `fmt` 1.1.0 and an edit of `src/price.ts` | Upgrade plus a source change outside the manifests | `package submit`: red, `APOS-SCOPE` names `src/price.ts` |
 | `fmt` 1.1.0 | The upgrade and nothing else | `package submit`: needs a decision (`package.json` is sensitive); an agent approves it; the same commit is green and the finding is gone |
+
+`py-remove` is the removal story: `goal.json` has a criterion `proof: "removed"` with `removesTests` (the two tests of `tests/test_coupons.py`), `plan.json` names the files of the old tests in `paths`, and these steps:
+
+| Patch | On top of | What it is | What APOS says |
+| --- | --- | --- | --- |
+| `01-absence-test` | the repo | Two tests that say coupons are gone: red while they exist | `tests submit`: locked |
+| `02-removes-one-too-many` | 01 | The removal, and a test nobody declared | `package submit`: red, `test missing: ...` names it |
+| `03-keeps-a-declared-test` | 01 | The removal, but a declared test is kept | `package submit`: red, `declared removed but still there` |
+| `04-removal` | 01 | The removal and exactly the two declared tests | `package submit`: green, verified |

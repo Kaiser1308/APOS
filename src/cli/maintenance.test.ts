@@ -240,6 +240,8 @@ describe('the gate of a maintenance Goal', () => {
     await p.invoke('goal', 'show', 'GOAL-MAINT-001');
     const text = p.out.join('\n');
     expect(text).toContain(`có trên ${base.slice(0, 7)}, không còn trên ${fixed.slice(0, 7)}`);
+    // The finding is named by its rule beside its fingerprint, so a reader of the table knows which one it was.
+    expect(text).toMatch(/finding CVE-FMT-1 \(h:[0-9a-f]+\) có trên/);
     expect(text).toContain('chỉ chạm manifest/lockfile (+ paths)');
     expect(text).toContain('Quét');
   });

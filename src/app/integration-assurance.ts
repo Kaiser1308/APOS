@@ -16,6 +16,8 @@ import type { LayerId } from '../domain/layers.js';
 import type { GoalState } from '../domain/transitions.js';
 import { fileAt, filesAt, sha256Of } from './git-files.js';
 import type { LayerGateInput } from './layer-gate.js';
+import { inventoryLayers, lockedByOthers, type TestRun } from './removal-gate.js';
+import { removalOf, type RemovedTest } from '../domain/removal.js';
 
 /** Lines a diff adds, outside `.apos/`, without the `+` marker. */
 export function addedLines(repo: string, base: string, head: string): string[] {
@@ -43,6 +45,8 @@ export const unverifiable = (checkId: string, reason: string): CheckResult => ({
 export type IntegrationContext = {
   repo: string;
   setup: ProjectSetup;
+  /** Every Goal of the project: a test removed on purpose says whose lock it was. */
+  goals?: () => GoalState[];
   runTests: (
     setup: ProjectSetup,
     wanted: Map<string, { part: string; layer: LayerId }>,
@@ -75,18 +79,16 @@ export function unchangedPackageReviewFiles(repo: string, state: GoalState, head
  * file is inside the paths of the green packages or the plan's own `paths` (the integration files it declares).
  */
 export function integrationChecks(
-  { repo, setup, runTests }: IntegrationContext,
+  { repo, setup, runTests, goals }: IntegrationContext,
   state: GoalState,
   input: LayerGateInput,
 ): CheckResult[] {
   if (!input.base) return [];
   const lock = state.testLock;
   const reviews = (state.reviewTests ?? []).filter(review => !review.packageId);
-  const wanted = new Map<string, { part: string; layer: LayerId }>();
-  for (const [part, where] of Object.entries(setup.parts))
-    if (where.layers.L1?.length) wanted.set(`${part}.L1`, { part, layer: 'L1' });
-  for (const entry of lock?.map ?? [])
-    wanted.set(`${entry.part}.${entry.layer}`, { part: entry.part, layer: entry.layer });
+  // The Goal as a whole answers for every test it declared removed, whichever package took it out.
+  const removable = removalOf(state.spec);
+  const wanted = inventoryLayers(setup, lock, removable);
   const delivery = runTests(setup, wanted, input.head);
   const atBase = runTests(setup, wanted, input.base);
   const checks: CheckResult[] = [];
@@ -114,6 +116,8 @@ export function integrationChecks(
           delivery: delivery.set,
           addedLines: addedLines(repo, input.base, input.head),
           forbid: Object.values(setup.parts).flatMap(part => part.forbid),
+          removable,
+          lockedBy: lockedByOthers(goals?.(), state.spec.id),
         }),
   );
   if (lock?.infra) {
@@ -191,4 +195,37 @@ export function judgedByAPackage(repo: string, state: GoalState, input: LayerGat
       return now === undefined ? then === undefined : then?.equals(now) === true;
     });
   });
+}
+
+/**
+ * The inventory a Goal with `removed` criteria answers for at the close stage, on the commit it was verified on: the other
+ * stages that take an inventory (package, integration) do not run there. Without removals the close stage asks nothing new.
+ */
+export function closeInventory(input: {
+  repo: string;
+  setup: ProjectSetup;
+  state: GoalState;
+  removable: RemovedTest[];
+  base: string | undefined;
+  head: string;
+  goals: GoalState[] | undefined;
+  runTests: TestRun;
+}): CheckResult[] {
+  const { setup, state, removable, base, head } = input;
+  if (!removable.length || !base) return [];
+  const wanted = inventoryLayers(setup, state.testLock, removable);
+  const delivery = input.runTests(setup, wanted, head);
+  const atBase = input.runTests(setup, wanted, base);
+  const problems = [...delivery.problems, ...atBase.problems];
+  if (problems.length) return [unverifiable(INVENTORY_CHECK, `the layers did not run: ${problems.join('; ')}`)];
+  return [
+    inventoryCheck({
+      base: atBase.set,
+      delivery: delivery.set,
+      addedLines: addedLines(input.repo, base, head),
+      forbid: Object.values(setup.parts).flatMap(part => part.forbid),
+      removable,
+      lockedBy: lockedByOthers(input.goals, state.spec.id),
+    }),
+  ];
 }

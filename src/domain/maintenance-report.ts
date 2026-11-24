@@ -28,6 +28,10 @@ export function maintenanceEvidence(
   const scope = checks.find(check => check.checkId === SCOPE_CHECK);
   const scans = checks.flatMap(check => (check.scan ? [check.scan] : []));
   const security = state.spec.security;
+  // A fingerprint says little to a reader: the rule the base scan gave the finding goes beside it.
+  const ruleOf = new Map(
+    (state.spec.baseline?.scans ?? []).flatMap(scan => scan.findings.map(item => [item.fingerprint, item.ruleId])),
+  );
   const proven = checks.find(check => check.checkId === SECURITY_CHECK)?.status === 'pass';
   return {
     judged: Boolean(gate),
@@ -44,7 +48,7 @@ export function maintenanceEvidence(
     ...(security?.length
       ? {
           security: {
-            named: security,
+            named: security.map(print => (ruleOf.has(print) ? `${ruleOf.get(print)} (${print})` : print)),
             proven,
             ...(proven && gate ? { base: gate.baseCommit.slice(0, 7), commit: gate.deliveryCommit.slice(0, 7) } : {}),
           },

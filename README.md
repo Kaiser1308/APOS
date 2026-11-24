@@ -33,7 +33,7 @@
 3. [Install](#install)
 4. [Quick start](#quick-start)
 5. [The Goal contract](#the-goal-contract)
-6. [Delivery flows](#delivery-flows) (Solo, [a bug](#fixing-a-bug-apos-bug), [an old repo](#an-old-repo-with-few-tests), Multi-WP)
+6. [Delivery flows](#delivery-flows) (Solo, [a bug](#fixing-a-bug-apos-bug), [a removal](#removing-a-feature-a-removed-criterion), [an old repo](#an-old-repo-with-few-tests), Multi-WP)
 7. [Project setup](#project-setup), [Layers by stage](#layers-by-stage), [The assurance table](#the-assurance-table) and [Web UI](#web-ui)
 8. [Configuration and state](#configuration-and-state)
 9. [Trust model](#trust-model)
@@ -286,11 +286,36 @@ What the gate holds a maintenance Goal to, at `package submit` (and again at the
 3. **A named finding is gone.** `--security <finding>` takes a fingerprint or a `ruleId` that exactly one finding of the base has. A finding the base does not show is refused at `open` and at `approve` (`không tái hiện được finding trên base`), and so is a setup with no scan tool. On the delivery the finding must be absent: `APOS-SECURITY`.
 4. **Only manifests, lockfiles and `--paths` change.** The globs of the manifests come from the catalog (`manifests`, copied to the setup part at `draft`); any other changed file is red and named. A manifest that the setup lists as sensitive (`needsHuman`) still waits for a decision, which an agent may give (`exception approve --by agent:<name>`); the table lists it.
 
-The table says it: `Bảo trì: chỉ chạm manifest/lockfile (+ paths); lỗi có sẵn trên base: n; lỗi mới: 0`, `Quét: finding mới 0 (dưới mức chặn: n)` (or `Quét: setup không có công cụ`), and for a security Goal `Vá bảo mật: finding <id> có trên <base>, không còn trên <commit>`.
+The table says it: `Bảo trì: chỉ chạm manifest/lockfile (+ paths); lỗi có sẵn trên base: n; lỗi mới: 0`, `Quét: finding mới 0 (dưới mức chặn: n)` (or `Quét: setup không có công cụ`), and for a security Goal `Vá bảo mật: finding <ruleId> (<fingerprint>) có trên <base>, không còn trên <commit>`.
 
 **Dependabot and other pull requests.** `apos maintenance open --from-pr 12 [--remote origin]` fetches `pull/12/head` with plain git (no `gh`, no network beyond that fetch), keeps it under `refs/apos/pr/12`, records the number and the sha in the Goal, and takes the description from the title of the first commit when none is given. `apos package submit <goal> WP-MAIN --from-pr` gates exactly that sha: if the remote moved the pull request since, it says so and asks for `--commit <sha>`. A pull request that does not contain the plan's base commit is refused, as any commit is (`rebase the change onto it`); plan on the pull request's own base with `apos lead propose --maintenance --goal <id> --base <sha>` if that is what you mean. The table's `Nguồn` line says `từ PR #12 <sha>`.
 
 `npm run demo:maint` runs the story on `examples/ts-maint` (no network: the dependency is a folder in `vendor/`); see [docs/demo.md](docs/demo.md).
+
+### Removing a feature (a `removed` criterion)
+
+Taking a feature out is an ordinary Goal whose criterion says "the feature is gone", and whose approval carries the list of old tests that go with it. Nothing else may disappear:
+
+```json
+{
+  "id": "AC-1",
+  "text": "Coupons are gone: total() takes no coupon and the cart has no apply_coupon",
+  "requirementIds": ["R-1"],
+  "checkIds": ["CHK-1"],
+  "proof": "removed",
+  "removesTests": [
+    "app.L1::tests.test_coupons::test_ten_percent_coupon_takes_off_a_tenth",
+    "app.L1::tests.test_coupons::test_an_unknown_coupon_is_refused"
+  ]
+}
+```
+
+A `removesTests` entry is `<part>.<layer>::<test id as the layer's report gives it>`, or `<part>.<layer>::<file>` for every test of that file (for pytest `tests.test_coupons`, the classname; for vitest the file path). A repeated id (`#2`) and a parametrized one (`name[...]`) belong to their test. The list is the **Goal's**, not the plan's: the Human approves it, so the Lead cannot add a test to it. The proof has two halves:
+
+1. **A test of absence.** The Tester writes a test that is red on the code as it is because the feature is there, and green once it is gone: it calls the public entry and asserts the absence (the route answers 404, the command says it does not exist, the argument is refused, the attribute is not on a module that imports fine). It is locked by `tests submit` like any red-green test, with two more rules. It must fail on an **assertion**: a test that errors, or that raises an exception that is not an assertion (an `ImportError` of the code that is going away, an `AttributeError`, a `TypeError`, "not implemented"; pytest reports an exception raised in a test body as a failure, so APOS reads the first line of the message, roughly) proves nothing about the feature, and is refused. And in a Goal whose test-proved criteria are all `removed`, the Tester changes tests and `tests.json` and nothing else (no stub, no code), so the test is red on the code as it is.
+2. **The old tests go, exactly.** `goal approve` runs the declared layers on the repo as it is, prints the tests that will be removed (so the Human sees them before confirming) and refuses an entry no test matches. At every gate (submit, integrate, close) the inventory then allows the loss of the declared tests and of no other: a test that vanished and was not declared is red and named (locked or not); a declared test the delivery still runs (or skips) is red (`declared removed but still there`); an entry that matches nothing on the base is red. Only a Goal with a `removed` criterion may lose tests: every other Goal keeps the old rule. A Multi-WP Goal's package answers for the entries of its own criterion (and of the green packages it builds on, whose removals its delivery contains); the integration commit and the close stage for all of them. The plan's `paths` must include the files of the old tests, or the scope check is red.
+
+The declared tests may be the locked tests of another Goal, a characterize Goal's included: the Human approved the list. The table says whose (`xoá đúng 2 test đã khai (1 test đã khoá của GOAL-003)`), and a later `refactor` no longer requires them (it holds the file as the removal Goal left it). The table's line is `Xoá tính năng: AC-1: test <id> đỏ trên <lock commit>, xanh trên <commit>; xoá đúng n test đã khai (k test đã khoá của GOAL-…)`. `npm run demo:remove` runs the story on `examples/py-remove` with pytest; see [docs/demo.md](docs/demo.md).
 
 ### An old repo with few tests
 
@@ -373,9 +398,12 @@ GOAL-001  setup v1  (app: python)
   Ngoại lệ           floor-reduced WP-MAIN:submit:L2 (agent:lead): ...
   Agent duyệt thay   1 chỗ: floor-reduced WP-MAIN:submit:L2 (agent:lead)
   Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Giới hạn           xác nhận Human chỉ chống duyệt nhầm, chưa phải ranh giới bảo mật; --by agent:<x> là tự khai; APOS chứng minh code đạt tiêu chí đã duyệt, không chứng minh tiêu chí hay bộ test là đủ (README.md, mục "What the evidence does not prove")
 ```
 
 A Goal on a setup approved with no baseline opens with a first line, `BẢO ĐẢM THẤP: repo chưa có test nền (app.L1, app.L2)`. A characterize Goal adds `Chụp hành vi` (the code it captures, the tests locked), and a refactor adds `Giữ hành vi` (`giữ nguyên hành vi: <n> test chụp từ <GOAL-…>, xanh trước trên <base>, xanh sau trên <commit>`, or that it is not proved yet).
+
+The last line, `Giới hạn`, is the same on every table: what the evidence above does not prove ([What the evidence does not prove](#what-the-evidence-does-not-prove)).
 
 It says what the machine proved, what you confirm by hand, which layers were cut and by whom (`human`, `on-behalf:<where>`, `agent:<name>`), tools whose only evidence is an exit code, and what is off (a flag-gated tool, a floor layer with no tool, the entry check for a stack with no rule, no setup at all).
 
@@ -412,8 +440,8 @@ The repo gets readable Goal documents (`.apos/goals/<id>/`) committed only at mi
 ## Trust model
 
 - **The log is tamper-evident, not a security boundary.** Each event carries the hash of its predecessor, so an edit breaks the chain and is detected; a process running as the same OS user can still read or delete files. APOS assumes a single host operated by a trusted developer.
-- **The Human decides through a person, not through a process.** Human commands need the Goal id typed back in a terminal, or an explicit `--on-behalf "<why>"` that is written to the log. A script or agent without a terminal cannot do either by accident. This stops a mistake or a prompt-injected agent, not a process determined to pass `--on-behalf`; the log shows when it did.
-- **Lead commands are not authenticated.** `lead *`, `package *` and `integration gate` take `--by <name>` (default `lead`) for the log only. They can only describe a plan and submit commits; the gate, not the caller, decides.
+- **The Human decides through a person, not through a process.** Human commands need the Goal id typed back in a terminal, or an explicit `--on-behalf "<why>"` that is written to the log. A script or agent without a terminal cannot do either by accident. This stops a mistake or a prompt-injected agent, not a process determined to pass `--on-behalf`; the log shows when it did. It is not a security boundary: see [What the evidence does not prove](#what-the-evidence-does-not-prove).
+- **Lead commands are not authenticated.** `lead *`, `package *` and `integration gate` take `--by <name>` (default `lead`) for the log only. They can only describe a plan and submit commits; the gate, not the caller, decides. A name (`--by agent:<x>`) is the caller's own word: APOS does not authenticate it.
 - **An LLM's word is never evidence.** Verification needs a green gate APOS ran on the exact commit. Owner-submitted evidence is a report. A review (a person, a model or an AI tool) is advice, and blocks only through a test that APOS runs and finds red: see [Reviews](#reviews).
 - **The gate protects its own rules.** A delivery that rewrites APOS-managed files (`.apos/`: skills, Goal documents, sources) is red (`APOS-PROTECTED`). Source snapshots are hashed with line endings normalized; a changed or missing snapshot refuses approval and gating.
 - **Closing is tied to a gate.** Nothing, `--on-behalf` included, closes a Goal on a commit that is not the last green gate.
@@ -493,7 +521,7 @@ Mutation testing is the second net under the assertion count: it changes the cod
 
 ## Demo
 
-`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug` and `npm run demo:legacy` run an example (`examples/ts-orders`, `examples/py-parking`, `examples/ts-bug`, `examples/py-legacy`) through the whole flow with the real binary and a real test runner, and print the assurance table. The output of all four is in [docs/demo.md](docs/demo.md).
+`npm run demo:ts`, `npm run demo:py`, `npm run demo:bug`, `npm run demo:maint`, `npm run demo:legacy` and `npm run demo:remove` run an example (`examples/ts-orders`, `examples/py-parking`, `examples/ts-bug`, `examples/ts-maint`, `examples/py-legacy`, `examples/py-remove`) through the whole flow with the real binary and a real test runner, and print the assurance table. The output of all of them is in [docs/demo.md](docs/demo.md).
 
 ## Old logs (legacy Goals)
 
@@ -533,10 +561,18 @@ Conventions and the dependency rules: [`AGENTS.md`](AGENTS.md), [`docs/architect
 - **The gate runs the Goal's own checks.** What it proves is only as good as the checks the Goal names, the tests locked from them and the layers the setup defines; the assurance table says which of these ran.
 - **A characterize Goal captures behaviour, not correctness.** Its tests pass because they describe what the code does today; APOS cannot tell a wanted behaviour from a defect, nor whether the tests reach every path of the code in `covers` (the assertion count is rough, there is no coverage). A refactor is as safe as the captured tests are complete. The `mutation` flag on the refactor Goal is how to see how much they would catch.
 - **The low-assurance label judges nothing differently.** A layer whose tool finds no test is red or `unverifiable` at the gate and at close, labelled or not: a legacy setup lists only the layers that have tests to run (L2 for the captured tests), or cuts one with a `floor-reduced` exception. Goals keep the label until a new setup version is approved on a probe that finds tests.
-- **Single host, trusted user** (see the trust model). Windows and Linux; Node 24+.
+- **Single host, trusted user** (see the trust model and [What the evidence does not prove](#what-the-evidence-does-not-prove)). Windows and Linux; Node 24+.
 - **Event log compatibility.** Controller-published document milestones are `documents-published` events with commit and file hashes. Do not roll back to a build older than v3 once a log holds v3 events: such a build does not know them.
 - **A Goal is one repo.** A Goal spanning several repos is out of scope for now.
 - **Submissions are on the Lead's word.** APOS does not watch a branch for new commits; the Lead runs `package submit`.
+
+### What the evidence does not prove
+
+Three limits that the assurance table of every Goal repeats in its last line (`Giới hạn`), so nobody reads a green table as more than it is:
+
+1. **The Human confirmation prevents a mistake; it is not a security boundary.** A Human command asks for the Goal id typed at a terminal, or for `--on-behalf "<where the Human agreed>"`, which is written to the log. That stops an agent or a script that approves by accident, and shows who said what. It does not stop a process that is determined to: any process that can run `apos` can pass `--on-behalf`, with any text. The log shows that it did; nothing prevents it.
+2. **A name given by `--by` is the caller's own word.** `--by agent:lead`, `--by agent:<x>` and the `by` of a test lock or an exception are written to the log as they are passed. APOS does not authenticate who calls, so the table's "agent duyệt thay" lists what was *claimed*, not what was proved.
+3. **APOS proves that the code meets the criteria the Human approved; it does not prove that the criteria, or the tests locked from them, are enough.** A criterion that misses a case, a test that asserts too little (the assertion count is a rough regex line count), a characterize test that captures a defect, a `removesTests` list that leaves a stale test behind: all of them give a green gate. Reading the criteria, and the list of tests a removal deletes, is the Human's job at `goal approve`.
 
 ## Roadmap
 

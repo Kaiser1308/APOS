@@ -12,11 +12,16 @@ const walk = (
   }
 };
 
-function outcome(node: XmlElement): Pick<TestOutcome, 'status' | 'message'> {
+function outcome(node: XmlElement): Pick<TestOutcome, 'status' | 'message' | 'failureType'> {
   const failing = node.children.find(child => child.name === 'error' || child.name === 'failure');
   if (failing) {
     const message = failing.attrs.message?.trim() || failing.text.trim();
-    return { status: failing.name === 'error' ? 'error' : 'fail', ...(message ? { message } : {}) };
+    const failureType = failing.attrs.type?.trim();
+    return {
+      status: failing.name === 'error' ? 'error' : 'fail',
+      ...(message ? { message } : {}),
+      ...(failureType ? { failureType } : {}),
+    };
   }
   if (node.children.some(child => child.name === 'skipped')) return { status: 'skip' };
   return { status: 'pass' };

@@ -12,6 +12,8 @@ const version = z.number().int().positive();
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const commit = z.string().regex(/^[0-9a-fA-F]{40,64}$/);
 const TOOL_REF = /^(?:[a-z][a-z0-9-]*)\.L[0-6]\.[^.\s][^\s]*$/;
+/** A test of a `removed` criterion: `<part>.<layer>::<id as the layer report gives it>`, or `...::<file>` for every test of a file. */
+const REMOVED_TEST = /^[a-z][a-z0-9-]*\.L[0-6]::\S.*$/;
 
 /** Immutable verbatim snapshot of where the Goal came from. Stored at `.apos/goals/<id>/source.md`. */
 const sourceSchema = z.object({
@@ -56,7 +58,15 @@ const acceptanceSchema = z.object({
    * `benchmark` and `scan` are non-functional proofs: a tool of the pinned setup that the gate runs at the close stage
    * against a threshold the Human approved with the Goal. Kept optional so Goals written earlier replay unchanged.
    */
-  proof: z.enum(['red-green', 'stays-green', 'manual', 'benchmark', 'scan']).optional(),
+  proof: z.enum(['red-green', 'stays-green', 'manual', 'benchmark', 'scan', 'removed']).optional(),
+  /**
+   * `proof: 'removed'`: the old tests of the feature that goes away, each `<part>.<layer>::<id>` or `<part>.<layer>::<file>` (every
+   * test of that file). The Human approves the list with the Goal: they are the only tests the delivery may lose.
+   */
+  removesTests: z
+    .array(z.string().regex(REMOVED_TEST, 'a removed test is "<part>.<layer>::<id>" (or "<part>.<layer>::<file>")'))
+    .min(1)
+    .optional(),
   /** `proof: 'benchmark'`: `tool` is `<part>.<layer>.<id>` of a `metric` tool; the criterion holds when `metric op value`. */
   benchmark: z
     .object({
@@ -242,6 +252,11 @@ const goalSchema = z
         issue(['acceptance', index], `Acceptance ${item.id} has a benchmark but its proof is not "benchmark"`);
       if (item.scan && item.proof !== 'scan')
         issue(['acceptance', index], `Acceptance ${item.id} has a scan but its proof is not "scan"`);
+      if ((item.proof === 'removed') !== (item.removesTests !== undefined))
+        issue(
+          ['acceptance', index],
+          `Acceptance ${item.id}: removesTests (the old tests that go) and proof "removed" come together`,
+        );
       for (const requirementId of item.requirementIds) {
         const requirement = requirements.get(requirementId);
         if (!requirement)

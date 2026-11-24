@@ -12,3 +12,4 @@ GOAL-001  setup v1  (app: python)
   Agent duyệt thay   1 chỗ: floor-reduced WP-MAIN:submit:L2 (agent:lead)
   Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
   Tắt / chưa kiểm    L0 không chạy ở khâu close: setup không có công cụ cho lớp này
+  Giới hạn           xác nhận Human chỉ chống duyệt nhầm, chưa phải ranh giới bảo mật; --by agent:<x> là tự khai; APOS chứng minh code đạt tiêu chí đã duyệt, không chứng minh tiêu chí hay bộ test là đủ (README.md, mục "What the evidence does not prove")

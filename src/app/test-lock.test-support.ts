@@ -21,7 +21,8 @@ import type { GoalState } from '../domain/transitions.js';
 /**
  * A fake test tool for the lock and gate tests. It reads `*.t` files under a directory: `case <name> <kind> [arg]` with
  * kind `pass`, `fail`, `skip`, `load` (a load error), `typo` (an error that is not "not implemented"), `needs <feature>`
- * (fails with NotImplementedError until `src/impl.txt` mentions the feature) or `needs-err <feature>` (the same as an error).
+ * (fails with NotImplementedError until `src/impl.txt` mentions the feature), `needs-err <feature>` (the same as an error) or
+ * `gone <feature>` (a test of absence: fails with an AssertionError while `src/impl.txt` still mentions the feature).
  */
 export const RUNNER = `
 const fs = require('fs'), path = require('path');
@@ -41,6 +42,7 @@ function read(file) {
     else if (kind === 'load') inner = '<error message="ImportError while importing test module"/>';
     else if (kind === 'typo') inner = '<error message="NameError: nope"/>';
     else if (kind === 'needs' && !impl.includes(arg)) inner = '<failure message="NotImplementedError: ' + esc(arg) + '"/>';
+    else if (kind === 'gone' && impl.includes(arg)) inner = '<failure message="AssertionError: ' + esc(arg) + ' is still there"/>';
     else if (kind === 'needs-err' && !impl.includes(arg)) inner = '<error message="NotImplementedError: ' + esc(arg) + '"/>';
     cases += '<testcase classname="' + cls + '" name="' + name + '">' + inner + '</testcase>';
   }

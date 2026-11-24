@@ -147,7 +147,7 @@ describe('judgeSuite', () => {
   });
   const judge = (
     tests: { id: string; status: 'pass' | 'fail' | 'error' | 'skip'; message?: string }[],
-    proof = 'red-green' as const,
+    proof = 'red-green' as 'red-green' | 'removed',
     ids = ['a'],
   ) =>
     judgeSuite({
@@ -159,6 +159,55 @@ describe('judgeSuite', () => {
   it('accepts a test that fails, or errors with "not implemented"', () => {
     expect(judge([{ id: 'a', status: 'fail', message: 'assert 1 == 2' }])).toEqual([]);
     expect(judge([{ id: 'a', status: 'error', message: 'NotImplementedError: add' }])).toEqual([]);
+  });
+  it('holds a removed test to a failed assertion: the feature is still there, an error shows nothing', () => {
+    expect(judge([{ id: 'a', status: 'fail', message: 'assert apply_coupon is None' }], 'removed')).toEqual([]);
+    expect(judge([{ id: 'a', status: 'pass' }], 'removed')[0]).toMatch(/already green/);
+    expect(judge([{ id: 'a', status: 'error', message: 'NotImplementedError: x' }], 'removed')[0]).toMatch(
+      /must fail on an assertion.*error/,
+    );
+    expect(judge([{ id: 'a', status: 'error', message: 'AttributeError: nope' }], 'removed')[0]).toMatch(
+      /must fail on an assertion/,
+    );
+    expect(judge([{ id: 'a', status: 'error', message: 'ImportError while importing' }], 'removed')[0]).toMatch(
+      /did not load/,
+    );
+  });
+  it('refuses a removed test that failed with an exception that is not an assertion, as pytest and vitest report it', () => {
+    for (const message of [
+      "AttributeError: module 'shop.cart' has no attribute 'nope'",
+      "ImportError: cannot import name 'nope' from 'shop.cart'",
+      'NotImplementedError: add',
+      'TypeError: x is not a function',
+      'java.lang.NullPointerException: null',
+    ])
+      expect(judge([{ id: 'a', status: 'fail', message }], 'removed')[0], message).toMatch(
+        /must fail on an assertion|did not load/,
+      );
+  });
+  it('accepts a removed test that failed an assertion, however the runner words it', () => {
+    for (const message of [
+      'assert not True',
+      "Failed: DID NOT RAISE <class 'TypeError'>",
+      'AssertionError: apply_coupon is still there',
+      'expected true to be false // Object.is equality',
+      'org.opentest4j.AssertionFailedError: expected: <false> but was: <true>',
+      'Error: expect(received).toBe(expected) // Object.is equality',
+    ])
+      expect(judge([{ id: 'a', status: 'fail', message }], 'removed'), message).toEqual([]);
+  });
+  it('believes the exception class a runner reports over the words of the message (vitest, Surefire)', () => {
+    const fail = (message: string, failureType: string) =>
+      judgeSuite({
+        map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L2', testIds: ['a'] }],
+        proofOf: () => 'removed',
+        outcomes: [{ part: 'app', layer: 'L2', tests: [{ id: 'a', status: 'fail', message, failureType }] }],
+        patterns: { app: { notImplemented: [], loadError: [] } },
+      });
+    expect(fail("Cannot read properties of undefined (reading 'coupon')", 'TypeError')[0]).toMatch(
+      /must fail on an assertion/,
+    );
+    expect(fail('expected true to be false', 'AssertionError')).toEqual([]);
   });
   it('names a test that is already green', () => {
     expect(judge([{ id: 'a', status: 'pass' }])).toEqual([

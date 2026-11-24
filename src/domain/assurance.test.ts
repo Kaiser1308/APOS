@@ -79,6 +79,68 @@ describe('inventoryCheck', () => {
   });
 });
 
+describe('inventoryCheck with declared removals', () => {
+  const base = {
+    'app.L1::tests.old::a': 'pass',
+    'app.L1::tests.old::b': 'pass',
+    'app.L1::tests.keep::c': 'pass',
+    'app.L1::tests.keep::d': 'pass',
+  } as const;
+  const removable = [{ acceptanceId: 'AC-1', entry: 'app.L1::tests.old' }];
+  const run = (delivery: Record<string, 'pass' | 'fail' | 'error' | 'skip'>, extra = {}) =>
+    inventoryCheck({ base, delivery, addedLines: [], forbid: [], removable, ...extra });
+
+  it('passes when exactly the declared tests are gone, and counts them (and whose locks they were)', () => {
+    const check = run(
+      { 'app.L1::tests.keep::c': 'pass', 'app.L1::tests.keep::d': 'pass' },
+      { lockedBy: (key: string) => (key.endsWith('::a') ? 'GOAL-OLD' : undefined) },
+    );
+    expect(check.status).toBe('pass');
+    expect(check.removal).toEqual({
+      tests: ['app.L1::tests.old::a', 'app.L1::tests.old::b'],
+      locked: [{ goalId: 'GOAL-OLD', tests: ['app.L1::tests.old::a'] }],
+    });
+  });
+  it('is red naming a test that was lost without being declared (Review Focus 1)', () => {
+    const check = run({ 'app.L1::tests.keep::c': 'pass' });
+    expect(check.status).toBe('fail');
+    expect(check.reason).toBe('test missing: app.L1::tests.keep::d');
+  });
+  it('is red when a declared test is still there, whatever its status (Review Focus 2)', () => {
+    const delivery = {
+      'app.L1::tests.old::a': 'pass',
+      'app.L1::tests.keep::c': 'pass',
+      'app.L1::tests.keep::d': 'pass',
+    } as const;
+    const check = run(delivery);
+    expect(check.status).toBe('fail');
+    expect(check.reason).toBe('declared removed but still there: app.L1::tests.old::a');
+    expect(run({ ...delivery, 'app.L1::tests.old::a': 'skip' }).reason).toMatch(/still there: app.L1::tests.old::a/);
+  });
+  it('is red for a test under a declared file that the base did not have: a rename does not remove it (Codex)', () => {
+    const check = run({
+      'app.L1::tests.old::renamed': 'pass',
+      'app.L1::tests.keep::c': 'pass',
+      'app.L1::tests.keep::d': 'pass',
+    });
+    expect(check.status).toBe('fail');
+    expect(check.reason).toBe('declared removed but still there: app.L1::tests.old::renamed');
+  });
+  it('is red for a declared test the base does not have', () => {
+    const check = run(
+      { 'app.L1::tests.keep::c': 'pass', 'app.L1::tests.keep::d': 'pass' },
+      { removable: [...removable, { acceptanceId: 'AC-1', entry: 'app.L1::tests.ghost::z' }] },
+    );
+    expect(check.status).toBe('fail');
+    expect(check.reason).toContain('declared removed but not on the base: app.L1::tests.ghost::z');
+  });
+  it('changes nothing for a Goal that declares none', () => {
+    const check = inventoryCheck({ base, delivery: {}, addedLines: [], forbid: [] });
+    expect(check.removal).toBeUndefined();
+    expect(check.reason).toContain('test missing: app.L1::tests.old::a');
+  });
+});
+
 describe('scopeCheck', () => {
   const base = { paths: ['src/**'], needsHuman: ['pyproject.toml'], lockedFiles: ['tests/a.t'] };
   it("passes for files inside paths; .apos files and locked files are other checks' business", () => {

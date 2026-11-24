@@ -3,6 +3,8 @@ export type TestOutcome = {
   id: string;
   status: 'pass' | 'fail' | 'error' | 'skip';
   message?: string;
+  /** The `type` of the `<failure>` or `<error>` when the runner writes one (vitest, Surefire): the exception class. */
+  failureType?: string;
   /** The `file` attribute of the testcase when the runner writes one (pytest with junit_family=xunit1). */
   file?: string;
 };

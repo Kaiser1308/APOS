@@ -42,6 +42,8 @@ export type CheckResult = {
   baseFailing?: number;
   /** A metric layer: the measured value (the median of the runs). */
   metric?: { name: string; value: number };
+  /** A Goal with `removed` criteria: the old tests the delivery dropped, as declared, and which of them other Goals had locked. */
+  removal?: { tests: string[]; locked: { goalId: string; tests: string[] }[] };
   /** A refactor: how many captured tests it kept green, and which characterize Goals they come from. */
   preserved?: { tests: number; from: string[] };
 };

@@ -2,6 +2,7 @@ import { entryViolations } from '../domain/entry-rule.js';
 import { matchesAny, rootedGlobs } from '../domain/glob.js';
 import type { ProjectSetup } from '../domain/project-setup.js';
 import { goalKind } from '../domain/contracts.js';
+import { removalOf } from '../domain/removal.js';
 import { acceptanceProof, needsTest } from '../domain/test-plan.js';
 import {
   countAsserts,
@@ -84,14 +85,19 @@ export function inspectTests(input: InspectInput): Inspection {
   const kind = goalKind(state.spec);
   const bugfix = kind === 'bugfix';
   const characterize = kind === 'characterize';
+  // A Goal whose tests all say "the feature is gone" is the same: they are red because the feature is there, on the code as it is.
+  const needing = state.spec.acceptance.filter(needsTest);
+  const removal = needing.length > 0 && needing.every(item => item.proof === 'removed');
   const notATest = (file: string) =>
     file !== mapPath && !file.startsWith('.apos/') && (matchesAny(file, infraGlobs) || !owner(file));
   for (const file of changed) {
-    if ((bugfix || characterize) && notATest(file)) {
+    if ((bugfix || characterize || removal) && notATest(file)) {
       problems.push(
         bugfix
           ? `${file}: bugfix: the Tester adds tests only (tests.paths and tests.json), never code, a stub or test infrastructure: the bug must be red on the code as it is`
-          : `${file}: characterize: the Tester adds tests only (tests.paths and tests.json), never code, a stub or test infrastructure: the behaviour is captured on the code as it is`,
+          : removal
+            ? `${file}: removal: the Tester adds tests only (tests.paths and tests.json), never code, a stub or test infrastructure: the test of absence must be red on the code as it is, with the feature there`
+            : `${file}: characterize: the Tester adds tests only (tests.paths and tests.json), never code, a stub or test infrastructure: the behaviour is captured on the code as it is`,
       );
       continue;
     }
@@ -179,6 +185,7 @@ export function inspectTests(input: InspectInput): Inspection {
         outcomes,
         bugfix,
         characterize,
+        declared: removalOf(state.spec).map(item => item.entry),
         patterns: Object.fromEntries(
           Object.entries(setup.parts).map(([name, part]) => [
             name,

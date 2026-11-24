@@ -32,6 +32,7 @@ import { ShellExecutor, type CommandExecutor } from './shell-executor.js';
 import { GitWorktreeFactory, type WorkspaceFactory } from './gate-workspace.js';
 import type { AssuranceService } from './assurance-service.js';
 import { recordCloseGate } from './close-gate.js';
+import { hotfixCheck } from '../domain/hotfix.js';
 
 export type { CommandExecutor, ExecResult } from './shell-executor.js';
 export { ShellExecutor } from './shell-executor.js';
@@ -143,6 +144,11 @@ export class GateService {
         delivery: [],
         newFailures: [],
       });
+    // The evidence of a hotfix is the hotfix plus the tests: a delivery that does not contain the commit proves nothing about it.
+    if (state.hotfix)
+      checks.push(
+        hotfixCheck({ hotfix: state.hotfix, contains: this.inspector.contains(repoPath, state.hotfix.commit, head) }),
+      );
     const changedFiles = this.inspector.files(repoPath, head, base);
     // APOS's own milestone commits are legitimate changes under .apos/; anything else there is not.
     const guard = protectedCheck(goalId, untrustedProtectedFiles(this.store, goalId, repoPath, head, changedFiles));

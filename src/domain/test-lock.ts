@@ -203,7 +203,10 @@ export function failedAnAssertion(
   where: { notImplemented: string[]; loadError: string[] } | undefined,
 ): boolean {
   if (matchesAnyPattern(message, [...(where?.loadError ?? []), ...(where?.notImplemented ?? [])])) return false;
-  return !/^\s*(?:[\w$]+\.)*(?!Assert)\w*(?:Error|Exception)\b/.test(firstLine(message));
+  const line = firstLine(message);
+  // Jest words a failed assertion as `Error: expect(received).toBe(expected)`.
+  if (/^\s*(?:Error:\s*)?expect\(/.test(line)) return true;
+  return !/^\s*(?:[\w$]+\.)*(?!Assert)\w*(?:Error|Exception)\b/.test(line);
 }
 
 /** `<id>:<status>` of every test, sorted: two runs of the same commit must give the same text. */

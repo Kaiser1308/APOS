@@ -192,6 +192,7 @@ describe('judgeSuite', () => {
       'AssertionError: apply_coupon is still there',
       'expected true to be false // Object.is equality',
       'org.opentest4j.AssertionFailedError: expected: <false> but was: <true>',
+      'Error: expect(received).toBe(expected) // Object.is equality',
     ])
       expect(judge([{ id: 'a', status: 'fail', message }], 'removed'), message).toEqual([]);
   });

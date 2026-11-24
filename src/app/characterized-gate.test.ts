@@ -4,7 +4,7 @@ import { GitCommitInspector } from './integration.js';
 import { cleanProjects, testingProject } from './test-lock.test-support.js';
 import type { GoalState } from '../domain/transitions.js';
 import type { TestLock } from '../domain/test-lock.js';
-import { spec } from '../domain/fixtures.test-support.js';
+import { gateReport, proposal, spec } from '../domain/fixtures.test-support.js';
 import { sha256Of } from './git-files.js';
 
 afterEach(cleanProjects);
@@ -64,34 +64,31 @@ describe('coverageOfRefactor', () => {
 });
 
 describe('coverageOfRefactor after a Goal that removed tests (Review Focus 5)', () => {
-  const lockOf = (commit: string, files: Record<string, string>): TestLock =>
-    ({
-      commit,
-      files,
-      asserts: {},
-      map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L1', testIds: ['tests.a::one', 'tests.a::two'] }],
-      by: 't',
-    }) as TestLock;
-  const removal = (verifiedCommit: string, changedFiles: string[], removesTests: string[]): GoalState =>
-    ({
-      spec: {
-        ...spec,
-        id: 'GOAL-GONE',
-        acceptance: [{ ...spec.acceptance[0]!, proof: 'removed', removesTests }],
-      },
-      status: 'closed',
-      selected: true,
-      evidence: [],
-      reviews: [],
-      verifiedCommit,
-      gate: { changedFiles },
-    }) as unknown as GoalState;
-  const refactorOf = (base: string): GoalState =>
-    ({
-      spec: { ...spec, id: 'GOAL-R', kind: 'refactor', paths: ['src/legacy.txt'] },
-      status: 'executing',
-      proposal: { baseCommit: base },
-    }) as unknown as GoalState;
+  const lockOf = (commit: string, files: Record<string, string>): TestLock => ({
+    commit,
+    files,
+    asserts: {},
+    map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L1' as const, testIds: ['tests.a::one', 'tests.a::two'] }],
+    by: 't',
+  });
+  const removal = (verifiedCommit: string, changedFiles: string[], removesTests: string[]): GoalState => ({
+    spec: {
+      ...spec,
+      id: 'GOAL-GONE',
+      acceptance: [{ ...spec.acceptance[0]!, proof: 'removed', removesTests }],
+    },
+    status: 'closed',
+    selected: true,
+    evidence: [],
+    reviews: [],
+    verifiedCommit,
+    gate: { ...gateReport(verifiedCommit), changedFiles },
+  });
+  const refactorOf = (base: string): GoalState => ({
+    spec: { ...spec, id: 'GOAL-R', kind: 'refactor' as const, paths: ['src/legacy.txt'] },
+    status: 'executing',
+    proposal: { ...proposal, baseCommit: base },
+  });
 
   it('no longer asks for the removed tests, and holds the file as the removal left it', async () => {
     const p = await testingProject({ files: { 'src/legacy.txt': 'legacy\n' } });
@@ -193,5 +190,27 @@ describe('coverageOfRefactor after a Goal that removed tests (Review Focus 5)', 
     const [source] = coverageOfRefactor(p.dir, goals, goals[3]!, undefined, new GitCommitInspector()).sources;
     expect(source?.lock.map[0]?.testIds).toEqual(['tests.a::one']);
     expect(source?.lock.files['tests/a.t']).toBe(sha256Of(Buffer.from('case one pass\n')));
+  }, 60_000);
+
+  it('holds a file two characterize locks share as the removal left it, for both locks (Codex)', async () => {
+    const p = await testingProject({ files: { 'src/legacy.txt': 'legacy\n' } });
+    const one = p.commit({ 'tests/a.t': 'case one pass\n' }, 'lock C1');
+    const both = p.commit({ 'tests/a.t': 'case one pass\ncase two pass\n' }, 'lock C2 adds two');
+    const c1 = closed('GOAL-C1', one);
+    c1.testLock = {
+      ...lockOf(one, { 'tests/a.t': sha256Of(Buffer.from('case one pass\n')) }),
+      map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L1', testIds: ['tests.a::one'] }],
+    };
+    const c2 = closed('GOAL-C2', both);
+    c2.testLock = {
+      ...lockOf(both, { 'tests/a.t': sha256Of(Buffer.from('case one pass\ncase two pass\n')) }),
+      map: [{ acceptanceId: 'AC-1', part: 'app', layer: 'L1', testIds: ['tests.a::two'] }],
+    };
+    const after = p.commit({ 'tests/a.t': 'case two pass\n' }, 'removes one');
+    const goals = [c1, c2, removal(after, ['tests/a.t'], ['app.L1::tests.a::one']), refactorOf(after)];
+    const sources = coverageOfRefactor(p.dir, goals, goals[3]!, undefined, new GitCommitInspector()).sources;
+    const hash = sha256Of(Buffer.from('case two pass\n'));
+    expect(sources.map(item => item.lock.files['tests/a.t'])).toEqual([hash, hash]);
+    expect(sources.map(item => item.lock.map.length)).toEqual([0, 1]);
   }, 60_000);
 });

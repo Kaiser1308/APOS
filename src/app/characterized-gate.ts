@@ -28,7 +28,8 @@ export function coverageOfRefactor(
   const coverage = refactorCoverage({ paths, files: base ? filesAt(repo, base) : [], characterized: held });
   // A Goal that removed tests after the lock took them out of what a refactor must keep: the Human approved that list.
   if (inspector) {
-    const changed = (item: Characterization) => afterRemovals(repo, goals, item, inspector, base);
+    const all = coverage.held;
+    const changed = (item: Characterization) => afterRemovals(repo, goals, item, inspector, base, all);
     coverage.sources = coverage.sources.map(changed);
     coverage.held = coverage.held.map(changed);
   }
@@ -56,6 +57,7 @@ function afterRemovals(
   item: Characterization,
   inspector: CommitInspector,
   base: string | undefined,
+  all: Characterization[],
 ): Characterization {
   let lock = item.lock;
   const removals = goals
@@ -72,18 +74,23 @@ function afterRemovals(
   for (const state of removals) {
     const commit = state.verifiedCommit!;
     if (!inspector.contains(repo, lock.commit, commit)) continue;
-    // Only a removal that took tests out of this lock's map has anything to say about its files: one that merely edited a
-    // captured test it kept is not excused (the refactor's check still holds the file to what was locked).
-    const count = (item: typeof lock) => item.map.reduce((sum, entry) => sum + entry.testIds.length, 0);
-    if (count(withoutRemoved(lock, removalOf(state.spec), {})) === count(lock)) continue;
+    // Only a removal that took tests out of a lock has anything to say about that lock's files: one that merely edited a
+    // captured test it kept is not excused (the refactor's check still holds the file to what was locked). A file two locks
+    // share is excused for both, since the newer lock's hash would otherwise stay the pre-removal one.
+    const removed = removalOf(state.spec);
+    const count = (one: typeof lock) => one.map.reduce((sum, entry) => sum + entry.testIds.length, 0);
+    const lost = (one: typeof lock) => count(withoutRemoved(one, removed, {})) !== count(one);
+    const shared = new Set(all.filter(other => lost(other.lock)).flatMap(other => Object.keys(other.lock.files)));
+    const mine = lost(lock);
     const files = Object.fromEntries(
       Object.keys(lock.files)
-        .filter(path => state.gate?.changedFiles?.includes(path))
+        .filter(path => (mine || shared.has(path)) && state.gate?.changedFiles?.includes(path))
         .map(path => {
           const content = fileAt(repo, commit, path);
           return [path, content ? sha256Of(content) : undefined];
         }),
     );
+    if (!mine && !Object.keys(files).length) continue;
     lock = withoutRemoved(lock, removalOf(state.spec), files);
   }
   return { ...item, lock };

@@ -76,18 +76,17 @@ export async function removalProject(
 }
 
 /** A closed Goal of the project that locked acceptance tests (`<part>.<layer>` is `app.L2`), as the log would show it. */
-export const lockedBy = (id: string, testIds: string[]): GoalState =>
-  ({
-    spec: { ...spec, id },
-    status: 'closed',
-    selected: true,
-    evidence: [],
-    reviews: [],
-    testLock: {
-      commit: 'e'.repeat(40),
-      files: {},
-      asserts: {},
-      map: [{ acceptanceId: 'AC-9', part: 'app', layer: 'L2', testIds }],
-      by: 't',
-    },
-  }) as unknown as GoalState;
+export const lockedBy = (id: string, testIds: string[]): GoalState => ({
+  spec: { ...spec, id },
+  status: 'closed',
+  selected: true,
+  evidence: [],
+  reviews: [],
+  testLock: {
+    commit: 'e'.repeat(40),
+    files: {},
+    asserts: {},
+    map: [{ acceptanceId: 'AC-9', part: 'app', layer: 'L2' as const, testIds }],
+    by: 't',
+  },
+});

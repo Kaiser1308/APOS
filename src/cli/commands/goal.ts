@@ -9,6 +9,7 @@ import { GoalRegistryService } from '../../app/registry.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import { lockSummary } from '../lock-summary.js';
 import { buildAssuranceReport, renderAssuranceText } from '../../domain/assurance-report.js';
+import { hotfixRows, unprovenCount, unprovenLine } from '../../domain/hotfix.js';
 import { pinnedSetupOf } from '../test-lock-wiring.js';
 import { approvalSetupVersion, baselineMissingOf } from '../goal-approval.js';
 import { maintenanceApprovalProblems } from '../../domain/maintenance.js';
@@ -80,6 +81,8 @@ export function registerGoal(ctx: CliContext): void {
       withJournal(journal => {
         const state = journal.getGoal(id);
         if (!state) throw new UserError(`Goal not found: ${id}`);
+        const unproven = unprovenCount(hotfixRows(journal.listGoals(), ctx.now()));
+        if (unproven) write(unprovenLine(unproven));
         write(`${id}\t${state.status}\t${state.spec.outcome}`);
         write(state.setupVersion === undefined ? 'không có setup' : `setup v${state.setupVersion}`);
         for (const line of lockSummary(state)) write(line);
@@ -91,7 +94,7 @@ export function registerGoal(ctx: CliContext): void {
           setup = undefined;
         }
         write('');
-        for (const line of renderAssuranceText(buildAssuranceReport(state, setup)).split('\n')) write(line);
+        for (const line of renderAssuranceText(buildAssuranceReport(state, setup, ctx.now())).split('\n')) write(line);
       }),
     );
   // Gate A: the Human approves WHAT, together with the appetite only the controller will see.

@@ -1,3 +1,4 @@
+import { hotfixRows, redNote, short, unprovenCount, unprovenLine } from '../domain/hotfix.js';
 import { hasException } from '../domain/exceptions.js';
 import { orphanRequirements } from '../domain/plan.js';
 import { effectiveStatus, type GoalState } from '../domain/transitions.js';
@@ -19,7 +20,7 @@ const manualCheckResolved = (state: GoalState, notice: ManualCheckNotice): boole
  * What needs the Human, in the order `apos inbox` prints it. The CLI and the UI both read this, so the
  * two cannot disagree about which Goals are waiting.
  */
-export function buildInbox(repo: GoalRepository): InboxItem[] {
+export function buildInbox(repo: GoalRepository, now: string = new Date().toISOString()): InboxItem[] {
   const items: InboxItem[] = [];
   const goals = repo.listGoals();
   for (const state of goals) {
@@ -132,6 +133,7 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
       items.push({ goalId, kind: 'notice', detail: JSON.stringify(notice.data), at: notice.at });
     }
   }
+  items.push(...hotfixItems(goals, now));
   for (const orphan of orphanRequirements(goals)) {
     const events = repo.events(orphan.targetGoalId);
     const closedAt = [...events]
@@ -150,5 +152,47 @@ export function buildInbox(repo: GoalRepository): InboxItem[] {
       at: closedAt ?? events.at(-1)?.at,
     });
   }
+  return items;
+}
+
+/**
+ * What the Human owes to hotfixes they let through: a red line for one past its deadline, an ordinary one while it waits,
+ * and one project-wide count of those without evidence (a stopped Goal still counts). The lines name the absolute
+ * deadline, never "3h ago", so the same item reads the same on every call.
+ */
+function hotfixItems(goals: GoalState[], now: string): InboxItem[] {
+  const rows = hotfixRows(goals, now);
+  const items: InboxItem[] = [];
+  for (const { goal, hotfix, status } of rows) {
+    const red = redNote(hotfix);
+    const named = `hotfix ${short(hotfix.commit)}`;
+    if (status === 'overdue')
+      items.push({
+        goalId: goal.spec.id,
+        kind: 'needs-decision',
+        detail: JSON.stringify({
+          why: 'hotfix-overdue',
+          note: `${named} quá hạn ${hotfix.dueAt}, chưa có bằng chứng${red ? `; ${red}` : ''}`,
+        }),
+        at: hotfix.dueAt,
+      });
+    if (status === 'waiting')
+      items.push({
+        goalId: goal.spec.id,
+        kind: 'notice',
+        detail: JSON.stringify({
+          kind: 'hotfix-waiting',
+          note: `${named} đang chờ bằng chứng, hạn ${hotfix.dueAt}${red ? `; ${red}` : ''}`,
+        }),
+        at: hotfix.acceptedAt,
+      });
+  }
+  const count = unprovenCount(rows);
+  if (count)
+    items.push({
+      goalId: 'PROJECT',
+      kind: 'notice',
+      detail: JSON.stringify({ kind: 'hotfix-unproven', count, note: unprovenLine(count) }),
+    });
   return items;
 }

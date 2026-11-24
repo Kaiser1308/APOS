@@ -20,7 +20,7 @@ export function parseDurationMs(raw: string | undefined, defaultMs = 300_000): n
   return Math.max(1, Math.round(value * mult));
 }
 
-export function buildHumanInbox(repo: GoalRepository): HumanInboxItem[] {
+export function buildHumanInbox(repo: GoalRepository, now?: string): HumanInboxItem[] {
   const gates: HumanInboxItem[] = [];
   for (const state of repo.listGoals()) {
     const events = repo.events(state.spec.id);
@@ -39,7 +39,7 @@ export function buildHumanInbox(repo: GoalRepository): HumanInboxItem[] {
         at: [...events].reverse().find(item => item.type === 'goal-approved')?.at,
       });
   }
-  return [...gates, ...buildInbox(repo)];
+  return [...gates, ...buildInbox(repo, now)];
 }
 
 export const itemCursorId = (item: HumanInboxItem): string =>

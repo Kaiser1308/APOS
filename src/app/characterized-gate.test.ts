@@ -263,4 +263,29 @@ describe('coverageOfRefactor after a Goal that removed tests (Review Focus 5)', 
     const [source] = coverageOfRefactor(p.dir, goals, goals[2]!, undefined, new GitCommitInspector()).sources;
     expect(source?.lock.files['tests/test_calc.py']).toBe(sha256Of(Buffer.from('class TestCalc:\n  add\n')));
   }, 60_000);
+
+  it('adjusts neither file when two parts have the same module path and the lock cannot say which one lost the test (Codex)', async () => {
+    const p = await testingProject({ files: { 'src/legacy.txt': 'legacy\n' } });
+    const text = 'case mul pass\ncase add pass\n';
+    const locked = p.commit({ 'api/tests/test_calc.py': text, 'web/tests/test_calc.py': text }, 'lock');
+    const characterize = closed('GOAL-C', locked);
+    characterize.testLock = {
+      ...lockOf(locked, {
+        'api/tests/test_calc.py': sha256Of(Buffer.from(text)),
+        'web/tests/test_calc.py': sha256Of(Buffer.from(text)),
+      }),
+      map: [{ acceptanceId: 'AC-1', part: 'api', layer: 'L1', testIds: ['tests.test_calc::test_mul'] }],
+    };
+    const weaker = p.commit(
+      { 'api/tests/test_calc.py': 'case add pass\n', 'web/tests/test_calc.py': '# weaker\n' },
+      'x',
+    );
+    const goals = [
+      characterize,
+      removal(weaker, ['api/tests/test_calc.py', 'web/tests/test_calc.py'], ['api.L1::tests.test_calc::test_mul']),
+      refactorOf(weaker),
+    ];
+    const [source] = coverageOfRefactor(p.dir, goals, goals[2]!, undefined, new GitCommitInspector()).sources;
+    expect(source?.lock.files['web/tests/test_calc.py']).toBe(sha256Of(Buffer.from(text)));
+  }, 60_000);
 });

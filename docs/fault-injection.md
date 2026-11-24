@@ -248,6 +248,7 @@ A Goal with a `removed` criterion may lose the tests it declared (`removesTests`
 | Two characterize locks share a test file and a removal took a test of only one of them | the file's post-removal version is held for both locks, each keeps its surviving tests | `characterized-gate.test.ts` › holds a file two characterize locks share as the removal left it |
 | A removal deletes a test of one captured file and weakens a kept test in another | only the file that held a removed test is rehashed; the other stays held to what was locked | `characterized-gate.test.ts` › rehashes only the files that held a removed test |
 | A test of absence crashes with a runner-reported exception class (vitest `type="TypeError"`) | refused: the reported class is believed over the message | `test-lock.test.ts` › believes the exception class a runner reports |
+| A removal's module path exists in two parts of the same lock (`api/tests/test_calc.py`, `web/tests/test_calc.py`) | the lock cannot say which one lost the test: neither file is rehashed, both stay held to what was locked | `characterized-gate.test.ts` › adjusts neither file when two parts have the same module path |
 
 ## What the table does not claim (v3.2 T0, #50)
 

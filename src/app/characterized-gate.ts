@@ -54,23 +54,30 @@ export function coverageOfRefactor(
  * adjusts nothing: its file stays held to what was locked.
  */
 function filesOfRemoved(lock: Characterization['lock'], removed: RemovedTest[]): string[] {
-  const prefixes = lock.map.flatMap(entry =>
-    entry.testIds
-      .filter(id => removed.some(item => entryMatches(item.entry, testKey(entry.part, entry.layer, id))))
-      .map(id => id.split('::')[0]!),
+  const prefixes = new Set(
+    lock.map.flatMap(entry =>
+      entry.testIds
+        .filter(id => removed.some(item => entryMatches(item.entry, testKey(entry.part, entry.layer, id))))
+        .map(id => id.split('::')[0]!),
+    ),
   );
-  return Object.keys(lock.files).filter(path => {
+  const holds = (path: string, prefix: string) => {
     const bare = path.replace(/\.[^./]+$/, '');
     const dotted = bare.replaceAll('/', '.');
     // A class inside the module (pytest `tests.test_calc.TestCalc`) continues the dotted path.
-    return prefixes.some(
-      prefix =>
-        prefix === path ||
-        prefix === bare ||
-        prefix === dotted ||
-        prefix.startsWith(`${dotted}.`) ||
-        bare.endsWith(`/${prefix.replaceAll('.', '/')}`),
+    return (
+      prefix === path ||
+      prefix === bare ||
+      prefix === dotted ||
+      prefix.startsWith(`${dotted}.`) ||
+      bare.endsWith(`/${prefix.replaceAll('.', '/')}`)
     );
+  };
+  // The lock does not say which part a file is in: a module path two files answer to (the same relative path in two parts)
+  // cannot be told apart, and adjusts neither.
+  return [...prefixes].flatMap(prefix => {
+    const paths = Object.keys(lock.files).filter(path => holds(path, prefix));
+    return paths.length === 1 ? paths : [];
   });
 }
 

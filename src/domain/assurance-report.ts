@@ -286,6 +286,9 @@ const WHY: Record<LayerWhy, string> = {
   proof: ' (tiêu chí)',
 };
 const STAGE_NAME: Record<Stage, string> = { submit: 'submit', integrate: 'ghép', close: 'đóng' };
+/** The same words on every table: what the evidence above does not prove. The README's "Limits" section says it at length. */
+export const LIMITS =
+  'xác nhận Human chỉ chống duyệt nhầm, chưa phải ranh giới bảo mật; --by agent:<x> là tự khai; APOS chứng minh code đạt tiêu chí đã duyệt, không chứng minh tiêu chí hay bộ test là đủ (README.md, mục "What the evidence does not prove")';
 const label = (text: string) => `  ${text.padEnd(19)}`;
 
 /** The text of spec 6.9: what the machine proved, what the Human confirmed by hand, who approved on whose behalf, what is off. */
@@ -364,5 +367,6 @@ export function renderAssuranceText(report: AssuranceReport): string {
   );
   if (report.exitOnly.length) lines.push(`${label('Chỉ có mã thoát')}${report.exitOnly.join(', ')}`);
   for (const note of report.off) lines.push(`${label('Tắt / chưa kiểm')}${note}`);
+  lines.push(`${label('Giới hạn')}${LIMITS}`);
   return lines.join('\n');
 }

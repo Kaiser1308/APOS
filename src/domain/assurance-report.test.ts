@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildAssuranceReport, renderAssuranceText } from './assurance-report.js';
+import { readFileSync } from 'node:fs';
+import { buildAssuranceReport, LIMITS, renderAssuranceText } from './assurance-report.js';
 import type { CheckResult, GateReport } from './gate.js';
 import { parseSetupObject } from './project-setup.js';
 import type { GoalState } from './transitions.js';
@@ -272,7 +273,8 @@ describe('renderAssuranceText', () => {
         Lớp khâu submit    WP-MAIN: L1 unit ✓ · L3 integ bớt · L5 scan (tiêu chí) ✓ (2 finding dưới mức chặn)
         Ngoại lệ           floor-reduced WP-MAIN:submit:L3 (agent:lead): docs only
         Agent duyệt thay   1 chỗ: floor-reduced WP-MAIN:submit:L3 (agent:lead)
-        Tắt / chưa kiểm    app.L5.mut tắt: Goal không gắn cờ mutation"
+        Tắt / chưa kiểm    app.L5.mut tắt: Goal không gắn cờ mutation
+        Giới hạn           xác nhận Human chỉ chống duyệt nhầm, chưa phải ranh giới bảo mật; --by agent:<x> là tự khai; APOS chứng minh code đạt tiêu chí đã duyệt, không chứng minh tiêu chí hay bộ test là đủ (README.md, mục "What the evidence does not prove")"
     `);
   });
 });
@@ -408,5 +410,18 @@ describe('the table of a Goal that removes a feature', () => {
     const text = renderAssuranceText(buildAssuranceReport(removing()));
     expect(text).toContain('Xoá tính năng      AC-1: chưa chứng minh');
     expect(text).toContain('khai xoá 2 mục');
+  });
+});
+
+describe('the Limits line', () => {
+  it('ends every table, the same words each time, and points at the README section that says it at length', () => {
+    for (const state of [base, { ...base, setupVersion: undefined }]) {
+      const lines = renderAssuranceText(buildAssuranceReport(state)).split('\n');
+      expect(lines.at(-1)).toBe(`  Giới hạn           ${LIMITS}`);
+    }
+    expect(LIMITS).toContain('chưa phải ranh giới bảo mật');
+    expect(LIMITS).toContain('--by agent:<x> là tự khai');
+    expect(LIMITS).toContain('không chứng minh tiêu chí hay bộ test là đủ');
+    expect(readFileSync('README.md', 'utf8')).toContain('### What the evidence does not prove');
   });
 });

@@ -244,3 +244,8 @@ A Goal with a `removed` criterion may lose the tests it declared (`removesTests`
 | A Multi-WP package builds on a green package that already removed tests | those tests are not this package's loss: the entries of green dependencies the delivery contains are allowed too (never an unrelated package's) | `removal-gate.test.ts` › a Multi-WP package that builds on a package which already removed tests |
 | A removal closes after the refactor's base was pinned, or on a branch the base does not contain | the refactor still requires the tests, as locked: only removals the base holds count | `characterized-gate.test.ts` › ignores a removal the refactor base does not contain |
 | Two removals took different tests out of the same captured file, and their Goal ids sort the other way round | applied in the order of their commits: the newest removal's file stands | `characterized-gate.test.ts` › applies removals in the order of their commits |
+| A test of absence fails with Jest's `Error: expect(received).toBe(expected)` | an assertion: accepted (only other exception classes are refused) | `test-lock.test.ts` › accepts a removed test that failed an assertion |
+
+## What the table does not claim (v3.2 T0, #50)
+
+Every assurance table ends with the same `Giới hạn` line: the Human confirmation is a guard against mistakes and not a security boundary (any process that can run `apos` can pass `--on-behalf`), `--by agent:<x>` is the caller's own word, and APOS proves the code meets the approved criteria, not that the criteria or tests are enough. The gate does not change; the words are in the README (Limits › What the evidence does not prove) and tested in `assurance-report.test.ts` › the Limits line.

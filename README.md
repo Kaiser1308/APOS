@@ -398,9 +398,12 @@ GOAL-001  setup v1  (app: python)
   Ngoại lệ           floor-reduced WP-MAIN:submit:L2 (agent:lead): ...
   Agent duyệt thay   1 chỗ: floor-reduced WP-MAIN:submit:L2 (agent:lead)
   Tắt / chưa kiểm    L0 không chạy ở khâu submit: setup không có công cụ cho lớp này
+  Giới hạn           xác nhận Human chỉ chống duyệt nhầm, chưa phải ranh giới bảo mật; --by agent:<x> là tự khai; APOS chứng minh code đạt tiêu chí đã duyệt, không chứng minh tiêu chí hay bộ test là đủ (README.md, mục "What the evidence does not prove")
 ```
 
 A Goal on a setup approved with no baseline opens with a first line, `BẢO ĐẢM THẤP: repo chưa có test nền (app.L1, app.L2)`. A characterize Goal adds `Chụp hành vi` (the code it captures, the tests locked), and a refactor adds `Giữ hành vi` (`giữ nguyên hành vi: <n> test chụp từ <GOAL-…>, xanh trước trên <base>, xanh sau trên <commit>`, or that it is not proved yet).
+
+The last line, `Giới hạn`, is the same on every table: what the evidence above does not prove ([What the evidence does not prove](#what-the-evidence-does-not-prove)).
 
 It says what the machine proved, what you confirm by hand, which layers were cut and by whom (`human`, `on-behalf:<where>`, `agent:<name>`), tools whose only evidence is an exit code, and what is off (a flag-gated tool, a floor layer with no tool, the entry check for a stack with no rule, no setup at all).
 
@@ -437,8 +440,8 @@ The repo gets readable Goal documents (`.apos/goals/<id>/`) committed only at mi
 ## Trust model
 
 - **The log is tamper-evident, not a security boundary.** Each event carries the hash of its predecessor, so an edit breaks the chain and is detected; a process running as the same OS user can still read or delete files. APOS assumes a single host operated by a trusted developer.
-- **The Human decides through a person, not through a process.** Human commands need the Goal id typed back in a terminal, or an explicit `--on-behalf "<why>"` that is written to the log. A script or agent without a terminal cannot do either by accident. This stops a mistake or a prompt-injected agent, not a process determined to pass `--on-behalf`; the log shows when it did.
-- **Lead commands are not authenticated.** `lead *`, `package *` and `integration gate` take `--by <name>` (default `lead`) for the log only. They can only describe a plan and submit commits; the gate, not the caller, decides.
+- **The Human decides through a person, not through a process.** Human commands need the Goal id typed back in a terminal, or an explicit `--on-behalf "<why>"` that is written to the log. A script or agent without a terminal cannot do either by accident. This stops a mistake or a prompt-injected agent, not a process determined to pass `--on-behalf`; the log shows when it did. It is not a security boundary: see [What the evidence does not prove](#what-the-evidence-does-not-prove).
+- **Lead commands are not authenticated.** `lead *`, `package *` and `integration gate` take `--by <name>` (default `lead`) for the log only. They can only describe a plan and submit commits; the gate, not the caller, decides. A name (`--by agent:<x>`) is the caller's own word: APOS does not authenticate it.
 - **An LLM's word is never evidence.** Verification needs a green gate APOS ran on the exact commit. Owner-submitted evidence is a report. A review (a person, a model or an AI tool) is advice, and blocks only through a test that APOS runs and finds red: see [Reviews](#reviews).
 - **The gate protects its own rules.** A delivery that rewrites APOS-managed files (`.apos/`: skills, Goal documents, sources) is red (`APOS-PROTECTED`). Source snapshots are hashed with line endings normalized; a changed or missing snapshot refuses approval and gating.
 - **Closing is tied to a gate.** Nothing, `--on-behalf` included, closes a Goal on a commit that is not the last green gate.
@@ -558,10 +561,18 @@ Conventions and the dependency rules: [`AGENTS.md`](AGENTS.md), [`docs/architect
 - **The gate runs the Goal's own checks.** What it proves is only as good as the checks the Goal names, the tests locked from them and the layers the setup defines; the assurance table says which of these ran.
 - **A characterize Goal captures behaviour, not correctness.** Its tests pass because they describe what the code does today; APOS cannot tell a wanted behaviour from a defect, nor whether the tests reach every path of the code in `covers` (the assertion count is rough, there is no coverage). A refactor is as safe as the captured tests are complete. The `mutation` flag on the refactor Goal is how to see how much they would catch.
 - **The low-assurance label judges nothing differently.** A layer whose tool finds no test is red or `unverifiable` at the gate and at close, labelled or not: a legacy setup lists only the layers that have tests to run (L2 for the captured tests), or cuts one with a `floor-reduced` exception. Goals keep the label until a new setup version is approved on a probe that finds tests.
-- **Single host, trusted user** (see the trust model). Windows and Linux; Node 24+.
+- **Single host, trusted user** (see the trust model and [What the evidence does not prove](#what-the-evidence-does-not-prove)). Windows and Linux; Node 24+.
 - **Event log compatibility.** Controller-published document milestones are `documents-published` events with commit and file hashes. Do not roll back to a build older than v3 once a log holds v3 events: such a build does not know them.
 - **A Goal is one repo.** A Goal spanning several repos is out of scope for now.
 - **Submissions are on the Lead's word.** APOS does not watch a branch for new commits; the Lead runs `package submit`.
+
+### What the evidence does not prove
+
+Three limits that the assurance table of every Goal repeats in its last line (`Giới hạn`), so nobody reads a green table as more than it is:
+
+1. **The Human confirmation prevents a mistake; it is not a security boundary.** A Human command asks for the Goal id typed at a terminal, or for `--on-behalf "<where the Human agreed>"`, which is written to the log. That stops an agent or a script that approves by accident, and shows who said what. It does not stop a process that is determined to: any process that can run `apos` can pass `--on-behalf`, with any text. The log shows that it did; nothing prevents it.
+2. **A name given by `--by` is the caller's own word.** `--by agent:lead`, `--by agent:<x>` and the `by` of a test lock or an exception are written to the log as they are passed. APOS does not authenticate who calls, so the table's "agent duyệt thay" lists what was *claimed*, not what was proved.
+3. **APOS proves that the code meets the criteria the Human approved; it does not prove that the criteria, or the tests locked from them, are enough.** A criterion that misses a case, a test that asserts too little (the assertion count is a rough regex line count), a characterize test that captures a defect, a `removesTests` list that leaves a stale test behind: all of them give a green gate. Reading the criteria, and the list of tests a removal deletes, is the Human's job at `goal approve`.
 
 ## Roadmap
 

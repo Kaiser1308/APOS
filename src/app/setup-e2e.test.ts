@@ -254,6 +254,22 @@ it.skipIf(!hasCmake)(
   180_000,
 );
 
+it.skipIf(!hasGo)(
+  'probes a passing Go test that logs a missing executable',
+  async () => {
+    const dir = temp('apos-e2e-go-logged-error-');
+    execFileSync('git', ['init', '-q', dir]);
+    commitAll(dir, {
+      'go.mod': 'module example.com/demo\n\ngo 1.22\n',
+      'check_test.go':
+        'package demo\nimport ("os/exec"; "testing")\nfunc TestMissing(t *testing.T) { t.Log(exec.Command("apos-tool-does-not-exist").Run()) }\n',
+    });
+    const report = await probeDraft(dir, 'go');
+    expect(report.results.filter(item => !item.ok)).toEqual([]);
+  },
+  180_000,
+);
+
 describe.skipIf(!hasPytest)('python draft on a typical pytest repo', () => {
   const calc = `import pytest
 

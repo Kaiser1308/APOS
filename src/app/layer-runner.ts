@@ -16,13 +16,18 @@ export type RunnerDeps = {
   timeoutMs?: number;
 };
 
-const NOT_FOUND =
-  /command not found|is not recognized as an internal or external command|executable file not found in \$PATH|: not found$/im;
+const NOT_FOUND = /command not found|is not recognized as an internal or external command|: not found$/im;
+const EXECUTABLE_NOT_FOUND = /executable file not found in (?:\$PATH|%PATH%)/im;
 /** Why a command did not run at all (timed out, never exited, not installed), or undefined when it ran. */
 export const notRunnable = (result: ExecResult): string | undefined => {
   if (result.timedOut) return 'timed out';
   if (result.exitCode === null) return 'did not exit';
-  if (result.exitCode === 127 || NOT_FOUND.test(result.output)) return 'command not found';
+  if (
+    result.exitCode === 127 ||
+    NOT_FOUND.test(result.output) ||
+    (result.exitCode !== 0 && EXECUTABLE_NOT_FOUND.test(result.output))
+  )
+    return 'command not found';
   return undefined;
 };
 

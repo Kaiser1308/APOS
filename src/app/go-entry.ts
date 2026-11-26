@@ -86,7 +86,11 @@ export function checkGoEntries(input: {
     if (text === undefined) return fail(`cannot read ${file}`);
     try {
       const helper = parseCandidate(text, file);
-      if (!helper.active || helper.package !== parsed.package) continue;
+      const sameBinary =
+        helper.package === parsed.package ||
+        helper.package === `${parsed.package}_test` ||
+        `${helper.package}_test` === parsed.package;
+      if (!helper.active || !sameBinary) continue;
       if (!input.allowed(file)) return fail(`test helper ${file} is outside allowed paths`);
       sources.push({ file, text, parsed: helper });
       visited.add(file);
@@ -107,7 +111,7 @@ export function checkGoEntries(input: {
     if (text === undefined) return fail(`cannot read ${file}`);
     try {
       const source = parseCandidate(text, file);
-      if (source.active && source.package === parsed.package) {
+      if (source.active && sources.some(item => item.parsed.package === source.package)) {
         if (!input.allowed(file)) return [`${input.file}: same-package test can access undeclared ${file}`];
         if (input.isTestFile?.(file)) {
           sources.push({ file, text, parsed: source });

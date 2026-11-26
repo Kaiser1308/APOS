@@ -7,22 +7,22 @@ detect:
 layers:
   L0:
     - id: host-build
-      command: cmake -S . -B build && cmake --build build
+      command: cmake -S . -B build && cmake --build build --config Debug
       format: exit
     - id: idf-build
       command: idf.py build
       format: exit
   L1:
     - id: ctest-unit
-      command: cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on-failure --output-junit {report}
+      command: cmake -S . -B build && cmake --build build --config Debug && ctest --test-dir build -C Debug --output-on-failure --output-junit {report}
       format: junit
       testFileRequired: true
   L2:
     - id: ctest-acceptance
-      command: cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on-failure --output-junit {report}
+      command: cmake -S . -B build && cmake --build build --config Debug && ctest --test-dir build -C Debug --output-on-failure --output-junit {report}
       format: junit
       testFileRequired: true
-      runOne: cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on-failure --output-junit {report} -R "^{name|regex}$"
+      runOne: cmake -S . -B build && cmake --build build --config Debug && ctest --test-dir build -C Debug --output-on-failure --output-junit {report} -R "^{name|regex}$"
 loadErrorPatterns: ['CMake Error', 'Build failed', 'error:']
 noTestsPatterns: ['No tests were found!!!']
 manifests: [idf_component.yml, dependencies.lock]

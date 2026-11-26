@@ -28,8 +28,10 @@ const vitestBin = resolve('node_modules', '.bin', 'vitest');
 const hasVitest = existsSync(vitestBin);
 const hasGo = spawnSync('go', ['version']).status === 0 && spawnSync('gotestsum', ['--version']).status === 0;
 const hasCmake = ['cmake', 'ctest', 'c++'].every(bin => spawnSync(bin, ['--version']).status === 0);
+const hasNinja = spawnSync('ninja', ['--version']).status === 0;
 if (!hasGo) console.warn('Skipping Go e2e: go and gotestsum must both be on PATH.');
 if (!hasCmake) console.warn('Skipping ESP-IDF host e2e: cmake, ctest and c++ must be on PATH.');
+if (!hasNinja) console.warn('Skipping multi-config host e2e: ninja must be on PATH.');
 
 function commitAll(dir: string, files: Record<string, string>): string {
   for (const [name, content] of Object.entries(files)) {
@@ -199,6 +201,27 @@ it.skipIf(!hasGo)(
         .filter(item => item.layer === 'L1' || item.layer === 'L2')
         .every(item => !item.ok && item.outcome !== 'no-tests'),
     ).toBe(true);
+  },
+  180_000,
+);
+
+it.skipIf(!hasCmake || !hasNinja)(
+  'probes ESP-IDF host tests with a real multi-config generator',
+  async () => {
+    const dir = temp('apos-e2e-esp-multiconfig-');
+    execFileSync('git', ['init', '-q', dir]);
+    cpSync(resolve('examples/cpp-espidf-host'), dir, { recursive: true });
+    commitAll(dir, {});
+    const previous = process.env.CMAKE_GENERATOR;
+    process.env.CMAKE_GENERATOR = 'Ninja Multi-Config';
+    try {
+      const report = await probeDraft(dir, 'cpp-espidf', true);
+      expect(report.results.filter(item => !item.ok)).toEqual([]);
+      expect(report.results.find(item => item.layer === 'L2')?.reason).toMatch(/runOne ok/);
+    } finally {
+      if (previous === undefined) delete process.env.CMAKE_GENERATOR;
+      else process.env.CMAKE_GENERATOR = previous;
+    }
   },
   180_000,
 );

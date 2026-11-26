@@ -93,7 +93,7 @@ func indexTests(root string) (map[string][]string, error) {
 			}
 			for _, decl := range parsed.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+				if !ok || fn.Recv != nil || !(strings.HasPrefix(fn.Name.Name, "Test") || strings.HasPrefix(fn.Name.Name, "Fuzz") || strings.HasPrefix(fn.Name.Name, "Example")) {
 					continue
 				}
 				key := p.ImportPath + "::" + fn.Name.Name

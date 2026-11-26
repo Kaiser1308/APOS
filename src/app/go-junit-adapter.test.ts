@@ -7,6 +7,47 @@ import { readJunit } from '../domain/results/junit.js';
 
 const available = spawnSync('go', ['version']).status === 0 && spawnSync('gotestsum', ['--version']).status === 0;
 
+it.skipIf(!available)(
+  'maps Go examples and fuzz seeds and runs each alone',
+  () => {
+    const dir = mkdtempSync(join(tmpdir(), 'apos-go-extra-tests-'));
+    try {
+      writeFileSync(join(dir, 'go.mod'), 'module example.com/demo\n\ngo 1.22\n');
+      writeFileSync(join(dir, 'calc.go'), 'package demo\nfunc Add(a, b int) int { return a + b }\n');
+      writeFileSync(
+        join(dir, 'calc_test.go'),
+        'package demo\nimport ("fmt"; "testing")\nfunc ExampleAdd() { fmt.Println(2)\n// Output: 2\n}\nfunc FuzzAdd(f *testing.F) { f.Add(1); f.Fuzz(func(t *testing.T, n int) { if n < 0 { t.Fatal(n) } }) }\n',
+      );
+      const report = join(dir, 'report.xml');
+      const run = (...args: string[]) =>
+        execFileSync('go', ['run', resolve('scripts/go-junit/main.go'), '--report', report, ...args], {
+          cwd: dir,
+          env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' },
+          encoding: 'utf8',
+        });
+      run();
+      const full = readJunit(readFileSync(report, 'utf8'));
+      expect(full).toMatchObject({
+        kind: 'tests',
+        tests: expect.arrayContaining([
+          expect.objectContaining({ id: 'calc_test.go::ExampleAdd' }),
+          expect.objectContaining({ id: 'calc_test.go::FuzzAdd/seed#0' }),
+        ]),
+      });
+      for (const name of ['ExampleAdd', 'FuzzAdd/seed#0']) {
+        run('--file', 'calc_test.go', '--test', name);
+        expect(readJunit(readFileSync(report, 'utf8'))).toMatchObject({
+          kind: 'tests',
+          tests: [{ id: `calc_test.go::${name}` }],
+        });
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
 it.skipIf(!available || process.platform === 'win32')(
   'refuses a test source that is a symlink outside the checkout',
   () => {

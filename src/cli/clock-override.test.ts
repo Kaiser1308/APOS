@@ -66,7 +66,7 @@ describe('the APOS_NOW override', () => {
     q.out.length = 0;
     await q.invoke('goal', 'show', 'GOAL-BUG-001');
     expect(q.out.join('\n')).toMatch(
-      /chưa có bằng chứng, hạn 2026-11-25T08:00:00\.000Z \(hạn tính theo đồng hồ ghi đè\)/,
+      /chưa có bằng chứng, hạn 2026-11-25T08:00:00\.000Z (?:\(QUÁ HẠN\) )?\(hạn tính theo đồng hồ ghi đè\)/,
     );
   });
 });

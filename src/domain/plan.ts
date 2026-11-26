@@ -173,7 +173,9 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
 
     // The adopting brief carries the latest disposition; follow its own
     // deferral chain within that source just as for legacy requirements.
-    const lastAdoption = adopted.at(-1);
+    const lastAdoption = adopted
+      .filter(e => e.req.disposition !== 'acceptance' || effectiveStatus(e.goal) !== 'stopped')
+      .at(-1);
     const dispositionEntries = lastAdoption
       ? adopted.filter(e => keyOf(e.goal, e.req.id) === keyOf(lastAdoption.goal, lastAdoption.req.id))
       : item.entries;

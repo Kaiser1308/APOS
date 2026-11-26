@@ -151,7 +151,7 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
     ).rejects.toThrow(/sketch|acceptance/i);
   });
 
-  it('notifies once when a closed Goal orphans a deferred requirement, and clears the notice when adopted or out-of-scope', async () => {
+  it.each(['adopt', 'revise'] as const)('clears an orphan notice through %s', async action => {
     const { dir, home, sourceFile, invoke } = await setup();
     const goal1 = {
       ...spec,
@@ -211,50 +211,66 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
         .filter(item => item.type === 'human-notified' && JSON.stringify(item.data).includes('orphan-requirement')),
     ).toHaveLength(0);
 
-    // A new brief explicitly adopts the original requirement and survives journal replay.
-    const newBrief = join(dir, 'new-brief.md');
-    writeFileSync(newBrief, 'Adopt the deferred requirement');
-    const adopter = {
-      id: 'GOAL-003',
-      version: 1,
-      outcome: 'Preserve data',
-      requirements: [
-        {
-          id: 'R-2',
-          sourceSpan: 'new brief',
-          text: 'never lose data',
-          disposition: 'acceptance',
-          adopts: { sourceSha256: createHash('sha256').update(sourceText).digest('hex'), requirementId: 'R-2' },
-        },
-      ],
-    };
-    writeFileSync(join(dir, 'g3.json'), JSON.stringify(adopter));
-    await invoke('goal', 'create', '--file', join(dir, 'g3.json'), '--source', newBrief);
-    expect(
-      buildInbox(new ReadOnlyJournal(home)).filter(item => item.detail.includes('orphan-requirement')),
-    ).toHaveLength(0);
+    if (action === 'adopt') {
+      // A new brief explicitly adopts the original requirement and survives journal replay.
+      const newBrief = join(dir, 'new-brief.md');
+      writeFileSync(newBrief, 'Adopt the deferred requirement');
+      const adopter = {
+        id: 'GOAL-003',
+        version: 1,
+        outcome: 'Preserve data',
+        requirements: [
+          {
+            id: 'R-2',
+            sourceSpan: 'new brief',
+            text: 'never lose data',
+            disposition: 'acceptance',
+            adopts: { sourceSha256: createHash('sha256').update(sourceText).digest('hex'), requirementId: 'R-2' },
+          },
+        ],
+      };
+      writeFileSync(join(dir, 'g3.json'), JSON.stringify(adopter));
+      await invoke('goal', 'create', '--file', join(dir, 'g3.json'), '--source', newBrief);
+      expect(
+        buildInbox(new ReadOnlyJournal(home)).filter(item => item.detail.includes('orphan-requirement')),
+      ).toHaveLength(0);
 
-    // Revise GOAL-001 to mark R-2 out-of-scope -> notice disappears
-    const goal1Revised = {
-      ...goal1,
-      version: 2,
-      requirements: [
-        spec.requirements[0],
-        {
-          id: 'R-2',
-          sourceSpan: 'line 4',
-          text: 'never lose data',
-          disposition: 'excluded',
-          exclusion: { kind: 'out-of-scope' },
-          exclusionReason: 'Human decided out of scope',
-        },
-      ],
-    };
-    writeFileSync(join(dir, 'g1-v2.json'), JSON.stringify(goal1Revised));
-    await invoke('goal', 'revise', '--file', join(dir, 'g1-v2.json'), '--source', sourceFile);
+      const stopped = ProjectJournal.open(dir, home, newEvent);
+      stopped.journal.append({
+        id: 'STOP-003',
+        goalId: 'GOAL-003',
+        type: 'outcome-stopped',
+        at: '2026-11-18T06:00:01.000Z',
+      });
+      stopped.close();
+      expect(
+        buildInbox(new ReadOnlyJournal(home)).filter(
+          item => item.detail.includes('orphan-requirement') && item.detail.includes('R-2'),
+        ),
+      ).toHaveLength(1);
+    } else {
+      // Revise GOAL-001 to mark R-2 out-of-scope -> notice disappears
+      const goal1Revised = {
+        ...goal1,
+        version: 2,
+        requirements: [
+          spec.requirements[0],
+          {
+            id: 'R-2',
+            sourceSpan: 'line 4',
+            text: 'never lose data',
+            disposition: 'excluded',
+            exclusion: { kind: 'out-of-scope' },
+            exclusionReason: 'Human decided out of scope',
+          },
+        ],
+      };
+      writeFileSync(join(dir, 'g1-v2.json'), JSON.stringify(goal1Revised));
+      await invoke('goal', 'revise', '--file', join(dir, 'g1-v2.json'), '--source', sourceFile);
 
-    const inbox2 = buildInbox(new ReadOnlyJournal(home));
-    expect(inbox2.filter(item => item.detail.includes('orphan-requirement'))).toHaveLength(0);
+      const inbox2 = buildInbox(new ReadOnlyJournal(home));
+      expect(inbox2.filter(item => item.detail.includes('orphan-requirement'))).toHaveLength(0);
+    }
   });
 
   it('replays legacy Goals that only have exclusionReason as unplanned without breaking the event log', async () => {

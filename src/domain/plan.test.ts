@@ -93,6 +93,39 @@ describe('explicit adoption across briefs', () => {
     expect(orphanRequirements(goals).map(r => r.fromGoalId)).toEqual(['GOAL-A']);
   });
 
+  it.each(['stopped', 'approved', 'closed'] as const)(
+    'reports the original orphan when an adopting Goal is %s unless it handles the requirement',
+    status => {
+      const goals = [
+        goal('GOAL-A', SHA_A, 'closed', [deferTo('GOAL-B')]),
+        goal('GOAL-B', SHA_A, 'closed', []),
+        goal('GOAL-C', SHA_B, status, [{ ...accept, adopts: { sourceSha256: SHA_A, requirementId: 'R-1' } }]),
+      ];
+      const row = buildPlan(goals, SHA_A).requirements[0];
+      expect(row?.status).toBe(status === 'stopped' ? 'orphan' : status === 'closed' ? 'covered' : 'planned');
+      expect(orphanRequirements(goals)).toEqual(
+        status === 'stopped' ? [{ id: 'R-1', text: 'same id', fromGoalId: 'GOAL-A', targetGoalId: 'GOAL-B' }] : [],
+      );
+    },
+  );
+
+  it('preserves the most recent deferral when a later adoption is stopped', () => {
+    const goals = [
+      goal('GOAL-A', SHA_A, 'closed', [deferTo('GOAL-B')]),
+      goal('GOAL-B', SHA_A, 'closed', []),
+      goal('GOAL-C', SHA_B, 'closed', [
+        { ...deferTo('GOAL-D'), adopts: { sourceSha256: SHA_A, requirementId: 'R-1' } },
+      ]),
+      goal('GOAL-D', SHA_B, 'closed', []),
+      goal('GOAL-E', 'c'.repeat(64), 'stopped', [{ ...accept, adopts: { sourceSha256: SHA_B, requirementId: 'R-1' } }]),
+    ];
+    expect(buildPlan(goals, SHA_A).requirements[0]).toMatchObject({
+      status: 'orphan',
+      fromGoalId: 'GOAL-C',
+      goalId: 'GOAL-D',
+    });
+  });
+
   it('honours an explicit out-of-scope adoption in a new brief', () => {
     const goals = [
       goal('GOAL-B', SHA_B, 'closed', [deferTo('GOAL-X')]),

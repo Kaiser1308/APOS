@@ -66,7 +66,11 @@ function resolveDisposition(entries: ReqEntry[]): { end: ReqEntry; lastDefer?: R
   return { end: current, lastDefer };
 }
 
-export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummary {
+function buildPlanInternal(
+  goals: GoalState[],
+  sourceSha256?: string,
+  orphanKeys?: Map<PlanRequirementRow, string>,
+): PlanSummary {
   const byId = new Map<string, GoalState>(goals.map(item => [item.spec.id, item]));
   const relevant = sourceSha256 ? goals.filter(item => item.spec.source?.sha256 === sourceSha256) : goals;
   const reqMap = new Map<
@@ -212,7 +216,7 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
         continue;
       }
       if (['closed', 'stopped'].includes(effectiveStatus(target))) {
-        requirements.push({
+        const row: PlanRequirementRow = {
           id: item.id,
           text: item.text,
           sourcePath: item.sourcePath,
@@ -221,7 +225,9 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
           goalId: targetId,
           fromGoalId: deferredEntry.goal.spec.id,
           reason: deferredEntry.req.exclusionReason,
-        });
+        };
+        requirements.push(row);
+        orphanKeys?.set(row, JSON.stringify([deferredEntry.goal.spec.id, deferredEntry.req.id]));
         continue;
       }
       requirements.push({
@@ -283,10 +289,21 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
   return { goals: goalRows, requirements };
 }
 
+export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummary {
+  return buildPlanInternal(goals, sourceSha256);
+}
+
 export function orphanRequirements(goals: GoalState[]): OrphanRequirement[] {
-  const plan = buildPlan(goals);
+  const orphanKeys = new Map<PlanRequirementRow, string>();
+  const plan = buildPlanInternal(goals, undefined, orphanKeys);
+  const seen = new Set<string>();
   return plan.requirements
-    .filter(item => item.status === 'orphan' && item.fromGoalId && item.goalId)
+    .filter(item => {
+      const key = orphanKeys.get(item);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .map(item => ({
       id: item.id,
       text: item.text,

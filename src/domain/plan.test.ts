@@ -126,6 +126,27 @@ describe('explicit adoption across briefs', () => {
     });
   });
 
+  it('reports one orphan per deferred requirement across a long adoption chain', () => {
+    const goals = [
+      goal('GOAL-A', SHA_A, 'closed', [deferTo('GOAL-B')]),
+      goal('GOAL-B', SHA_A, 'closed', []),
+      goal('GOAL-C', SHA_B, 'closed', [
+        { ...deferTo('GOAL-D'), adopts: { sourceSha256: SHA_A, requirementId: 'R-1' } },
+      ]),
+      goal('GOAL-D', SHA_B, 'closed', []),
+      goal('GOAL-E', 'c'.repeat(64), 'closed', [
+        { ...deferTo('GOAL-F'), adopts: { sourceSha256: SHA_B, requirementId: 'R-1' } },
+      ]),
+      goal('GOAL-F', SHA_B, 'closed', []),
+      goal('GOAL-G', 'd'.repeat(64), 'closed', [deferTo('GOAL-H')]),
+      goal('GOAL-H', SHA_B, 'closed', []),
+    ];
+    expect(orphanRequirements(goals)).toEqual([
+      { id: 'R-1', text: 'same id', fromGoalId: 'GOAL-E', targetGoalId: 'GOAL-F' },
+      { id: 'R-1', text: 'same id', fromGoalId: 'GOAL-G', targetGoalId: 'GOAL-H' },
+    ]);
+  });
+
   it('honours an explicit out-of-scope adoption in a new brief', () => {
     const goals = [
       goal('GOAL-B', SHA_B, 'closed', [deferTo('GOAL-X')]),

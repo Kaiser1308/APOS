@@ -32,6 +32,7 @@ const exclusionSchema = z.discriminatedUnion('kind', [
 const requirementSchema = z.object({
   id,
   sourceSpan: namedText,
+  adopts: z.object({ sourceSha256: sha256, requirementId: id }).optional(),
   text: namedText,
   disposition: z.enum(['acceptance', 'excluded']),
   exclusion: exclusionSchema.optional(),

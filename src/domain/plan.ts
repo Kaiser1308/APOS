@@ -32,6 +32,8 @@ export type OrphanRequirement = {
   text: string;
   fromGoalId: string;
   targetGoalId: string;
+  sourceSha256: string;
+  sourcePath: string;
 };
 
 type ReqEntry = { goal: GoalState; req: GoalSpec['requirements'][number] };
@@ -66,7 +68,11 @@ function resolveDisposition(entries: ReqEntry[]): { end: ReqEntry; lastDefer?: R
   return { end: current, lastDefer };
 }
 
-export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummary {
+function buildPlanInternal(
+  goals: GoalState[],
+  sourceSha256?: string,
+  orphanEntries?: Map<PlanRequirementRow, ReqEntry>,
+): PlanSummary {
   const byId = new Map<string, GoalState>(goals.map(item => [item.spec.id, item]));
   const relevant = sourceSha256 ? goals.filter(item => item.spec.source?.sha256 === sourceSha256) : goals;
   const reqMap = new Map<
@@ -110,11 +116,35 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
     }
   }
 
+  // An explicit reference connects a new brief to an earlier requirement. IDs alone
+  // remain scoped to their source; references to missing sources never match by ID.
+  const allEntries = goals.flatMap(goal => (goal.spec.requirements ?? []).map(req => ({ goal, req })));
+  const descendants = (root: string): ReqEntry[] => {
+    const seen = new Set([root]);
+    const queue = [root];
+    const result: ReqEntry[] = [];
+    while (queue.length) {
+      const parent = queue.shift()!;
+      for (const entry of allEntries) {
+        const ref = entry.req.adopts;
+        if (!ref || `${ref.sourceSha256}|${ref.requirementId}` !== parent) continue;
+        const child = keyOf(entry.goal, entry.req.id);
+        if (seen.has(child)) continue;
+        seen.add(child);
+        queue.push(child);
+        result.push(...allEntries.filter(e => keyOf(e.goal, e.req.id) === child));
+      }
+    }
+    return result;
+  };
+
   const requirements: PlanRequirementRow[] = [];
   const placeholderTargets = new Set<string>();
 
-  for (const item of reqMap.values()) {
-    const closedAccepting = item.entries.find(
+  for (const [key, item] of reqMap) {
+    const adopted = descendants(key);
+    const entries = [...item.entries, ...adopted];
+    const closedAccepting = entries.find(
       e => e.req.disposition === 'acceptance' && effectiveStatus(e.goal) === 'closed',
     );
     if (closedAccepting) {
@@ -129,7 +159,7 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
       continue;
     }
 
-    const activeAccepting = item.entries.find(
+    const activeAccepting = entries.find(
       e =>
         e.req.disposition === 'acceptance' &&
         effectiveStatus(e.goal) !== 'closed' &&
@@ -147,7 +177,15 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
       continue;
     }
 
-    const { end: latest, lastDefer } = resolveDisposition(item.entries);
+    // The adopting brief carries the latest disposition; follow its own
+    // deferral chain within that source just as for legacy requirements.
+    const lastAdoption = adopted
+      .filter(e => e.req.disposition !== 'acceptance' || effectiveStatus(e.goal) !== 'stopped')
+      .at(-1);
+    const dispositionEntries = lastAdoption
+      ? adopted.filter(e => keyOf(e.goal, e.req.id) === keyOf(lastAdoption.goal, lastAdoption.req.id))
+      : item.entries;
+    const { end: latest, lastDefer } = resolveDisposition(dispositionEntries);
     if (latest.req.disposition === 'excluded' && latest.req.exclusion?.kind === 'out-of-scope') {
       requirements.push({
         id: item.id,
@@ -180,7 +218,7 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
         continue;
       }
       if (['closed', 'stopped'].includes(effectiveStatus(target))) {
-        requirements.push({
+        const row: PlanRequirementRow = {
           id: item.id,
           text: item.text,
           sourcePath: item.sourcePath,
@@ -189,7 +227,9 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
           goalId: targetId,
           fromGoalId: deferredEntry.goal.spec.id,
           reason: deferredEntry.req.exclusionReason,
-        });
+        };
+        requirements.push(row);
+        orphanEntries?.set(row, deferredEntry);
         continue;
       }
       requirements.push({
@@ -251,14 +291,29 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
   return { goals: goalRows, requirements };
 }
 
+export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummary {
+  return buildPlanInternal(goals, sourceSha256);
+}
+
 export function orphanRequirements(goals: GoalState[]): OrphanRequirement[] {
-  const plan = buildPlan(goals);
-  return plan.requirements
-    .filter(item => item.status === 'orphan' && item.fromGoalId && item.goalId)
-    .map(item => ({
-      id: item.id,
-      text: item.text,
-      fromGoalId: item.fromGoalId!,
-      targetGoalId: item.goalId!,
-    }));
+  const orphanEntries = new Map<PlanRequirementRow, ReqEntry>();
+  const plan = buildPlanInternal(goals, undefined, orphanEntries);
+  const seen = new Set<string>();
+  const orphans: OrphanRequirement[] = [];
+  for (const row of plan.requirements) {
+    const entry = orphanEntries.get(row);
+    if (!entry || !row.goalId) continue;
+    const key = JSON.stringify([entry.goal.spec.id, entry.req.id]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    orphans.push({
+      id: entry.req.id,
+      text: entry.req.text,
+      fromGoalId: entry.goal.spec.id,
+      targetGoalId: row.goalId,
+      sourceSha256: entry.goal.spec.source?.sha256 ?? '',
+      sourcePath: entry.goal.spec.source?.path ?? '',
+    });
+  }
+  return orphans;
 }

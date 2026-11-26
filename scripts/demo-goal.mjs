@@ -40,9 +40,17 @@ if (!hasStory)
 if (!existsSync(bin)) usage(`demo: ${bin} does not exist: run \`npm run build\` first`, 2);
 
 const demo = JSON.parse(readFileSync(join(source, 'demo.json'), 'utf8'));
-// On Windows `npx` is `npx.cmd`, which node starts only through a shell.
-const works = (command, ...argv) =>
-  spawnSync(command, argv, { encoding: 'utf8', shell: process.platform === 'win32' }).status === 0;
+// Windows needs cmd.exe to find command shims such as npx.cmd. Probe only tool names
+// and the fixed --version argument, and pass cmd a single command string.
+const works = (command, ...argv) => {
+  if (process.platform !== 'win32') return spawnSync(command, argv, { encoding: 'utf8' }).status === 0;
+  if (!/^[a-zA-Z0-9_.-]+$/.test(command) || argv.some(arg => arg !== '--version')) return false;
+  return (
+    spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `${command} --version`], {
+      encoding: 'utf8',
+    }).status === 0
+  );
+};
 
 // What the example needs on this machine. Python is `python` on one system and `python3` on another.
 const missing = [];

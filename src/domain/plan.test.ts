@@ -79,3 +79,27 @@ describe('buildPlan with two sources sharing a requirement id', () => {
     expect(plan.goals.map(g => g.id)).toEqual(['GOAL-B1', 'GOAL-B2']);
   });
 });
+
+describe('explicit adoption across briefs', () => {
+  it('clears an orphan only for the explicitly referenced source, including scoped plans', () => {
+    const adoption = { ...accept, adopts: { sourceSha256: SHA_B, requirementId: 'R-1' } };
+    const goals = [
+      goal('GOAL-A', SHA_A, 'closed', [deferTo('GOAL-X')]),
+      goal('GOAL-B', SHA_B, 'closed', [deferTo('GOAL-X')]),
+      goal('GOAL-X', SHA_A, 'closed', []),
+      goal('GOAL-C', 'c'.repeat(64), 'approved', [adoption]),
+    ];
+    expect(buildPlan(goals, SHA_B).requirements[0]?.status).toBe('planned');
+    expect(orphanRequirements(goals).map(r => r.fromGoalId)).toEqual(['GOAL-A']);
+  });
+
+  it('honours an explicit out-of-scope adoption in a new brief', () => {
+    const goals = [
+      goal('GOAL-B', SHA_B, 'closed', [deferTo('GOAL-X')]),
+      goal('GOAL-X', SHA_A, 'closed', []),
+      goal('GOAL-C', 'c'.repeat(64), 'approved', [{ ...oos, adopts: { sourceSha256: SHA_B, requirementId: 'R-1' } }]),
+    ];
+    expect(buildPlan(goals, SHA_B).requirements[0]?.status).toBe('out-of-scope');
+    expect(orphanRequirements(goals)).toEqual([]);
+  });
+});

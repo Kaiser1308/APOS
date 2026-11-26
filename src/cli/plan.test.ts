@@ -1,6 +1,7 @@
 import { newEvent } from '../app/events.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -208,6 +209,29 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
       new ReadOnlyJournal(home)
         .events('GOAL-002')
         .filter(item => item.type === 'human-notified' && JSON.stringify(item.data).includes('orphan-requirement')),
+    ).toHaveLength(0);
+
+    // A new brief explicitly adopts the original requirement and survives journal replay.
+    const newBrief = join(dir, 'new-brief.md');
+    writeFileSync(newBrief, 'Adopt the deferred requirement');
+    const adopter = {
+      id: 'GOAL-003',
+      version: 1,
+      outcome: 'Preserve data',
+      requirements: [
+        {
+          id: 'R-2',
+          sourceSpan: 'new brief',
+          text: 'never lose data',
+          disposition: 'acceptance',
+          adopts: { sourceSha256: createHash('sha256').update(sourceText).digest('hex'), requirementId: 'R-2' },
+        },
+      ],
+    };
+    writeFileSync(join(dir, 'g3.json'), JSON.stringify(adopter));
+    await invoke('goal', 'create', '--file', join(dir, 'g3.json'), '--source', newBrief);
+    expect(
+      buildInbox(new ReadOnlyJournal(home)).filter(item => item.detail.includes('orphan-requirement')),
     ).toHaveLength(0);
 
     // Revise GOAL-001 to mark R-2 out-of-scope -> notice disappears

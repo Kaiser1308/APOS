@@ -147,7 +147,7 @@ export function buildInbox(repo: GoalRepository, now: string = new Date().toISOS
         goalId: orphan.targetGoalId,
         fromGoalId: orphan.fromGoalId,
         requirementId: orphan.id,
-        note: `Requirement ${orphan.id} (${orphan.text}) was deferred from ${orphan.fromGoalId} to ${orphan.targetGoalId}, which closed without accepting it. ${orphan.fromGoalId} and ${orphan.targetGoalId} are closed, so the way out is a new Goal that adopts ${orphan.id} (reuse the same requirement id) or excludes it there with an exclusion.`,
+        note: `Requirement ${orphan.id} (${orphan.text}) was deferred from ${orphan.fromGoalId} to ${orphan.targetGoalId}, which closed without accepting it. ${orphan.fromGoalId} and ${orphan.targetGoalId} are closed, so the way out is a new Goal that adopts or excludes ${orphan.id}. Reuse the same source and requirement id, or in a new brief set adopts.sourceSha256 and adopts.requirementId to identify the original requirement.`,
       }),
       at: closedAt ?? events.at(-1)?.at,
     });

@@ -110,11 +110,35 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
     }
   }
 
+  // An explicit reference connects a new brief to an earlier requirement. IDs alone
+  // remain scoped to their source; references to missing sources never match by ID.
+  const allEntries = goals.flatMap(goal => (goal.spec.requirements ?? []).map(req => ({ goal, req })));
+  const descendants = (root: string): ReqEntry[] => {
+    const seen = new Set([root]);
+    const queue = [root];
+    const result: ReqEntry[] = [];
+    while (queue.length) {
+      const parent = queue.shift()!;
+      for (const entry of allEntries) {
+        const ref = entry.req.adopts;
+        if (!ref || `${ref.sourceSha256}|${ref.requirementId}` !== parent) continue;
+        const child = keyOf(entry.goal, entry.req.id);
+        if (seen.has(child)) continue;
+        seen.add(child);
+        queue.push(child);
+        result.push(...allEntries.filter(e => keyOf(e.goal, e.req.id) === child));
+      }
+    }
+    return result;
+  };
+
   const requirements: PlanRequirementRow[] = [];
   const placeholderTargets = new Set<string>();
 
-  for (const item of reqMap.values()) {
-    const closedAccepting = item.entries.find(
+  for (const [key, item] of reqMap) {
+    const adopted = descendants(key);
+    const entries = [...item.entries, ...adopted];
+    const closedAccepting = entries.find(
       e => e.req.disposition === 'acceptance' && effectiveStatus(e.goal) === 'closed',
     );
     if (closedAccepting) {
@@ -129,7 +153,7 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
       continue;
     }
 
-    const activeAccepting = item.entries.find(
+    const activeAccepting = entries.find(
       e =>
         e.req.disposition === 'acceptance' &&
         effectiveStatus(e.goal) !== 'closed' &&
@@ -147,7 +171,13 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
       continue;
     }
 
-    const { end: latest, lastDefer } = resolveDisposition(item.entries);
+    // The adopting brief carries the latest disposition; follow its own
+    // deferral chain within that source just as for legacy requirements.
+    const lastAdoption = adopted.at(-1);
+    const dispositionEntries = lastAdoption
+      ? adopted.filter(e => keyOf(e.goal, e.req.id) === keyOf(lastAdoption.goal, lastAdoption.req.id))
+      : item.entries;
+    const { end: latest, lastDefer } = resolveDisposition(dispositionEntries);
     if (latest.req.disposition === 'excluded' && latest.req.exclusion?.kind === 'out-of-scope') {
       requirements.push({
         id: item.id,

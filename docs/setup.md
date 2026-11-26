@@ -27,6 +27,14 @@ apos setup show      # the latest approved version
 
    **The label does not wear off.** It goes only when a new setup version is approved on a probe that finds tests. After a characterize Goal has closed and its tests are in the repo, probe again at the new commit and `apos setup approve --commit <sha>` (no flag); the same text of the setup is accepted again for this, and the new version has no label. Goals on the old version keep theirs. Then see [Old repo, few tests](../README.md#an-old-repo-with-few-tests).
 
+## Workspaces and dependencies
+
+Each Goal command check invocation and each setup tool invocation runs in its own fresh detached worktree at the requested commit. This includes repeated runs, base and delivery, and rechecks. The worktree is removed after the invocation, so a tool cannot depend on an earlier tool or check having built `dist/` or written another uncommitted file. Chain the preparation and the consumer in the same command, for example `npm run build && node dist/dry-run.js`. Goal manual checks use a recorded confirmation; built-in assurance checks are not all commands run in worktrees.
+
+A worktree contains the committed files, not uncommitted files from the original checkout. For a root `package.json` with `package-lock.json`, APOS prepares Node dependencies: it may link the original checkout’s `node_modules` when the lockfiles match and there are no workspace or `file:` links or root install scripts; otherwise it runs `npm ci`. A committed `node_modules` is left as is; without a root lockfile APOS does not prepare it. Dependency preparation is not a build step and is not a guarantee that other generated artifacts exist. Other dependencies and external services must be available to the command itself. Goal check logs record the dependency preparation. The shared `node_modules` link also means this is not complete filesystem isolation: commands should not modify shared dependencies.
+
+Logs and reports are stored outside the worktree as gate evidence. The `{report}` placeholder supplies an external report path for APOS to read; it is not a way to pass build output between checks.
+
 ## Format of the file
 
 ```yaml

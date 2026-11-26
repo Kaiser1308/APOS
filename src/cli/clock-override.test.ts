@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clockOverride } from './clock.js';
 import { hotfixArgs, hotfixProject, removeTemp, temp } from './hotfix.test-support.js';
 
@@ -8,6 +8,7 @@ beforeEach(() => {
   delete process.env.APOS_NOW;
 });
 afterEach(() => {
+  vi.useRealTimers();
   process.exitCode = undefined;
   for (const [key, value] of [
     ['APOS_HOME', saved.home],
@@ -63,6 +64,8 @@ describe('the APOS_NOW override', () => {
     expect((accepted?.data as { clockOverride?: string }).clockOverride).toBe('2026-11-24T08:00:00.000Z');
     expect(q.state('GOAL-BUG-001')!.hotfix?.clockOverride).toBe('2026-11-24T08:00:00.000Z');
     delete process.env.APOS_NOW;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-24T12:00:00.000Z'));
     q.out.length = 0;
     await q.invoke('goal', 'show', 'GOAL-BUG-001');
     expect(q.out.join('\n')).toMatch(

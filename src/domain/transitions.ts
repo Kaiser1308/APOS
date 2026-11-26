@@ -523,9 +523,17 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     case 'package-removed': {
       const data = event.data as { packageId?: string; reason?: unknown };
       const item = state.packages?.[data?.packageId ?? ''];
-      requireThat(state.proposal?.mode === 'multi-wp' && state.status === 'executing', 'Active Multi-WP required');
+      requireThat(
+        state.proposal?.mode === 'multi-wp' && ['planned', 'executing'].includes(state.status),
+        'Draft or active Multi-WP required',
+      );
       requireThat(typeof data?.reason === 'string' && data.reason.trim(), 'Package removal reason required');
       requireThat(item && item.status !== 'green', 'Package must not be green');
+      if (state.status === 'planned') {
+        const packages = { ...state.packages };
+        delete packages[item.spec.id];
+        return { ...state, packages };
+      }
       requireThat(
         !Object.values(state.packages ?? {}).some(other => other.spec.dependencies.includes(item.spec.id)),
         'Package has dependents',
@@ -547,8 +555,9 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
     }
     case 'package-revised': {
       requireThat(
-        state.proposal?.mode === 'multi-wp' && state.proposalApprovedVersion === state.proposal.version,
-        'Approved Multi-WP proposal required',
+        state.proposal?.mode === 'multi-wp' &&
+          (state.status === 'planned' || state.proposalApprovedVersion === state.proposal.version),
+        'Draft or approved Multi-WP proposal required',
       );
       const data = event.data as { spec?: unknown; reason?: unknown };
       requireThat(typeof data?.reason === 'string' && data.reason.trim(), 'Package revision reason required');
@@ -561,6 +570,8 @@ export function applyEvent(state: GoalState | undefined, event: GoalEvent): Goal
           spec.version > current.spec.version,
         'Current package and newer version required',
       );
+      if (state.status === 'planned')
+        return { ...state, packages: { ...state.packages, [spec.id]: { ...current, spec } } };
       requireThat(spec.owner === current.spec.owner, 'Package owner change requires reassignment');
       requireThat(
         JSON.stringify(spec.acceptance.map(item => item.goalAcceptanceId)) ===

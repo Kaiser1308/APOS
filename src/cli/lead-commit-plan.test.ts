@@ -53,8 +53,38 @@ async function plannedGoal(pinSetup: boolean) {
     );
     return invoke('lead', 'propose', '--file', join(dir, 'plan.json'));
   };
-  return { invoke, propose };
+  return { dir, invoke, propose };
 }
+
+it('corrects duplicate criterion coverage through package revise before committing a Multi-WP plan', async () => {
+  const { dir, invoke, propose } = await plannedGoal(false);
+  await propose({ mode: 'multi-wp', splitRationale: 'separate responsibilities' });
+  const wp = (id: string) => ({
+    id,
+    goalId: spec.id,
+    goalVersion: 1,
+    version: 1,
+    owner: 'worker',
+    outcome: 'outcome',
+    scope: ['scope'],
+    exclusions: [],
+    dependencies: [],
+    interfaces: ['api@v1'],
+    acceptance: [{ id: `${id}-AC`, text: 'works', goalAcceptanceId: 'AC-1' }],
+    integration: 'integrate',
+  });
+  const file = join(dir, 'package.json');
+  const add = async (id: string) => {
+    writeFileSync(file, JSON.stringify(wp(id)));
+    await invoke('package', 'add', '--file', file, '--reason', 'draft');
+  };
+  await add('WP-01');
+  await add('WP-02');
+  await expect(invoke('lead', 'commit', spec.id)).rejects.toThrow(/AC-1 belongs to 2 packages/);
+  writeFileSync(file, JSON.stringify({ ...wp('WP-02'), version: 2, acceptance: [{ id: 'WP-02-AC', text: 'other' }] }));
+  await invoke('package', 'revise', spec.id, '--file', file, '--reason', 'correct coverage');
+  await expect(invoke('lead', 'commit', spec.id)).resolves.toBeUndefined();
+});
 
 it('refuses to commit a plan without paths when the Goal pinned a setup, and says what is missing', async () => {
   const { invoke, propose } = await plannedGoal(true);

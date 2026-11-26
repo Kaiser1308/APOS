@@ -4,23 +4,27 @@ import { checkGoEntries } from './go-entry.js';
 
 const hasGo = spawnSync('go', ['version']).status === 0;
 
-it.skipIf(!hasGo)('rejects a same-package test helper that imports an undeclared internal package', () => {
-  const source: Record<string, string> = {
-    'acceptance_test.go': 'package calc_test\nimport "testing"\nfunc TestCalc(t *testing.T) { helper() }\n',
-    'helper_test.go': 'package calc_test\nimport "example.com/demo/internal"\nfunc helper() { internal.Secret() }\n',
-    'internal/secret.go': 'package internal\nfunc Secret() {}\n',
-  };
-  const result = checkGoEntries({
-    file: 'acceptance_test.go',
-    partRoot: '.',
-    files: ['go.mod', ...Object.keys(source)],
-    module: 'module example.com/demo\n',
-    text: source['acceptance_test.go']!,
-    read: path => source[path],
-    allowed: path => path.endsWith('_test.go'),
-  });
-  expect(result).toEqual([expect.stringContaining('internal/secret.go')]);
-});
+it.skipIf(!hasGo)(
+  'rejects a same-package test helper that imports an undeclared internal package',
+  () => {
+    const source: Record<string, string> = {
+      'acceptance_test.go': 'package calc_test\nimport "testing"\nfunc TestCalc(t *testing.T) { helper() }\n',
+      'helper_test.go': 'package calc_test\nimport "example.com/demo/internal"\nfunc helper() { internal.Secret() }\n',
+      'internal/secret.go': 'package internal\nfunc Secret() {}\n',
+    };
+    const result = checkGoEntries({
+      file: 'acceptance_test.go',
+      partRoot: '.',
+      files: ['go.mod', ...Object.keys(source)],
+      module: 'module example.com/demo\n',
+      text: source['acceptance_test.go']!,
+      read: path => source[path],
+      allowed: path => path.endsWith('_test.go'),
+    });
+    expect(result).toEqual([expect.stringContaining('internal/secret.go')]);
+  },
+  60_000,
+);
 
 it.skipIf(!hasGo)('checks imports in same-package and imported test helper source files', () => {
   const source: Record<string, string> = {

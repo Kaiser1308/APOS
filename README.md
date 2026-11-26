@@ -221,6 +221,14 @@ A Goal is a strictly validated JSON document (`src/domain/contracts.ts`). A mini
 - `acceptance[]` carries `requirementIds`, `checkIds`, and optionally `examples` (`{ "input": "<text>", "expected": "<text>" }[]` — objects, not strings), `boundaries` (`string[]`), `prohibited` (`string[]`), and `ambiguity` (`{ "status": "resolved", "decision": "<text>" } | { "status": "blocked", "question": "<text>" }`).
 - `checks[]` are either `{ kind: "command", command, expect: "pass" | "no-new-failures", failurePattern?, runs, timeoutMs, env }` or `{ kind: "manual", procedure, expectedResult }`. `no-new-failures` needs a `failurePattern` (a regex that recognises a failing line); it runs base and delivery and fails only on failures that are new at delivery.
 
+**Command check workspace contract:** Each execution gets a fresh detached worktree at the commit being checked, removed after the run. This applies separately to each check, each repetition, base and delivery runs, and any recheck. Uncommitted files and generated files from another run are not carried over. Make each command produce any uncommitted build artifacts it needs within that same command, for example:
+
+```json
+{ "id": "CHK-DRY", "kind": "command", "command": "npm run build && node dist/dry-run.js", "expect": "pass" }
+```
+
+The build and dry run share that command’s worktree; a separate build check cannot supply `dist/` to it. Manual checks use recorded human confirmations rather than executing a command in a worktree. Setup layer tools also run each invocation in a fresh worktree; built-in assurance checks include non-command checks and do not all use this execution path. See [setup workspaces and dependencies](docs/setup.md#workspaces-and-dependencies) for dependency preparation and reports.
+
 **Simplest: leave `source` out of `goal.json`.** `goal create` then fills `path`, `sha256`, `capturedAt` and `origin` from `--source`. If you write the `sha256` yourself, APOS hashes the text with CRLF turned into LF, so `Get-FileHash` or `shasum` of a CRLF file on Windows will not match; the error prints the digest APOS expects.
 
 `goal create` snapshots the source with its sha256. **Approval refuses** an unmapped requirement, a `blocked` ambiguity, a missing appetite, and a source snapshot that no longer matches.

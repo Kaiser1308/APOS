@@ -23,6 +23,7 @@ import type { GoalRepository } from '../ports/goal-repository.js';
 import { fileAt, filesAt, filesByCommit, sha256Of } from './git-files.js';
 import type { ToolRunner } from './layer-runner.js';
 import { untrustedProtectedFiles } from './protected-milestones.js';
+import { checkGoEntries } from './go-entry.js';
 
 export type Inspection = {
   problems: string[];
@@ -225,7 +226,8 @@ export function inspectTests(input: InspectInput): Inspection {
         for (const id of entry.testIds) {
           const test = outcome.tests.find(item => item.id === id);
           if (!test) continue;
-          const holder = holderOf(candidates, where.root, test);
+          const requireFile = (where.layers[outcome.layer] ?? []).some(tool => tool.testFileRequired);
+          const holder = holderOf(candidates, where.root, test, requireFile);
           if (holder) {
             holders.add(holder);
             if (entry.layer === 'L2') acceptanceHolders.set(holder, outcome.part);
@@ -242,20 +244,35 @@ export function inspectTests(input: InspectInput): Inspection {
     const rule = where.tests?.entryRule;
     const text = fileAt(repo, commit, file);
     if (!rule || !text) continue;
-    problems.push(
-      ...entryViolations({
-        rule,
-        file,
-        text: text.toString('utf8'),
-        partRoot: where.root,
-        exists: path => present.has(path),
-        allowed: path =>
-          matchesAny(path, stubs) ||
-          matchesAny(path, rootedGlobs(where.root, where.tests?.paths ?? [])) ||
-          // The tests of a characterize Goal call the code they capture, which is not a stub.
-          (characterize && matchesAny(path, state.spec.covers ?? [])),
-      }),
-    );
+    const allowed = (path: string) =>
+      matchesAny(path, stubs) ||
+      matchesAny(path, rootedGlobs(where.root, where.tests?.paths ?? [])) ||
+      (characterize && matchesAny(path, state.spec.covers ?? []));
+    if (rule.goModule) {
+      const modulePath = where.root === '.' ? 'go.mod' : `${where.root}/go.mod`;
+      const module = fileAt(repo, commit, modulePath);
+      problems.push(
+        ...checkGoEntries({
+          file,
+          partRoot: where.root,
+          files: treeFiles,
+          module: module?.toString('utf8') ?? '',
+          text: text.toString('utf8'),
+          allowed,
+          read: path => fileAt(repo, commit, path)?.toString('utf8'),
+        }),
+      );
+    } else
+      problems.push(
+        ...entryViolations({
+          rule,
+          file,
+          text: text.toString('utf8'),
+          partRoot: where.root,
+          exists: path => present.has(path),
+          allowed,
+        }),
+      );
   }
   for (const file of holders) {
     const content = fileAt(repo, commit, file);
@@ -313,11 +330,17 @@ export function inspectTests(input: InspectInput): Inspection {
 }
 
 /** The file a reported test lives in: the report's `file` attribute, or the class name read as a path or a dotted module. */
-function holderOf(candidates: string[], root: string, test: { id: string; file?: string }): string | undefined {
+function holderOf(
+  candidates: string[],
+  root: string,
+  test: { id: string; file?: string },
+  requireFile = false,
+): string | undefined {
   const classname = (test.id.split('::')[0] ?? '').replaceAll('\\', '/');
   const dotted = classname.split('$')[0]!;
   const given = test.file?.replaceAll('\\', '/');
   const asFile = given && (root === '.' ? given : `${root}/${given}`);
+  if (requireFile) return asFile ? candidates.find(file => file === asFile) : undefined;
   return candidates.find(file => {
     const bare = file.replace(/\.[^./]+$/, '').replaceAll('/', '.');
     return file === asFile || file === classname || bare === dotted || bare.endsWith(`.${dotted}`);

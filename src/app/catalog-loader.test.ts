@@ -21,27 +21,34 @@ const home = (files: Record<string, string>) => {
 it('every file shipped in catalog/ passes the schema, and matches the content the tests were written against', () => {
   const { entries, warnings } = loadCatalog({ codec: yamlCodec, home: home({}) });
   expect(warnings).toEqual([]);
-  expect(entries.map(entry => entry.stack).sort()).toEqual(['java-gradle', 'java-maven', 'python', 'typescript']);
+  expect(entries.map(entry => entry.stack).sort()).toEqual([
+    'cpp-espidf',
+    'go',
+    'java-gradle',
+    'java-maven',
+    'python',
+    'typescript',
+  ]);
   for (const stack of STACKS) expect(entries.find(entry => entry.stack === stack.stack)).toEqual(stack);
 });
 it('a file in home replaces the bundled entry of the same stack and can add a new one', () => {
   const python = { ...STACKS.find(entry => entry.stack === 'python')!, forbid: ['custom-forbid'] };
-  const go = { ...python, stack: 'go', forbid: [] };
+  const rust = { ...python, stack: 'rust', forbid: [] };
   const { entries, warnings } = loadCatalog({
     codec: yamlCodec,
-    home: home({ 'python.yaml': yamlCodec.stringify(python), 'go.json': jsonCodec.stringify(go) }),
+    home: home({ 'python.yaml': yamlCodec.stringify(python), 'rust.json': jsonCodec.stringify(rust) }),
   });
   expect(warnings).toEqual([]);
   expect(entries.find(entry => entry.stack === 'python')?.forbid).toEqual(['custom-forbid']);
-  expect(entries.map(entry => entry.stack)).toContain('go');
-  expect(entries).toHaveLength(5);
+  expect(entries.map(entry => entry.stack)).toContain('rust');
+  expect(entries).toHaveLength(7);
 });
 it('skips a broken or invalid file with a warning and keeps the rest', () => {
   const { entries, warnings } = loadCatalog({
     codec: yamlCodec,
     home: home({ 'bad.yaml': '{ nope', 'worse.json': '{"stack":"x"}', 'ignored.txt': 'x' }),
   });
-  expect(entries).toHaveLength(4);
+  expect(entries).toHaveLength(6);
   expect(warnings).toHaveLength(2);
   expect(warnings.join('\n')).toMatch(/bad\.yaml: skipped, cannot be read/);
   expect(warnings.join('\n')).toMatch(/worse\.json: skipped/);
@@ -49,7 +56,7 @@ it('skips a broken or invalid file with a warning and keeps the rest', () => {
 it('works with no home catalog directory at all', () => {
   const empty = mkdtempSync(join(tmpdir(), 'apos-catalog-empty-'));
   dirs.push(empty);
-  expect(loadCatalog({ codec: yamlCodec, home: empty }).entries).toHaveLength(4);
+  expect(loadCatalog({ codec: yamlCodec, home: empty }).entries).toHaveLength(6);
 });
 
 it('reads legacy JSON catalog files while using YAML as the default codec', () => {

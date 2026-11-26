@@ -2,6 +2,8 @@
 
 Seven small repos that `scripts/demo-goal.mjs` drives through the whole v3 flow with the real APOS binary and a real test runner. See [docs/demo.md](../docs/demo.md).
 
+`go-calc/` and `cpp-espidf-host/` are smaller offline setup/probe examples, rather than Goal walkthroughs. See [the catalog guide](../docs/catalog.md#go-and-esp-idf-host-projects) for their prerequisites and how to run them.
+
 | Example | Stack | Goal |
 | --- | --- | --- |
 | `ts-orders` | TypeScript, vitest | An order placed more than 30 days ago cannot be cancelled |

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { cleanProjects, goodTests, setupDocument, testingProject } from './test-lock.test-support.js';
 
 afterEach(cleanProjects);
@@ -32,6 +33,27 @@ const tests = (goalId: string, lines: string) => ({
 });
 
 describe('tests go through the declared entries (plan task 5)', () => {
+  it.skipIf(spawnSync('go', ['version']).status !== 0)(
+    'enforces Go module imports during test submission',
+    async () => {
+      const p = await testingProject({
+        setup: withRule({ goModule: true }),
+        files: { 'go.mod': 'module example.com/demo\n', 'internal/secret.go': 'package secret\n' },
+      });
+      const commit = p.commit(
+        {
+          ...goodTests(p.goalId),
+          'tests/acceptance/calc.t':
+            'package acceptance_test\nimport "example.com/demo/internal"\nvar _ = `\ncase add needs add\n`\n',
+        },
+        'tests',
+      );
+      const result = await p.service.submit(p.goalId, commit, 'tester');
+      expect(result.ok).toBe(false);
+      expect(result.problems.join('\n')).toContain('internal/secret.go');
+    },
+    60_000,
+  );
   it('locks a suite that only imports the declared stub, a library, and its own helpers', async () => {
     const p = await testingProject({
       setup: withRule(),

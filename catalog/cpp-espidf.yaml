@@ -1,0 +1,34 @@
+stack: cpp-espidf
+notes:
+  - 'verified locally: CMake/CTest 4.2.3 host suite. Not verified: idf.py; hardware tests remain manual.'
+detect:
+  files: []
+  anyFiles: [idf_component.yml, sdkconfig]
+layers:
+  L0:
+    - id: host-build
+      command: cmake -S . -B build && cmake --build build
+      format: exit
+    - id: idf-build
+      command: idf.py build
+      format: exit
+  L1:
+    - id: ctest-unit
+      command: cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on-failure --output-junit {report}
+      format: junit
+      testFileRequired: true
+  L2:
+    - id: ctest-acceptance
+      command: cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on-failure --output-junit {report}
+      format: junit
+      testFileRequired: true
+      runOne: cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on-failure --output-junit {report} -R "^{name|regex}$"
+loadErrorPatterns: ['CMake Error', 'Build failed', 'error:']
+noTestsPatterns: ['No tests were found!!!']
+manifests: [idf_component.yml, dependencies.lock]
+testPaths: ['tests/**', 'test/**', '**/*_test.cpp']
+testInfra: [CMakeLists.txt, '**/CMakeLists.txt', sdkconfig]
+assertPatterns: ['\b(?:assert|ASSERT_\w+|EXPECT_\w+)\s*\(']
+notImplementedPatterns: ['[Nn]ot implemented']
+forbid: ['\b(?:DISABLED_|GTEST_SKIP\s*\()']
+needsHuman: [idf_component.yml, dependencies.lock, sdkconfig, CMakeLists.txt, '.github/**']

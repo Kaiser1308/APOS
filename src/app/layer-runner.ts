@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import type { LayerSpec } from '../domain/project-setup.js';
 import type { ParsedReport, TestOutcome } from '../domain/results/index.js';
 import { GitWorktreeFactory, type WorkspaceFactory } from './gate-workspace.js';
@@ -15,7 +16,8 @@ export type RunnerDeps = {
   timeoutMs?: number;
 };
 
-const NOT_FOUND = /command not found|is not recognized as an internal or external command|: not found$/im;
+const NOT_FOUND =
+  /command not found|is not recognized as an internal or external command|executable file not found in \$PATH|: not found$/im;
 /** Why a command did not run at all (timed out, never exited, not installed), or undefined when it ran. */
 export const notRunnable = (result: ExecResult): string | undefined => {
   if (result.timedOut) return 'timed out';
@@ -61,7 +63,12 @@ export class ToolRunner {
       const dir = join(this.artifactRoot, 'runs', randomUUID());
       mkdirSync(dir, { recursive: true });
       const tempReport = join(dir, 'report').replaceAll('\\', '/');
-      const final = command.replaceAll('{report}', tempReport).replaceAll('{changed}', vars.changed ?? '');
+      const apos = fileURLToPath(new URL('../../', import.meta.url)).replaceAll('\\', '/');
+      const quotedApos = process.platform === 'win32' ? apos.replaceAll('"', '\\"') : apos.replace(/["\\$`]/g, '\\$&');
+      const final = command
+        .replaceAll('{report}', tempReport)
+        .replaceAll('{changed}', vars.changed ?? '')
+        .replaceAll('{apos}', quotedApos);
       const cwd = join(workspace.path, root);
       const exec = this.executor.run(final, cwd, {}, this.timeoutMs);
       if (!tool.format || tool.format === 'exit' || notRunnable(exec)) return { exec };

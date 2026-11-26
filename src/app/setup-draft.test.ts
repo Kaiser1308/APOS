@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { draftSetup } from './setup-draft.js';
 import { STACKS } from '../domain/catalog-stacks.test-support.js';
 import { UserError } from '../domain/errors.js';
+import { loadCatalog } from './catalog-loader.js';
+import { yamlCodec } from '../domain/setup-codec.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -22,6 +24,19 @@ const repo = (files: Record<string, string>) => {
 const ts = { 'package.json': '{"devDependencies":{"vitest":"^4"}}', 'tsconfig.json': '{}' };
 
 describe('draftSetup', () => {
+  it('detects Go and either ESP-IDF marker in separate parts', () => {
+    const dir = repo({ 'server/go.mod': 'module example.com/server\n', 'firmware/sdkconfig': '' });
+    const { entries, warnings } = loadCatalog({ codec: yamlCodec, home: repo({}) });
+    expect(warnings).toEqual([]);
+    const { setup } = draftSetup(dir, entries);
+    expect(setup.parts.server?.stack).toBe('go');
+    expect(setup.parts.firmware?.stack).toBe('cpp-espidf');
+    expect(setup.parts.server?.manifests).toEqual(expect.arrayContaining(['go.mod', 'go.sum']));
+    expect(setup.parts.server?.tests?.entryRule?.goModule).toBe(true);
+    expect(setup.parts.firmware?.manifests).toEqual(expect.arrayContaining(['idf_component.yml', 'dependencies.lock']));
+    const second = draftSetup(repo({ 'idf_component.yml': 'dependencies: {}\n' }), entries);
+    expect(second.setup.parts.app?.stack).toBe('cpp-espidf');
+  });
   it('drafts a TypeScript repo as one part with the first tool per layer and the strict floor', () => {
     const { setup, notes } = draftSetup(repo(ts), STACKS);
     expect(notes).toEqual([]);

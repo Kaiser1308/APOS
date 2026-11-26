@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { loadCatalog } from './catalog-loader.js';
@@ -26,6 +26,10 @@ const temp = (prefix: string) => {
 const hasPytest = spawnSync('pytest', ['--version']).status === 0;
 const vitestBin = resolve('node_modules', '.bin', 'vitest');
 const hasVitest = existsSync(vitestBin);
+const hasGo = spawnSync('go', ['version']).status === 0 && spawnSync('gotestsum', ['--version']).status === 0;
+const hasCmake = ['cmake', 'ctest', 'c++'].every(bin => spawnSync(bin, ['--version']).status === 0);
+if (!hasGo) console.warn('Skipping Go e2e: go and gotestsum must both be on PATH.');
+if (!hasCmake) console.warn('Skipping ESP-IDF host e2e: cmake, ctest and c++ must be on PATH.');
 
 function commitAll(dir: string, files: Record<string, string>): string {
   for (const [name, content] of Object.entries(files)) {
@@ -38,7 +42,71 @@ function commitAll(dir: string, files: Record<string, string>): string {
   return git('rev-parse', 'HEAD');
 }
 
-async function probeDraft(dir: string, stack: string) {
+it.skipIf(!hasGo)(
+  'probes the Go draft using real gotestsum and maps one test back to its file',
+  async () => {
+    const dir = temp('apos-e2e-go-');
+    execFileSync('git', ['init', '-q', dir]);
+    cpSync(resolve('examples/go-calc'), dir, { recursive: true });
+    commitAll(dir, {});
+    const report = await probeDraft(dir, 'go', true);
+    expect(report.results.filter(item => !item.ok)).toEqual([]);
+    expect(report.results.find(item => item.layer === 'L2')?.reason).toMatch(/runOne ok/);
+  },
+  180_000,
+);
+
+it.skipIf(!hasGo)(
+  'labels an empty Go project as no-tests',
+  async () => {
+    const dir = temp('apos-e2e-go-empty-');
+    execFileSync('git', ['init', '-q', dir]);
+    commitAll(dir, { 'go.mod': 'module example.com/demo\n\ngo 1.22\n', 'calc.go': 'package demo\n' });
+    const report = await probeDraft(dir, 'go');
+    expect(report.ok).toBe(true);
+    expect(report.results.filter(item => item.layer === 'L1' || item.layer === 'L2').map(item => item.outcome)).toEqual(
+      ['no-tests', 'no-tests'],
+    );
+  },
+  180_000,
+);
+
+it.skipIf(!hasGo)(
+  'does not label a Go build failure as no-tests',
+  async () => {
+    const dir = temp('apos-e2e-go-broken-');
+    execFileSync('git', ['init', '-q', dir]);
+    commitAll(dir, {
+      'go.mod': 'module example.com/demo\n\ngo 1.22\n',
+      'calc_test.go': 'package demo\nimport "testing"\nfunc TestBroken(t *testing.T) { undefinedSymbol() }\n',
+    });
+    const report = await probeDraft(dir, 'go');
+    expect(report.ok).toBe(false);
+    expect(
+      report.results
+        .filter(item => item.layer === 'L1' || item.layer === 'L2')
+        .every(item => !item.ok && item.outcome !== 'no-tests'),
+    ).toBe(true);
+  },
+  180_000,
+);
+
+it.skipIf(!hasCmake)(
+  'probes ESP-IDF host tests without a device or network',
+  async () => {
+    const dir = temp('apos-e2e-esp-');
+    execFileSync('git', ['init', '-q', dir]);
+    cpSync(resolve('examples/cpp-espidf-host'), dir, { recursive: true });
+    commitAll(dir, {});
+    const report = await probeDraft(dir, 'cpp-espidf', true);
+    expect(report.results.filter(item => !item.ok)).toEqual([]);
+    expect(report.results.find(item => item.layer === 'L2')?.reason).toMatch(/runOne ok/);
+    expect(report.results.find(item => item.layer === 'L2')?.reason).toMatch(/test-file linkage unverified/);
+  },
+  180_000,
+);
+
+async function probeDraft(dir: string, stack: string, keepL0 = false) {
   const { entries } = loadCatalog({ codec: yamlCodec, home: temp('apos-e2e-home-') });
   const { setup, notes } = draftSetup(dir, entries);
   expect(notes).toEqual([]);
@@ -46,17 +114,94 @@ async function probeDraft(dir: string, stack: string) {
   const runners: ProjectSetup = {
     ...setup,
     parts: {
-      app: { ...setup.parts.app!, layers: { ...setup.parts.app!.layers, L0: undefined, L5: undefined } },
+      app: {
+        ...setup.parts.app!,
+        layers: { ...setup.parts.app!.layers, L0: keepL0 ? setup.parts.app!.layers.L0 : undefined, L5: undefined },
+      },
     },
   };
   const commit = commitAll(dir, { '.apos/project.yaml': yamlCodec.stringify(runners) });
-  const report = await probeSetup(dir, commit, {
-    codec: yamlCodec,
-    artifactRoot: temp('apos-e2e-art-'),
-    catalog: entries,
-  });
-  return report;
+  const beforeProxy = process.env.GOPROXY;
+  const beforeToolchain = process.env.GOTOOLCHAIN;
+  if (stack === 'go') {
+    process.env.GOPROXY = 'off';
+    process.env.GOTOOLCHAIN = 'local';
+  }
+  try {
+    return await probeSetup(dir, commit, {
+      codec: yamlCodec,
+      artifactRoot: temp('apos-e2e-art-'),
+      catalog: entries,
+    });
+  } finally {
+    if (beforeProxy === undefined) delete process.env.GOPROXY;
+    else process.env.GOPROXY = beforeProxy;
+    if (beforeToolchain === undefined) delete process.env.GOTOOLCHAIN;
+    else process.env.GOTOOLCHAIN = beforeToolchain;
+  }
 }
+
+it.skipIf(!hasCmake)(
+  'fails an ESP-IDF host build error instead of recording no tests',
+  async () => {
+    const dir = temp('apos-e2e-esp-broken-');
+    execFileSync('git', ['init', '-q', dir]);
+    commitAll(dir, {
+      'idf_component.yml': 'dependencies: {}\n',
+      'CMakeLists.txt':
+        'cmake_minimum_required(VERSION 3.21)\nproject(host LANGUAGES CXX)\nenable_testing()\nadd_executable(host_test broken.cpp)\n',
+      'broken.cpp': 'int main() { missing_symbol(); }\n',
+    });
+    const report = await probeDraft(dir, 'cpp-espidf');
+    expect(report.ok).toBe(false);
+    expect(
+      report.results
+        .filter(item => item.layer === 'L1' || item.layer === 'L2')
+        .every(item => !item.ok && item.outcome !== 'no-tests'),
+    ).toBe(true);
+  },
+  180_000,
+);
+
+it.skipIf(!hasCmake)(
+  'labels an empty ESP-IDF host suite as no-tests',
+  async () => {
+    const dir = temp('apos-e2e-esp-empty-');
+    execFileSync('git', ['init', '-q', dir]);
+    commitAll(dir, {
+      'idf_component.yml': 'dependencies: {}\n',
+      'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.21)\nproject(host NONE)\nenable_testing()\n',
+    });
+    const report = await probeDraft(dir, 'cpp-espidf', true);
+    expect(report.ok).toBe(true);
+    expect(report.results.filter(item => item.layer === 'L1' || item.layer === 'L2').map(item => item.outcome)).toEqual(
+      ['no-tests', 'no-tests'],
+    );
+  },
+  180_000,
+);
+
+it.skipIf(!hasGo)(
+  'does not call a mixed empty-and-panicking Go module no-tests',
+  async () => {
+    const dir = temp('apos-e2e-go-panic-');
+    execFileSync('git', ['init', '-q', dir]);
+    commitAll(dir, {
+      'go.mod': 'module example.com/demo\n\ngo 1.22\n',
+      'empty/empty.go': 'package empty\n',
+      'broken/broken_test.go':
+        'package broken\nimport "testing"\nfunc init() { panic("boom") }\nfunc TestBroken(t *testing.T) {}\n',
+    });
+    const report = await probeDraft(dir, 'go');
+    expect(report.ok).toBe(false);
+    expect(
+      report.results
+        .filter(item => item.layer === 'L1' || item.layer === 'L2')
+        .every(item => !item.ok && item.outcome !== 'no-tests'),
+    ).toBe(true);
+  },
+  180_000,
+);
 
 describe.skipIf(!hasPytest)('python draft on a typical pytest repo', () => {
   const calc = `import pytest

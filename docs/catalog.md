@@ -4,7 +4,7 @@ The catalog tells a Lead which tools usually fit a stack, so a project setup can
 
 ## Where it lives
 
-- Shipped with APOS: `catalog/<stack>.yaml` (python, java-gradle, java-maven, typescript).
+- Shipped with APOS: `catalog/<stack>.yaml` (python, java-gradle, java-maven, typescript, go, cpp-espidf).
 - Your own: `~/.apos/catalog/` (or `$APOS_HOME/catalog/`). A file whose `stack` matches a shipped one replaces it; a new `stack` is added. A file that does not parse or does not match the schema is skipped with a warning; it never hides the others.
 - YAML is the preferred format. Existing `.json` catalog files are still read, and a home catalog entry overrides the bundled entry of the same stack.
 
@@ -37,7 +37,7 @@ needsHuman: [pyproject.toml, .github/**]
 | Field | Meaning |
 | --- | --- |
 | `stack` | Lowercase name; `apos setup draft --part <name>=<dir>:<stack>` uses it. |
-| `detect` | A directory is this stack when every file in `files` exists and every `contains` substring is found. |
+| `detect` | A directory is this stack when every file in `files` exists, at least one `anyFiles` entry exists when provided, and every `contains` substring is found. |
 | `layers` | Tools per layer `L0` to `L5` (`L6` is a hand confirmation, never a tool). The first tool of each layer is what a draft picks. |
 | `loadErrorPatterns` | Regexes matched on a failing test's message to recognise a test that never loaded (a collection or import error, a broken class). The probe fails with `tests could not load: <message>` on such a test, and also when every test in a report errored. Phase 3 reuses them to tell "red for the right reason" from "could not run". |
 | `noTestsExitCodes`, `noTestsPatterns` | How the stack's test tool says "there is no test here": exit codes (pytest: `5`) and regexes matched on its output (vitest: `No test files found`; its exit code 1 is too common to count, a `globalSetup` that throws leaves the same empty junit report, and with the junit reporter alone vitest prints nothing: so the catalog's vitest commands add `--reporter=default` and `--outputFile.junit={report}`). Output that also matches a `loadErrorPatterns` entry is never read as "no tests": vitest prints "No test files found" even when a `globalSetup` throws, and the typescript entry lists `Unhandled Error` for that). The probe reads a layer as `no-tests` only when the tool said so *and* its report holds no test (or, with no report, only when a pattern matched): an exit code alone could be a crash. Copied to `tests` by `draft`. Empty (Java today) means the stack cannot tell, and a probe of an empty repo fails as it always did. Do not add a pattern that a usage error also prints: pytest says "no tests ran" for a missing path (exit 4) too, so python declares none. |
@@ -52,6 +52,18 @@ needsHuman: [pyproject.toml, .github/**]
 
 ## A tool
 
+### Go and ESP-IDF host projects
+
+Go detection uses `go.mod`; ESP-IDF detection accepts either `idf_component.yml` or `sdkconfig`. As with the other stacks, draft examines the root and one level of child directories. A root that also matches while child parts exist is reported as a note; select it explicitly with `--part` if needed. The Go manifests are `go.mod` and `go.sum`; the ESP-IDF manifests are `idf_component.yml` and `dependencies.lock`.
+
+The Go runner needs the Go toolchain and `gotestsum`. APOS ships a Go-standard-library adapter invoked through `{apos}`, the APOS installation directory. It uses `go list` and the Go parser to map gotestsum's package identities to `file::name`, and refuses a test that cannot be mapped uniquely or whose source is a symlink. `runOne` selects the exact test and reports only that test, including for subtests. Build tags follow the Go toolchain environment. An empty suite is labelled `no-tests` only when the adapter exits successfully and writes a readable empty report; matching `[no test files]` alone would conceal a failure in another package. Build errors and missing tools do not become empty success. Verified locally with Go 1.27.4 and gotestsum 1.13.0. The catalog also suggests `staticcheck` and `govulncheck`; they were not available for verification. `go vet` was run locally. The `go run` adapter must be shipped alongside APOS in `scripts/go-junit/`.
+
+The Go entry rule uses the Go parser and checks all committed non-test `.go` files of an imported package against the declared entries. It also checks same-package access. It fails closed if the parser or module cannot be read, an import cannot be resolved, or a Go workspace, nested module, `replace`, cgo, `unsafe`, or `go:linkname` is encountered. It conservatively includes files excluded by build tags; declare all relevant package files or revise the project setup. This is static import checking, not a sandbox against arbitrary test code. External imports and standard-library imports outside the module path are not treated as local packages.
+
+The ESP-IDF entry uses a project-provided host CMake/CTest suite; each test command configures and builds in its own worktree before producing JUnit, so it needs CMake, CTest and a C++ compiler but no device. Verified locally with CMake/CTest 4.2.3. CTest's JUnit report identifies the CTest name but does not identify its source file: although the setup probe works, `tests submit` cannot lock a test whose source cannot be identified from its report. A project needs a reporter that supplies an unambiguous test file for that flow. `idf.py build` is an alternative L0 command, not verified here; ESP-IDF, clang-tidy and cppcheck were not installed, so no SARIF command for them is claimed. Hardware testing remains a manual L6 confirmation, not a host test. Host CTest must be configured by each firmware project and does not establish firmware or hardware correctness.
+
+Offline examples are in `examples/go-calc` and `examples/cpp-espidf-host`. Copy either into a Git repository, run `apos init`, `apos setup draft`, review the setup, commit it, then run `apos setup probe`. The Go draft includes L5 `govulncheck`; install and configure that tool separately or remove L5 from the draft when experimenting offline, before committing and probing. The ESP-IDF example's host suite needs only CMake/CTest and a C++ compiler. The conditional e2e tests name the missing prerequisites when they are skipped in Vitest output; they do not turn an unavailable tool into a passing probe.
+
 | Field | Meaning |
 | --- | --- |
 | `id` | Unique within its layer. |
@@ -61,6 +73,9 @@ needsHuman: [pyproject.toml, .github/**]
 | `reportExitCodes` | Optional exit codes accepted when reading a `sarif` or `metric` report (default `[0]`). The report still decides findings or threshold status. Set this for tools that intentionally return a nonzero status while writing a usable report. |
 | `metric` | For `format: metric`: dotted path to the number (e.g. `metrics.mutationScore`). Omit when the file is one number. |
 | `runOne` | Runs a single test, needed to prove a test can run alone; see below. |
+| `testFileRequired` | When true, a test can be locked only when the report supplies a `file` that matches a committed test path. If any tool in a layer sets it, it applies to the layer. The probe warns if a reported test lacks a file; a passing probe does not establish that a reporter's file attribution is truthful. |
+
+`{apos}` expands to the APOS installation directory; place it inside double quotes, as in `"{apos}/scripts/go-junit/main.go"`. The adapter is part of the APOS installation, not a file from the project under test.
 
 ### `runOne` placeholders
 

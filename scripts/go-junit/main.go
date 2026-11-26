@@ -196,7 +196,7 @@ func run() (int, error) {
 	name := tmp.Name()
 	tmp.Close()
 	defer os.Remove(name)
-	args := []string{"--format", "standard-verbose", "--junitfile", name, "--", "./..."}
+	args := []string{"--format", "standard-verbose", "--junitfile", name, "--", "./...", "-count=1"}
 	if *file != "" {
 		found := false
 		for key, files := range index {
@@ -211,7 +211,7 @@ func run() (int, error) {
 		for i := range parts {
 			parts[i] = "^" + regexp.QuoteMeta(parts[i]) + "$"
 		}
-		args = []string{"--format", "standard-verbose", "--junitfile", name, "--", "./" + filepath.ToSlash(filepath.Dir(*file)), "-run", strings.Join(parts, "/")}
+		args = []string{"--format", "standard-verbose", "--junitfile", name, "--", "./" + filepath.ToSlash(filepath.Dir(*file)), "-run", strings.Join(parts, "/"), "-count=1"}
 	}
 	cmd := exec.Command("gotestsum", args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

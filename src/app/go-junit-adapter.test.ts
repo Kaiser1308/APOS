@@ -8,6 +8,50 @@ import { readJunit } from '../domain/results/junit.js';
 const available = spawnSync('go', ['version']).status === 0 && spawnSync('gotestsum', ['--version']).status === 0;
 
 it.skipIf(!available)(
+  'executes Go tests again across worktrees even with GOFLAGS=-trimpath',
+  () => {
+    const root = mkdtempSync(join(tmpdir(), 'apos-go-cache-'));
+    try {
+      const env = {
+        ...process.env,
+        GOPROXY: 'off',
+        GOTOOLCHAIN: 'local',
+        GOFLAGS: '-trimpath',
+        GOCACHE: join(root, 'cache'),
+      };
+      const dirs = ['first', 'second'].map(name => {
+        const dir = join(root, name);
+        mkdirSync(dir);
+        writeFileSync(join(dir, 'go.mod'), 'module example.com/demo\n\ngo 1.22\n');
+        writeFileSync(
+          join(dir, 'tick_test.go'),
+          'package demo\nimport ("fmt"; "testing"; "time")\nfunc TestTick(t *testing.T) { fmt.Printf("stamp:%d\\n", time.Now().UnixNano()) }\n',
+        );
+        return dir;
+      });
+      const run = (dir: string, ...args: string[]) =>
+        execFileSync('go', ['run', resolve('scripts/go-junit/main.go'), '--report', join(dir, 'out.xml'), ...args], {
+          cwd: dir,
+          env,
+          encoding: 'utf8',
+        });
+      for (const args of [[], ['--file', 'tick_test.go', '--test', 'TestTick']]) {
+        const first = run(dirs[0]!, ...args);
+        const second = run(dirs[1]!, ...args);
+        const stamp = (output: string) => /stamp:(\d+)/.exec(output)?.[1];
+        expect(stamp(first)).toBeDefined();
+        expect(stamp(second)).toBeDefined();
+        expect(stamp(second)).not.toBe(stamp(first));
+        expect(second).not.toContain('(cached)');
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  180_000,
+);
+
+it.skipIf(!available)(
   'maps Go examples and fuzz seeds and runs each alone',
   () => {
     const dir = mkdtempSync(join(tmpdir(), 'apos-go-extra-tests-'));

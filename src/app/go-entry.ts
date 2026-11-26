@@ -17,6 +17,31 @@ function parseGo(text: string, file?: string) {
   return parsedGo.parse(JSON.parse(result));
 }
 
+function uncertainToolchain(module: string): boolean {
+  if (/^\s*toolchain\s+/m.test(module)) return true;
+  const selected = process.env.GOTOOLCHAIN;
+  if (selected && selected !== 'local' && selected !== 'auto') return true;
+  const required = /^\s*go\s+(\d+)\.(\d+)(?:\.(\d+))?(?:\s|$)/m.exec(module);
+  if (!required) return true;
+  try {
+    const version = execFileSync('go', ['env', 'GOVERSION'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    const local = /^go(\d+)\.(\d+)(?:\.(\d+))?$/.exec(version);
+    if (!local) return true;
+    for (let index = 1; index <= 3; index++) {
+      const difference = Number(required[index] ?? 0) - Number(local[index] ?? 0);
+      if (difference !== 0) return difference > 0;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export function checkGoEntries(input: {
   file: string;
   partRoot: string;
@@ -48,7 +73,8 @@ export function checkGoEntries(input: {
     return fail('Go parser unavailable or test file cannot be parsed');
   }
   const dir = input.file.includes('/') ? input.file.slice(0, input.file.lastIndexOf('/') + 1) : '';
-  const parseCandidate = (text: string, file: string) => parseGo(text, input.conservativeBuild ? undefined : file);
+  const conservativeBuild = input.conservativeBuild || uncertainToolchain(input.module);
+  const parseCandidate = (text: string, file: string) => parseGo(text, conservativeBuild ? undefined : file);
   const sources = [{ file: input.file, text: input.text, parsed }];
   const visited = new Set([input.file]);
   const helpers = input.files.filter(

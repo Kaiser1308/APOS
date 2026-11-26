@@ -56,7 +56,7 @@ it.skipIf(!hasGo)('ignores same-package test helpers excluded by the Go build co
     file: 'a_test.go',
     partRoot: '.',
     files: ['go.mod', ...Object.keys(source)],
-    module: 'module example.com/demo\n',
+    module: 'module example.com/demo\n\ngo 1.22\n',
     text: source['a_test.go']!,
     read: path => source[path],
     allowed: path => path.endsWith('_test.go'),
@@ -100,6 +100,24 @@ it.skipIf(!hasGo)('checks tagged helpers when GOFLAGS selects tags and ignores o
     if (old === undefined) delete process.env.GOFLAGS;
     else process.env.GOFLAGS = old;
   }
+});
+
+it.skipIf(!hasGo)('does not exclude future-toolchain helpers when the module requests a newer Go version', () => {
+  const source: Record<string, string> = {
+    'a_test.go': 'package calc_test\nimport "testing"\nfunc TestA(t *testing.T) {}\n',
+    'future_test.go': '//go:build go1.999\n\npackage calc_test\nimport "example.com/demo/internal"\n',
+    'internal/secret.go': 'package internal\n',
+  };
+  const result = checkGoEntries({
+    file: 'a_test.go',
+    partRoot: '.',
+    files: ['go.mod', ...Object.keys(source)],
+    module: 'module example.com/demo\n\ngo 1.999\n',
+    text: source['a_test.go']!,
+    read: path => source[path],
+    allowed: path => path.endsWith('_test.go'),
+  });
+  expect(result.join('\n')).toContain('internal/secret.go');
 });
 
 it.skipIf(!hasGo)('resolves an import of the module root to its source files', () => {

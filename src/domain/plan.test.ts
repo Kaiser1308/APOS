@@ -104,7 +104,18 @@ describe('explicit adoption across briefs', () => {
       const row = buildPlan(goals, SHA_A).requirements[0];
       expect(row?.status).toBe(status === 'stopped' ? 'orphan' : status === 'closed' ? 'covered' : 'planned');
       expect(orphanRequirements(goals)).toEqual(
-        status === 'stopped' ? [{ id: 'R-1', text: 'same id', fromGoalId: 'GOAL-A', targetGoalId: 'GOAL-B' }] : [],
+        status === 'stopped'
+          ? [
+              {
+                id: 'R-1',
+                text: 'same id',
+                fromGoalId: 'GOAL-A',
+                targetGoalId: 'GOAL-B',
+                sourceSha256: SHA_A,
+                sourcePath: spec.source.path,
+              },
+            ]
+          : [],
       );
     },
   );
@@ -142,10 +153,64 @@ describe('explicit adoption across briefs', () => {
       goal('GOAL-H', SHA_B, 'closed', []),
     ];
     expect(orphanRequirements(goals)).toEqual([
-      { id: 'R-1', text: 'same id', fromGoalId: 'GOAL-E', targetGoalId: 'GOAL-F' },
-      { id: 'R-1', text: 'same id', fromGoalId: 'GOAL-G', targetGoalId: 'GOAL-H' },
+      {
+        id: 'R-1',
+        text: 'same id',
+        fromGoalId: 'GOAL-E',
+        targetGoalId: 'GOAL-F',
+        sourceSha256: 'c'.repeat(64),
+        sourcePath: spec.source.path,
+      },
+      {
+        id: 'R-1',
+        text: 'same id',
+        fromGoalId: 'GOAL-G',
+        targetGoalId: 'GOAL-H',
+        sourceSha256: 'd'.repeat(64),
+        sourcePath: spec.source.path,
+      },
     ]);
   });
+
+  it.each([false, true])(
+    'reports the actual deferred ID and source regardless of Goal order (reversed: %s)',
+    reverse => {
+      const goals = [
+        goal('GOAL-A', SHA_A, 'closed', [{ ...deferTo('GOAL-B'), id: 'R-11' }]),
+        goal('GOAL-B', SHA_A, 'closed', []),
+        goal('GOAL-C', SHA_B, 'closed', [
+          {
+            ...deferTo('GOAL-D'),
+            id: 'R-22',
+            text: 'new brief text',
+            adopts: { sourceSha256: SHA_A, requirementId: 'R-11' },
+          },
+        ]),
+        goal('GOAL-D', SHA_B, 'closed', []),
+        goal('GOAL-X', 'c'.repeat(64), 'closed', [{ ...deferTo('GOAL-Y'), id: 'R-22' }]),
+        goal('GOAL-Y', SHA_A, 'closed', []),
+      ];
+      const orphans = orphanRequirements(reverse ? goals.reverse() : goals);
+      expect(orphans).toHaveLength(2);
+      expect(orphans).toContainEqual(
+        expect.objectContaining({
+          id: 'R-22',
+          text: 'new brief text',
+          sourceSha256: SHA_B,
+          fromGoalId: 'GOAL-C',
+          targetGoalId: 'GOAL-D',
+        }),
+      );
+      expect(orphans).toContainEqual(
+        expect.objectContaining({
+          id: 'R-22',
+          sourceSha256: 'c'.repeat(64),
+          fromGoalId: 'GOAL-X',
+          targetGoalId: 'GOAL-Y',
+        }),
+      );
+    },
+  );
 
   it('honours an explicit out-of-scope adoption in a new brief', () => {
     const goals = [

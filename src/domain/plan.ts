@@ -32,6 +32,8 @@ export type OrphanRequirement = {
   text: string;
   fromGoalId: string;
   targetGoalId: string;
+  sourceSha256: string;
+  sourcePath: string;
 };
 
 type ReqEntry = { goal: GoalState; req: GoalSpec['requirements'][number] };
@@ -69,7 +71,7 @@ function resolveDisposition(entries: ReqEntry[]): { end: ReqEntry; lastDefer?: R
 function buildPlanInternal(
   goals: GoalState[],
   sourceSha256?: string,
-  orphanKeys?: Map<PlanRequirementRow, string>,
+  orphanEntries?: Map<PlanRequirementRow, ReqEntry>,
 ): PlanSummary {
   const byId = new Map<string, GoalState>(goals.map(item => [item.spec.id, item]));
   const relevant = sourceSha256 ? goals.filter(item => item.spec.source?.sha256 === sourceSha256) : goals;
@@ -227,7 +229,7 @@ function buildPlanInternal(
           reason: deferredEntry.req.exclusionReason,
         };
         requirements.push(row);
-        orphanKeys?.set(row, JSON.stringify([deferredEntry.goal.spec.id, deferredEntry.req.id]));
+        orphanEntries?.set(row, deferredEntry);
         continue;
       }
       requirements.push({
@@ -294,20 +296,24 @@ export function buildPlan(goals: GoalState[], sourceSha256?: string): PlanSummar
 }
 
 export function orphanRequirements(goals: GoalState[]): OrphanRequirement[] {
-  const orphanKeys = new Map<PlanRequirementRow, string>();
-  const plan = buildPlanInternal(goals, undefined, orphanKeys);
+  const orphanEntries = new Map<PlanRequirementRow, ReqEntry>();
+  const plan = buildPlanInternal(goals, undefined, orphanEntries);
   const seen = new Set<string>();
-  return plan.requirements
-    .filter(item => {
-      const key = orphanKeys.get(item);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .map(item => ({
-      id: item.id,
-      text: item.text,
-      fromGoalId: item.fromGoalId!,
-      targetGoalId: item.goalId!,
-    }));
+  const orphans: OrphanRequirement[] = [];
+  for (const row of plan.requirements) {
+    const entry = orphanEntries.get(row);
+    if (!entry || !row.goalId) continue;
+    const key = JSON.stringify([entry.goal.spec.id, entry.req.id]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    orphans.push({
+      id: entry.req.id,
+      text: entry.req.text,
+      fromGoalId: entry.goal.spec.id,
+      targetGoalId: row.goalId,
+      sourceSha256: entry.goal.spec.source?.sha256 ?? '',
+      sourcePath: entry.goal.spec.source?.path ?? '',
+    });
+  }
+  return orphans;
 }

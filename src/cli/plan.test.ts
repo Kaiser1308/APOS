@@ -221,7 +221,7 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
         outcome: 'Preserve data',
         requirements: [
           {
-            id: 'R-2',
+            id: action === 'defer' ? 'R-22' : 'R-2',
             sourceSpan: 'new brief',
             text: 'never lose data',
             disposition: action === 'defer' ? 'excluded' : 'acceptance',
@@ -246,11 +246,20 @@ describe('PM plan and requirement coverage tracking (#21)', { timeout: 60_000 },
           at: '2026-11-18T06:00:01.000Z',
         });
         journal.close();
-        expect(
-          buildInbox(new ReadOnlyJournal(home)).filter(
-            item => item.detail.includes('orphan-requirement') && item.detail.includes('R-2'),
-          ),
-        ).toHaveLength(1);
+        const notices = buildInbox(new ReadOnlyJournal(home)).filter(item =>
+          item.detail.includes('orphan-requirement'),
+        );
+        expect(notices).toHaveLength(1);
+        const notice = JSON.parse(notices[0]!.detail);
+        const sourceSha256 = createHash('sha256').update('Adopt the deferred requirement').digest('hex');
+        expect(notice).toMatchObject({
+          requirementId: 'R-22',
+          sourceSha256,
+          fromGoalId: 'GOAL-003',
+          goalId: 'GOAL-004',
+        });
+        expect(notice.note).toContain(sourceSha256);
+        expect(notice.note).toContain('R-22');
         return;
       }
       expect(

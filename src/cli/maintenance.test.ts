@@ -332,7 +332,7 @@ describe('the gate of a maintenance Goal', () => {
     const p = await prepare();
     const sha = p.commitFiles('bump', { 'deps.json': manifest({ fmt: '1.1.0' }) });
     // The runs of L1, in order: inventory (head, base), the layer on the head twice, then the base twice: the sixth is the second base run.
-    process.env.APOS_EXIT_ON = `${temp('apos-exit-')}/counter:5`;
+    process.env.APOS_EXIT_ON = `${temp(process.platform === 'win32' ? 'apos-exit-' : 'apos:exit-')}/counter:5`;
     const got = await submit(p, sha);
     expect(got.code).toBe(3);
     expect(got.text).toMatch(/two runs on the base disagree.*exited 1/);

@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io"
@@ -109,9 +110,54 @@ func run() (int, error) {
 	file := flag.String("file", "", "test file for a single test")
 	test := flag.String("test", "", "test name for a single test")
 	imports := flag.Bool("imports", false, "parse Go imports from stdin")
+	filename := flag.String("filename", "", "check whether this Go file matches the build context")
 	flag.Parse()
 	if *imports {
-		parsed, err := parser.ParseFile(token.NewFileSet(), "input.go", os.Stdin, parser.ImportsOnly)
+		content, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return 1, err
+		}
+		if *filename != "" {
+			envOutput, err := exec.Command("go", "env", "-json", "GOOS", "GOARCH", "CGO_ENABLED", "GOFLAGS").Output()
+			if err != nil {
+				return 1, err
+			}
+			var env struct {
+				GOOS       string
+				GOARCH     string
+				CGOEnabled string `json:"CGO_ENABLED"`
+				GOFLAGS    string
+			}
+			if err := json.Unmarshal(envOutput, &env); err != nil {
+				return 1, err
+			}
+			// Custom Go flags may select tags: inspecting every candidate is conservative in that case.
+			if env.GOFLAGS == "" {
+				dir, err := os.MkdirTemp("", "apos-go-match-*")
+				if err != nil {
+					return 1, err
+				}
+				defer os.RemoveAll(dir)
+				base := filepath.Base(*filename)
+				if err := os.WriteFile(filepath.Join(dir, base), content, 0600); err != nil {
+					return 1, err
+				}
+				context := build.Default
+				context.GOOS, context.GOARCH, context.CgoEnabled = env.GOOS, env.GOARCH, env.CGOEnabled == "1"
+				active, err := context.MatchFile(dir, base)
+				if err != nil {
+					return 1, err
+				}
+				if !active {
+					return 0, json.NewEncoder(os.Stdout).Encode(struct {
+						Package string   `json:"package"`
+						Imports []string `json:"imports"`
+						Active  bool     `json:"active"`
+					}{"_", []string{}, false})
+				}
+			}
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), "input.go", content, parser.ImportsOnly)
 		if err != nil {
 			return 1, err
 		}
@@ -126,7 +172,8 @@ func run() (int, error) {
 		return 0, json.NewEncoder(os.Stdout).Encode(struct {
 			Package string   `json:"package"`
 			Imports []string `json:"imports"`
-		}{parsed.Name.Name, paths})
+			Active  bool     `json:"active"`
+		}{parsed.Name.Name, paths, true})
 	}
 	if *report == "" {
 		return 1, errors.New("--report is required")

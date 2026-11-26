@@ -108,7 +108,7 @@ it.skipIf(!hasCmake)(
   180_000,
 );
 
-async function probeDraft(dir: string, stack: string, keepL0 = false) {
+async function probeDraft(dir: string, stack: string, keepL0 = false, artifactRoot = temp('apos-e2e-art-')) {
   const { entries } = loadCatalog({ codec: yamlCodec, home: temp('apos-e2e-home-') });
   const { setup, notes } = draftSetup(dir, entries);
   expect(notes).toEqual([]);
@@ -132,7 +132,7 @@ async function probeDraft(dir: string, stack: string, keepL0 = false) {
   try {
     return await probeSetup(dir, commit, {
       codec: yamlCodec,
-      artifactRoot: temp('apos-e2e-art-'),
+      artifactRoot,
       catalog: entries,
     });
   } finally {
@@ -222,6 +222,34 @@ it.skipIf(!hasCmake || !hasNinja)(
       if (previous === undefined) delete process.env.CMAKE_GENERATOR;
       else process.env.CMAKE_GENERATOR = previous;
     }
+  },
+  180_000,
+);
+
+it.skipIf(!hasGo)(
+  'probes Go with spaces in the artifact path',
+  async () => {
+    const dir = temp('apos-e2e-go-spaces-');
+    execFileSync('git', ['init', '-q', dir]);
+    cpSync(resolve('examples/go-calc'), dir, { recursive: true });
+    commitAll(dir, {});
+    const report = await probeDraft(dir, 'go', true, temp('apos artifacts {apos} $HOME '));
+    expect(report.results.filter(item => !item.ok)).toEqual([]);
+    expect(report.results.find(item => item.layer === 'L2')?.reason).toMatch(/runOne ok/);
+  },
+  180_000,
+);
+
+it.skipIf(!hasCmake)(
+  'probes CTest with spaces in the artifact path',
+  async () => {
+    const dir = temp('apos-e2e-cpp-spaces-');
+    execFileSync('git', ['init', '-q', dir]);
+    cpSync(resolve('examples/cpp-espidf-host'), dir, { recursive: true });
+    commitAll(dir, {});
+    const report = await probeDraft(dir, 'cpp-espidf', true, temp('apos artifacts {apos} $HOME '));
+    expect(report.results.filter(item => !item.ok)).toEqual([]);
+    expect(report.results.find(item => item.layer === 'L2')?.reason).toMatch(/runOne ok/);
   },
   180_000,
 );

@@ -13,13 +13,13 @@ layers:
       format: exit
   L1:
     - id: go-unit
-      command: go run "{apos}/scripts/go-junit/main.go" --report {report}
+      command: go run "{apos}/scripts/go-junit/main.go" --report "{report}"
       format: junit
   L2:
     - id: go-acceptance
-      command: go run "{apos}/scripts/go-junit/main.go" --report {report}
+      command: go run "{apos}/scripts/go-junit/main.go" --report "{report}"
       format: junit
-      runOne: go run "{apos}/scripts/go-junit/main.go" --report {report} --file "{file}" --test "{name}"
+      runOne: go run "{apos}/scripts/go-junit/main.go" --report "{report}" --file "{file}" --test "{name}"
   L5:
     - id: govulncheck
       command: govulncheck ./...

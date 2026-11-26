@@ -260,6 +260,14 @@ export function inspectTests(input: InspectInput): Inspection {
           text: text.toString('utf8'),
           allowed,
           read: path => fileAt(repo, commit, path)?.toString('utf8'),
+          isTestFile: path => matchesAny(path, rootedGlobs(where.root, where.tests?.paths ?? [])),
+          recordHelper: path => holders.add(path),
+          conservativeBuild: (where.layers.L2 ?? []).some(
+            tool =>
+              !/^go run "\{apos\}\/scripts\/go-junit\/main\.go" --report (?:"\{report\}"|\{report\})$/.test(
+                tool.command,
+              ),
+          ),
         }),
       );
     } else

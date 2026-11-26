@@ -64,11 +64,14 @@ export class ToolRunner {
       mkdirSync(dir, { recursive: true });
       const tempReport = join(dir, 'report').replaceAll('\\', '/');
       const apos = fileURLToPath(new URL('../../', import.meta.url)).replaceAll('\\', '/');
-      const quotedApos = process.platform === 'win32' ? apos.replaceAll('"', '\\"') : apos.replace(/["\\$`]/g, '\\$&');
-      const final = command
-        .replaceAll('{report}', tempReport)
-        .replaceAll('{changed}', vars.changed ?? '')
-        .replaceAll('{apos}', quotedApos);
+      const shellValue = (value: string) =>
+        process.platform === 'win32' ? value.replaceAll('"', '\\"') : value.replace(/["\\$`]/g, '\\$&');
+      const final = command.replace(/"\{report\}"|\{report\}|\{changed\}|\{apos\}/g, token => {
+        if (token === '"{report}"') return `"${shellValue(tempReport)}"`;
+        if (token === '{report}') return tempReport;
+        if (token === '{changed}') return vars.changed ?? '';
+        return shellValue(apos);
+      });
       const cwd = join(workspace.path, root);
       const exec = this.executor.run(final, cwd, {}, this.timeoutMs);
       if (!tool.format || tool.format === 'exit' || notRunnable(exec)) return { exec };

@@ -34,6 +34,89 @@ const tests = (goalId: string, lines: string) => ({
 
 describe('tests go through the declared entries (plan task 5)', () => {
   it.skipIf(spawnSync('go', ['version']).status !== 0)(
+    'checks a same-package Go helper even when it is also test infrastructure',
+    async () => {
+      const draft = withRule({ goModule: true });
+      const part = draft.parts.app;
+      const setup = {
+        ...draft,
+        parts: { app: { ...part, tests: { ...part.tests, infra: ['tests/acceptance/helper.go'] } } },
+      };
+      const p = await testingProject({
+        setup,
+        files: {
+          'go.mod': 'module example.com/demo\n',
+          'internal/secret.go': 'package secret\n',
+          'tests/acceptance/helper.go': 'package acceptance_test\nimport "example.com/demo/internal"\n',
+        },
+      });
+      const commit = p.commit(
+        {
+          ...goodTests(p.goalId),
+          'tests/acceptance/calc.t': 'package acceptance_test\nvar _ = `\ncase add needs add\n`\n',
+        },
+        'tests',
+      );
+      const result = await p.service.submit(p.goalId, commit, 'tester');
+      expect(result.ok).toBe(false);
+      expect(result.problems.join('\n')).toContain('internal/secret.go');
+    },
+    60_000,
+  );
+  it.skipIf(spawnSync('go', ['version']).status !== 0)(
+    'checks and locks pre-existing same-package Go test helpers',
+    async () => {
+      const helper = 'tests/acceptance/helper_test.go';
+      const p = await testingProject({
+        setup: withRule({ goModule: true }),
+        files: {
+          'go.mod': 'module example.com/demo\n',
+          [helper]: 'package acceptance_test\nfunc helper() {}\n',
+          'tests/acceptance/other_test.go': 'package another_test\n',
+          'tests/acceptance/ignored_test.go': '//go:build apos_never\n\npackage acceptance_test\n',
+        },
+      });
+      const commit = p.commit(
+        {
+          ...goodTests(p.goalId),
+          'tests/acceptance/calc.t': 'package acceptance_test\nvar _ = `\ncase add needs add\n`\n',
+        },
+        'tests',
+      );
+      expect(await p.service.submit(p.goalId, commit, 'tester')).toEqual({ ok: true, problems: [] });
+      expect(p.state().testLock?.files[helper]).toBeDefined();
+      expect(p.state().testLock?.files['tests/acceptance/other_test.go']).toBeUndefined();
+      // A custom runner may select different tags, so even an otherwise inactive helper is locked.
+      expect(p.state().testLock?.files['tests/acceptance/ignored_test.go']).toBeDefined();
+    },
+    60_000,
+  );
+
+  it.skipIf(spawnSync('go', ['version']).status !== 0)(
+    'refuses a pre-existing Go test helper importing an undeclared package',
+    async () => {
+      const p = await testingProject({
+        setup: withRule({ goModule: true }),
+        files: {
+          'go.mod': 'module example.com/demo\n',
+          'internal/secret.go': 'package secret\n',
+          'tests/acceptance/helper_test.go': 'package acceptance_test\nimport "example.com/demo/internal"\n',
+        },
+      });
+      const commit = p.commit(
+        {
+          ...goodTests(p.goalId),
+          'tests/acceptance/calc.t': 'package acceptance_test\nvar _ = `\ncase add needs add\n`\n',
+        },
+        'tests',
+      );
+      const result = await p.service.submit(p.goalId, commit, 'tester');
+      expect(result.ok).toBe(false);
+      expect(result.problems.join('\n')).toContain('internal/secret.go');
+    },
+    60_000,
+  );
+  it.skipIf(spawnSync('go', ['version']).status !== 0)(
     'enforces Go module imports during test submission',
     async () => {
       const p = await testingProject({

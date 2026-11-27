@@ -1,10 +1,10 @@
-# Assurance benchmark (work in progress)
+# Assurance benchmark
 
-This runner is incomplete and its output is not a benchmark result suitable for comparison or publication. In particular, the initial corpus and full end-to-end repeatability have not been established. The APOS tests remain separate from this benchmark.
+This benchmark measures APOS on a controlled corpus and remains separate from the tests of APOS itself. Its initial results describe these selected cases, not a representative population of software changes.
 
 The intended input is a controlled directory outside the checkout containing `manifest.json`, Git bundles, Goal documents and plans. The manifest fixes each delivery commit and states the independent oracle before any gate is run. It is sensitive: do not commit it, its bundles, detailed results, or holdout cases to a public repository. Retain the original manifest, bundles and supporting files, their digests, the detailed output and the exact APOS commit in controlled storage; access and backups must be arranged by the corpus owner. A path on one machine alone is not a durable archive.
 
-After building dependencies, run `npm run bench -- /private/corpus /private/new-output`. The output directory must not already exist. Run it without another build or test writing to `dist` in the same checkout; overlapping builds can corrupt an in-flight process's module load. The runner makes isolated repositories and APOS homes, invokes APOS for the preparation actions and `package submit --json`, and writes detailed JSON and CSV under the output directory. It runs twice and reports disagreements. Setup actions and the repositories they test execute code: run only trusted corpora in an appropriately isolated environment. Do not use this runner as a sandbox for an untrusted holdout.
+Install the pinned Node dependencies with `npm ci`; Git, GNU `/usr/bin/time` and the tools named by the corpus setups are also required. Python examples need Python and pytest, and a setup that calls `python` needs that command available even on a machine that normally calls it `python3`. Run `npm run bench -- /private/corpus /private/new-output`; the output directory must not already exist. Run it without another build or test writing to `dist` in the same checkout; overlapping builds can corrupt an in-flight process's module load. The runner makes isolated repositories and APOS homes, invokes APOS for the preparation actions and `package submit --json`, and writes detailed JSON and CSV under the output directory. It runs twice and reports disagreements. Setup actions and the repositories they test execute code: run only trusted corpora in an appropriately isolated environment. Do not use this runner as a sandbox for an untrusted holdout.
 
 `evidenceDigest` contains the digests APOS reports for tool logs plus the SHA-256 of the captured gate output. The latter is also recorded separately as `resultDigest`: it preserves the controller's result and reasons when a structural check produces no tool log. The output file is evidence of what APOS reported; it does not independently establish whether the code or a test was correct.
 
@@ -12,4 +12,20 @@ The manifest format is version 1: `cases` contains unique `id`, `goalKind`, `fam
 
 False-green uses all fault cases as its denominator; false-red uses all clean cases. `unverifiable` and `needs-human` are counted separately, never as a detection or false-red. Known limitations are excluded from those two populations and counted separately. Detection by family counts red verdicts among fault cases. Costs cover the measured package submission, including child processes, using GNU `time`: `duration` is wall time in milliseconds, `cpu` is user plus system CPU seconds, and peak RSS is that of an individual process in the measured process tree, not a simultaneous process-tree memory peak. `gateCommands` counts gate-bearing CLI commands, including preparation, rather than internal gate attempts. Results do not include setup cost; concurrent activity, caching and the operating system affect measurements. `caughtBy` lists the failing check IDs reported in APOS's reasons; a failing check does not establish which fault caused it, and the value is null when those IDs are unavailable.
 
-A holdout contributor can supply a sealed corpus through a private channel to an operator, who verifies provenance, oracle, executable contents, and access before running it separately. No such intake service, automated isolation, or durable private storage is supplied here. Review any aggregate report for case leakage before publishing it.
+A holdout contributor can supply a sealed corpus through a private channel to an operator, who verifies provenance, oracle, executable contents, and access before running it separately. Keep holdout cases apart from cases used to develop or tune the benchmark. No such intake service, automated isolation, or durable private storage is supplied here. Review any aggregate report for case leakage before publishing it.
+
+## First aggregate run
+
+On APOS commit `7cf5220853075993fcff25bbb639ea37a6f863c9`, a private development corpus of 28 cases drawn from the seven demos covered five Goal kinds and eight fault families. Two sequential repetitions produced the same verdict for every case, and the generated plans matched. The separately stated oracles were checked against the fixed snapshots; this is not an independent holdout.
+
+| Metric | Repetition 1 | Repetition 2 |
+| --- | ---: | ---: |
+| False-green, all fault cases | 6/18 (33.3%) | 6/18 (33.3%) |
+| False-red, all clean cases | 2/9 (22.2%) | 2/9 (22.2%) |
+| Unverifiable, all cases | 0/28 | 0/28 |
+| Needs-human, all cases | 1/28 (3.6%) | 1/28 (3.6%) |
+| Known limitations, reported separately | 1 | 1 |
+
+These denominators include abstentions; neither abstention is counted as a detection or a false-red. A red result on a faulty case is a block, not proof that APOS identified the actual cause. In particular, the gate alone cannot determine whether an incorrect test or correct code caused a failure. Family-level results are retained privately because small groups can disclose individual cases. All 56 result digests and the log digests APOS supplied matched retained files; 12 submissions had no tool-log digest and have the captured controller result instead.
+
+The run used Linux x64 kernel `7.0.0-44-generic`, an AMD Ryzen 7 4800H, Node `v22.22.1`, Python `3.14.4`, pytest `9.0.2`, Git `2.53.0`, and GNU `time`. Gate wall times summed to 319.1 s and 318.6 s; user plus system CPU summed to 374.5 s and 372.7 s. Maximum reported individual-process RSS was 135,228 KiB and 135,052 KiB. Total elapsed time was approximately 23.9 minutes including preparation; only gate costs are broken out per case. The shared machine, caching and a brief concurrent oracle audit introduce noise, and no random seed was controlled. Two repetitions establish only the observed agreement, not a statistical confidence interval. No LLM reviewer was used, and no independent holdout was run.

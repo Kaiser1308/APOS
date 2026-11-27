@@ -234,3 +234,29 @@ it.skipIf(!hasGo)('blocks same-package access to undeclared source and workspace
     expect.stringContaining('workspace'),
   ]);
 });
+
+it.skipIf(!hasGo)(
+  'checks and locks internal non-test helpers when acceptance is external',
+  () => {
+    const source: Record<string, string> = {
+      'tests/acceptance_test.go': 'package acceptance_test\nimport "testing"\nfunc TestValue(t *testing.T) {}\n',
+      'tests/helper.go': 'package acceptance\nimport "example.com/demo/internal"\nfunc init() { internal.Secret() }\n',
+      'internal/secret.go': 'package internal\n',
+    };
+    const helpers: string[] = [];
+    const result = checkGoEntries({
+      file: 'tests/acceptance_test.go',
+      partRoot: '.',
+      files: ['go.mod', ...Object.keys(source)],
+      module: 'module example.com/demo\n\ngo 1.22\n',
+      text: source['tests/acceptance_test.go']!,
+      read: path => source[path],
+      allowed: path => path.startsWith('tests/'),
+      isTestFile: path => path.startsWith('tests/'),
+      recordHelper: path => helpers.push(path),
+    });
+    expect(helpers).toContain('tests/helper.go');
+    expect(result.join('\n')).toContain('internal/secret.go');
+  },
+  60_000,
+);

@@ -111,7 +111,10 @@ export function checkGoEntries(input: {
     if (text === undefined) return fail(`cannot read ${file}`);
     try {
       const source = parseCandidate(text, file);
-      if (source.active && sources.some(item => item.parsed.package === source.package)) {
+      if (
+        source.active &&
+        sources.some(item => item.parsed.package === source.package || item.parsed.package === `${source.package}_test`)
+      ) {
         if (!input.allowed(file)) return [`${input.file}: same-package test can access undeclared ${file}`];
         if (input.isTestFile?.(file)) {
           sources.push({ file, text, parsed: source });

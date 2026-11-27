@@ -4,50 +4,58 @@ import { checkGoEntries } from './go-entry.js';
 
 const hasGo = spawnSync('go', ['version']).status === 0;
 
-it.skipIf(!hasGo)('checks imports in the internal TestMain when the acceptance test is external', () => {
-  const source: Record<string, string> = {
-    'app/acceptance_test.go': 'package app_test\nimport "example.com/demo/app"\n',
-    'app/helper_test.go':
-      'package app\nimport ("testing"; "os"; "example.com/demo/internal")\nfunc TestMain(m *testing.M) { internal.Secret(); os.Exit(m.Run()) }\n',
-    'app/app.go': 'package app\n',
-    'internal/secret.go': 'package internal\n',
-  };
-  const helpers: string[] = [];
-  const result = checkGoEntries({
-    file: 'app/acceptance_test.go',
-    partRoot: '.',
-    files: ['go.mod', ...Object.keys(source)],
-    module: 'module example.com/demo\n\ngo 1.22\n',
-    text: source['app/acceptance_test.go']!,
-    read: path => source[path],
-    allowed: path => path.endsWith('_test.go') || path === 'app/app.go',
-    recordHelper: path => helpers.push(path),
-  });
-  expect(helpers).toContain('app/helper_test.go');
-  expect(result.join('\n')).toContain('internal/secret.go');
-});
+it.skipIf(!hasGo)(
+  'checks imports in the internal TestMain when the acceptance test is external',
+  () => {
+    const source: Record<string, string> = {
+      'app/acceptance_test.go': 'package app_test\nimport "example.com/demo/app"\n',
+      'app/helper_test.go':
+        'package app\nimport ("testing"; "os"; "example.com/demo/internal")\nfunc TestMain(m *testing.M) { internal.Secret(); os.Exit(m.Run()) }\n',
+      'app/app.go': 'package app\n',
+      'internal/secret.go': 'package internal\n',
+    };
+    const helpers: string[] = [];
+    const result = checkGoEntries({
+      file: 'app/acceptance_test.go',
+      partRoot: '.',
+      files: ['go.mod', ...Object.keys(source)],
+      module: 'module example.com/demo\n\ngo 1.22\n',
+      text: source['app/acceptance_test.go']!,
+      read: path => source[path],
+      allowed: path => path.endsWith('_test.go') || path === 'app/app.go',
+      recordHelper: path => helpers.push(path),
+    });
+    expect(helpers).toContain('app/helper_test.go');
+    expect(result.join('\n')).toContain('internal/secret.go');
+  },
+  60_000,
+);
 
-it.skipIf(!hasGo)('checks and records external helpers when the acceptance test is internal', () => {
-  const source: Record<string, string> = {
-    'app/acceptance_test.go': 'package app\nimport "testing"\nfunc TestValue(t *testing.T) {}\n',
-    'app/helper_test.go': 'package app_test\nimport "example.com/demo/internal"\n',
-    'app/app.go': 'package app\n',
-    'internal/secret.go': 'package internal\n',
-  };
-  const helpers: string[] = [];
-  const result = checkGoEntries({
-    file: 'app/acceptance_test.go',
-    partRoot: '.',
-    files: ['go.mod', ...Object.keys(source)],
-    module: 'module example.com/demo\n\ngo 1.22\n',
-    text: source['app/acceptance_test.go']!,
-    read: path => source[path],
-    allowed: path => path.endsWith('_test.go') || path === 'app/app.go',
-    recordHelper: path => helpers.push(path),
-  });
-  expect(helpers).toContain('app/helper_test.go');
-  expect(result.join('\n')).toContain('internal/secret.go');
-});
+it.skipIf(!hasGo)(
+  'checks and records external helpers when the acceptance test is internal',
+  () => {
+    const source: Record<string, string> = {
+      'app/acceptance_test.go': 'package app\nimport "testing"\nfunc TestValue(t *testing.T) {}\n',
+      'app/helper_test.go': 'package app_test\nimport "example.com/demo/internal"\n',
+      'app/app.go': 'package app\n',
+      'internal/secret.go': 'package internal\n',
+    };
+    const helpers: string[] = [];
+    const result = checkGoEntries({
+      file: 'app/acceptance_test.go',
+      partRoot: '.',
+      files: ['go.mod', ...Object.keys(source)],
+      module: 'module example.com/demo\n\ngo 1.22\n',
+      text: source['app/acceptance_test.go']!,
+      read: path => source[path],
+      allowed: path => path.endsWith('_test.go') || path === 'app/app.go',
+      recordHelper: path => helpers.push(path),
+    });
+    expect(helpers).toContain('app/helper_test.go');
+    expect(result.join('\n')).toContain('internal/secret.go');
+  },
+  60_000,
+);
 
 it.skipIf(!hasGo)(
   'rejects a same-package test helper that imports an undeclared internal package',

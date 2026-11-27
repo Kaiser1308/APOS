@@ -1,8 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { readGateResult } from './result.mjs';
+import { attachResultDigest, readGateResult } from './result.mjs';
 
 export function runCase(item, corpus, cli, work) {
   mkdirSync(work, { recursive: false, mode: 0o700 });
@@ -46,7 +47,8 @@ export function runCase(item, corpus, cli, work) {
     ],
     { env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
   );
-  writeFileSync(join(work, 'gate-output.txt'), (result.stdout ?? '') + (result.stderr ?? ''), { mode: 0o600 });
+  const captured = (result.stdout ?? '') + (result.stderr ?? '');
+  writeFileSync(join(work, 'gate-output.txt'), captured, { mode: 0o600 });
   const duration = performance.now() - started;
   const [userCpuSeconds, systemCpuSeconds, maxRssKb] = readFileSync(timeFile, 'utf8')
     .trim()
@@ -57,11 +59,14 @@ export function runCase(item, corpus, cli, work) {
   if (![userCpuSeconds, systemCpuSeconds, maxRssKb].every(Number.isFinite))
     throw new Error('Could not measure gate resources');
   return {
-    ...readGateResult(result.stdout, result.status, {
-      goalId: item.goalId,
-      packageId: item.packageId,
-      commit: item.deliveryCommit,
-    }),
+    ...attachResultDigest(
+      readGateResult(result.stdout, result.status, {
+        goalId: item.goalId,
+        packageId: item.packageId,
+        commit: item.deliveryCommit,
+      }),
+      createHash('sha256').update(captured).digest('hex'),
+    ),
     durationMs: duration,
     userCpuSeconds,
     systemCpuSeconds,

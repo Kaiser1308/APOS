@@ -39,3 +39,7 @@ export function readGateResult(stdout, exitCode, identity) {
     setupVersion: result.setupVersion ?? null,
   };
 }
+
+export function attachResultDigest(result, digest) {
+  return { ...result, evidenceDigest: [...result.evidenceDigest, digest], resultDigest: digest };
+}

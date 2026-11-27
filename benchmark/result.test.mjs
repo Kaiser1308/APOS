@@ -53,3 +53,17 @@ it('does not leak malformed APOS output in an error message', () => {
     },
   );
 });
+
+it('adds the captured APOS result digest when no tool log exists', async () => {
+  const { attachResultDigest } = await import('./result.mjs');
+  assert.deepEqual(
+    attachResultDigest({ actualVerdict: 'red', evidenceDigest: [], caughtBy: ['scope'], setupVersion: 1 }, 'abc'),
+    {
+      actualVerdict: 'red',
+      evidenceDigest: ['abc'],
+      caughtBy: ['scope'],
+      setupVersion: 1,
+      resultDigest: 'abc',
+    },
+  );
+});

@@ -116,6 +116,7 @@ const fields = [
   'systemCpuSeconds',
   'maxRssKb',
   'evidenceDigest',
+  'resultDigest',
   'aposCommit',
   'aposDirty',
   'nodeVersion',

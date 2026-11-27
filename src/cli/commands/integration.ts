@@ -96,10 +96,11 @@ export function registerIntegration(ctx: CliContext): void {
     .action((goalId: string, { source, target }: { source: string; target: string }) =>
       withJournal(journal => {
         const mergeCommit = new MergeService(journal).merge(goalId, repo(), source, target);
-        const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(
-          goalId,
-          repo(),
-        );
+        const report = new GateService(journal, {
+          inspector: options.inspector,
+          ...options.gate,
+          assurance: assuranceService(ctx, journal, goalId),
+        }).runPostMerge(goalId, repo());
         write(`Merged ${goalId}: ${mergeCommit}; post-merge gate ${report.result}`);
       }),
     );

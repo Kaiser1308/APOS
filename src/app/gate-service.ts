@@ -250,17 +250,26 @@ export class GateService {
           )
         : undefined;
     if (guard) checks.push(guard);
-    // The integration commit of a Multi-WP Goal runs the layers of the integrate stage, on top of the Goal's own checks.
+    if (phase === 'post-merge' && state.setupVersion !== undefined && !this.assurance)
+      throw new UserError('Pinned setup assurance is required for the post-merge gate');
+    // Post-merge uses the close policy on the merged tree; integration retains its own stage policy.
     const layered =
-      phase === 'delivery' && state.proposal?.mode === 'multi-wp'
+      phase === 'post-merge' || (phase === 'delivery' && state.proposal?.mode === 'multi-wp')
         ? this.assurance?.layerChecks(state, {
-            stage: 'integrate',
+            stage: phase === 'post-merge' ? 'close' : 'integrate',
             scope: goalId,
             head: input.deliveryCommit,
-            base: state.testLock?.commit ?? baseCommit,
-            changed: changedFiles,
+            base:
+              state.testLock?.commit ??
+              (phase === 'post-merge' ? (state.proposal?.baseCommit ?? baseCommit) : baseCommit),
+            changed:
+              phase === 'post-merge' && state.proposal?.baseCommit
+                ? this.inspector.files(repoPath, input.deliveryCommit, state.proposal.baseCommit)
+                : changedFiles,
           })
         : undefined;
+    if (phase === 'post-merge' && state.setupVersion !== undefined && !layered?.layers)
+      throw new UserError('Pinned setup layers are unavailable for the post-merge gate');
     checks.push(...(layered?.checks ?? []));
     const report: GateReport = {
       gateId,

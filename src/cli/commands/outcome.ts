@@ -84,10 +84,11 @@ export function registerOutcome(ctx: CliContext): void {
             const mergeCommit = merges.merge(id, repo(), state.gate!.deliveryCommit, flags.mergeTo);
             let report: GateReport;
             try {
-              report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(
-                id,
-                repo(),
-              );
+              report = new GateService(journal, {
+                inspector: options.inspector,
+                ...options.gate,
+                assurance: assuranceService(ctx, journal, id),
+              }).runPostMerge(id, repo());
             } catch (error) {
               if (!flags.json) throw error;
               process.exitCode = 3;
@@ -99,6 +100,7 @@ export function registerOutcome(ctx: CliContext): void {
               );
               return;
             }
+            closeReport = report;
             if (!flags.json) write(`Merged ${id}: ${mergeCommit}; post-merge gate ${report.result}`);
             if (report.result !== 'green' && flags.json) {
               const verdict = verdictOf(report.result);
@@ -110,13 +112,14 @@ export function registerOutcome(ctx: CliContext): void {
               throw new Error(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
           }
           // Merged but not yet closed (the post-merge gate was pending or red): rerun it so a confirmation on the merge commit can count.
-          if (!flags.mergeTo && state.merge && state.postMergeGate?.result !== 'green') {
+          if (!flags.mergeTo && state.merge) {
             let report: GateReport;
             try {
-              report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(
-                id,
-                repo(),
-              );
+              report = new GateService(journal, {
+                inspector: options.inspector,
+                ...options.gate,
+                assurance: assuranceService(ctx, journal, id),
+              }).runPostMerge(id, repo());
             } catch (error) {
               if (!flags.json) throw error;
               process.exitCode = 3;
@@ -128,6 +131,7 @@ export function registerOutcome(ctx: CliContext): void {
               );
               return;
             }
+            closeReport = report;
             if (!flags.json) write(`Post-merge gate ${report.result} on ${state.merge.mergeCommit}`);
             if (report.result !== 'green' && flags.json) {
               const verdict = verdictOf(report.result);

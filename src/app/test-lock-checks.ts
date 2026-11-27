@@ -262,12 +262,8 @@ export function inspectTests(input: InspectInput): Inspection {
           read: path => fileAt(repo, commit, path)?.toString('utf8'),
           isTestFile: path => matchesAny(path, rootedGlobs(where.root, where.tests?.paths ?? [])),
           recordHelper: path => holders.add(path),
-          conservativeBuild: (where.layers.L2 ?? []).some(
-            tool =>
-              !/^go run "\{apos\}\/scripts\/go-junit\/main\.go" --report (?:"\{report\}"|\{report\})$/.test(
-                tool.command,
-              ),
-          ),
+          // A gate can run under a different GOOS, GOARCH, or tag set from submission.
+          conservativeBuild: true,
         }),
       );
     } else

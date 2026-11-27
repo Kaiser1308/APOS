@@ -1,3 +1,4 @@
+import { goLockProblems } from './go-lock-check.js';
 import { execFileSync } from 'node:child_process';
 import { assertGitRoot } from '../store/project-history.js';
 import {
@@ -103,7 +104,7 @@ export function integrationChecks(
           }),
         ),
         delivery: delivery.set,
-        runProblems: delivery.problems,
+        runProblems: [...delivery.problems, ...goLockProblems(repo, setup, state, input.head)],
         criteria: lock.map.map(entry => entry.acceptanceId),
       }),
     );

@@ -23,7 +23,9 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "deps:check": "depcruise src --config .dependency-cruiser.cjs",
-    "check": "npm run format:check && npm run lint && npm run deps:check && npm run typecheck && npm test"
+    "check": "npm run format:check && npm run lint && npm run deps:check && npm run typecheck && npm test && npm run bench:check",
+    "bench": "npm run build && node benchmark/bench.mjs",
+    "bench:check": "npm run build && node --test benchmark/*.test.mjs"
   },
   "dependencies": {
     "commander": "14.0.2",

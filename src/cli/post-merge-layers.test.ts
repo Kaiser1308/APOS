@@ -4,6 +4,7 @@ import { cleanProjects, lockedProject, setupDocument } from '../app/test-lock.te
 import { spec } from '../domain/fixtures.test-support.js';
 import { ProjectJournal } from '../store/journal.js';
 import { MergeService } from '../app/merge.js';
+import { IntegrationService } from '../app/integration.js';
 import { spawn } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -235,6 +236,86 @@ it('keeps a Goal verified if the merged layer report is unreadable', async () =>
     expect(state.postMergeGate).toMatchObject({ result: 'unverifiable', deliveryCommit: state.merge!.mergeCommit });
     expect(state.postMergeGate!.checks).toContainEqual(
       expect.objectContaining({ checkId: 'app.L3.integration', status: 'unverifiable' }),
+    );
+  } finally {
+    opened.close();
+  }
+}, 240_000);
+
+it('Multi-WP merge cannot close when target changes break pinned L3', async () => {
+  const part = setupDocument.parts.app;
+  const setup = {
+    ...setupDocument,
+    parts: {
+      app: {
+        ...part,
+        layers: { ...part.layers, L3: [{ id: 'integration', command: 'node integration.cjs', format: 'exit' }] },
+      },
+    },
+  };
+  const pkg = {
+    id: 'WP-A',
+    goalId: spec.id,
+    goalVersion: 1,
+    version: 1,
+    owner: 'worker',
+    outcome: 'implement',
+    scope: ['implementation'],
+    exclusions: [],
+    dependencies: [],
+    interfaces: ['api@v1'],
+    acceptance: [{ id: 'WP-AC-1', text: 'works', goalAcceptanceId: 'AC-1' }],
+    integration: 'integrate',
+    paths: ['src/**'],
+    stubPaths: ['src/stub.txt'],
+  };
+  const p = await lockedProject({
+    setup,
+    plan: { mode: 'multi-wp' },
+    packages: [
+      pkg,
+      {
+        ...pkg,
+        id: 'WP-B',
+        outcome: 'additional work',
+        dependencies: ['WP-A'],
+        acceptance: [{ id: 'WP-AC-2', text: 'done' }],
+      },
+    ],
+    files: {
+      'config.txt': 'good',
+      'integration.cjs': "process.exit(require('node:fs').readFileSync('config.txt','utf8') === 'good' ? 0 : 9);\n",
+    },
+  });
+  p.git('checkout', '-qb', 'worker');
+  const first = p.commit({ 'src/impl.txt': 'add\n', 'src/stub.txt': 'done\n' }, 'first');
+  expect((await p.submit(first, 'WP-A')).result).toBe('green');
+  const delivery = p.commit({ 'src/extra.txt': 'extra\n' }, 'second');
+  expect((await p.submit(delivery, 'WP-B')).result).toBe('green');
+  expect(p.gate.run(p.goalId, p.dir, { deliveryCommit: delivery }).result).toBe('green');
+  new IntegrationService(p.journal).complete(p.goalId, p.dir, {
+    commitRef: delivery,
+    conflictResolution: 'WP-B includes its dependency',
+  });
+  p.close();
+  p.git('checkout', '-q', 'main');
+  p.commit({ 'config.txt': 'bad' }, 'target change');
+  await expect(
+    runCli(['--repo', p.dir, 'outcome', 'close', p.goalId, '--merge-to', 'main', '--on-behalf', 'fixture'], {
+      home: p.home,
+      gate: { artifactRoot: p.artifacts },
+      write: () => {},
+      io: { isTTY: false, prompt: () => Promise.reject(new Error('no terminal')) },
+    }),
+  ).rejects.toThrow(/Post-merge gate is red/);
+  const opened = ProjectJournal.open(p.dir, p.home);
+  try {
+    const state = opened.journal.getGoal(p.goalId)!;
+    expect(state.proposal?.mode).toBe('multi-wp');
+    expect(state.status).toBe('verified');
+    expect(state.postMergeGate).toMatchObject({ result: 'red', deliveryCommit: state.merge!.mergeCommit });
+    expect(state.postMergeGate!.checks).toContainEqual(
+      expect.objectContaining({ checkId: 'app.L3.integration', status: 'fail' }),
     );
   } finally {
     opened.close();

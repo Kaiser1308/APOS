@@ -1,4 +1,5 @@
 import { goLockProblems } from './go-lock-check.js';
+import { postMergeAssurance } from './post-merge-assurance.js';
 import {
   infraCheck,
   inventoryCheck,
@@ -64,6 +65,20 @@ export class AssuranceService {
     // The scope the Human approved with a legacy Goal binds the integration commit and the close stage like a package.
     if (input.stage !== 'submit') ran.checks = [...ran.checks, ...this.legacyChecks(state, input)];
     if (input.stage === 'close') ran.checks = [...ran.checks, ...this.removalChecks(state, input)];
+    if (input.postMergeVerified) {
+      const setup = this.deps.loadSetup(state);
+      if (setup)
+        ran.checks.push(
+          ...postMergeAssurance({
+            repo: this.deps.repo,
+            setup,
+            state,
+            head: input.head,
+            verified: input.postMergeVerified,
+            runTests: (...args) => this.runTests(...args),
+          }),
+        );
+    }
     if (input.stage !== 'integrate') return ran;
     ran.checks = [...ran.checks, ...this.integration(state, input)];
     // A review of the integration commit locks its tests into every later integration commit, like a package's.

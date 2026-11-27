@@ -32,6 +32,8 @@ export type LayerGateDeps = {
 
 export type LayerGateInput = {
   stage: Stage;
+  /** The verified delivery being merged; present only for the post-merge close policy. */
+  postMergeVerified?: string;
   /** A package id at `submit`; the Goal id at `integrate` and `close`. Picks the exceptions that reduce the floor. */
   scope: string;
   head: string;

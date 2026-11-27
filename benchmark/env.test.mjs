@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { gitState } from './env.mjs';
 
 it('reads the real checkout identity without inherited Git or dependency-bin overrides', () => {
@@ -20,7 +20,11 @@ it('reads the real checkout identity without inherited Git or dependency-bin ove
   const fake = join(bin, 'git');
   writeFileSync(fake, '#!/bin/sh\nprintf fake\n');
   chmodSync(fake, 0o700);
-  const state = gitState(repo, { ...process.env, PATH: `${bin}:${process.env.PATH}`, GIT_DIR: '/not/a/repository' });
+  const state = gitState(repo, {
+    ...process.env,
+    PATH: [bin, process.env.PATH].join(delimiter),
+    GIT_DIR: '/not/a/repository',
+  });
   assert.deepEqual(state, { aposCommit: sha, dirty: false });
 });
 
@@ -32,7 +36,9 @@ it('removes arbitrary inherited directories inside node_modules, including symli
     alias = join(temp, 'alias');
   mkdirSync(hidden, { recursive: true });
   symlinkSync(hidden, alias, 'dir');
-  assert.equal(isolatedPath(`${hidden}:${alias}:/usr/bin`), '/usr/bin');
+  const safe = join(temp, 'safe');
+  mkdirSync(safe);
+  assert.equal(isolatedPath([hidden, alias, safe].join(delimiter)), safe);
 });
 
 it('removes inherited Node preloads from subprocess metadata checks', async () => {

@@ -5,7 +5,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-it('forwards npm ci, routes npm exec locally, and refuses dynamic installs', () => {
+const linuxIt = (name, fn) =>
+  it(name, { skip: process.platform !== 'linux' && 'benchmark execution requires Linux' }, fn);
+
+linuxIt('forwards npm ci, routes npm exec locally, and refuses dynamic installs', () => {
   const temp = mkdtempSync(join(tmpdir(), 'bench-npm-wrapper-')),
     repo = join(temp, 'repo'),
     bin = join(temp, 'bin');

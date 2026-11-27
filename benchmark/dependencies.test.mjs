@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { prepareCaseDependencies } from './dependencies.mjs';
 
-it('installs the case lock in an isolated seed and gives APOS worktrees the case dependency', async () => {
+const linuxIt = (name, fn) =>
+  it(name, { skip: process.platform !== 'linux' && 'benchmark execution requires Linux' }, fn);
+
+linuxIt('installs the case lock in an isolated seed and gives APOS worktrees the case dependency', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-seed-')),
     repo = join(dir, 'repo');
   mkdirSync(repo);
@@ -56,7 +59,7 @@ it('installs the case lock in an isolated seed and gives APOS worktrees the case
   }
 });
 
-it('rejects a Node case whose lockfile does not match its manifest', () => {
+linuxIt('rejects a Node case whose lockfile does not match its manifest', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-bad-lock-')),
     repo = join(dir, 'repo');
   mkdirSync(repo);
@@ -74,7 +77,7 @@ it('rejects a Node case whose lockfile does not match its manifest', () => {
   assert.throws(() => prepareCaseDependencies(repo, [commit], work, { ...process.env, npm_config_offline: 'true' }));
 });
 
-it('rejects a snapshot with a committed node_modules link before installation', async () => {
+linuxIt('rejects a snapshot with a committed node_modules link before installation', async () => {
   const { symlinkSync } = await import('node:fs');
   const dir = mkdtempSync(join(tmpdir(), 'bench-committed-link-')),
     repo = join(dir, 'repo');
@@ -106,7 +109,7 @@ it('rejects a gate with a failed dependency install even when a tool later repor
   assert.doesNotThrow(() => assertInstallationsSucceeded(dir));
 });
 
-it('rejects local dependency links escaping the snapshot before npm can run', () => {
+linuxIt('rejects local dependency links escaping the snapshot before npm can run', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-escape-')),
     repo = join(dir, 'repo'),
     outside = join(dir, 'outside');
@@ -152,7 +155,7 @@ it('rejects an unresolved workspace link instead of treating it as an ordinary d
   assert.throws(() => prepareCaseDependencies(repo, [sha], work, process.env), /unresolved local dependency/);
 });
 
-it('rejects a lockfile symlink instead of reading dependencies outside the snapshot', async () => {
+linuxIt('rejects a lockfile symlink instead of reading dependencies outside the snapshot', async () => {
   const { symlinkSync } = await import('node:fs');
   const dir = mkdtempSync(join(tmpdir(), 'bench-lock-link-')),
     repo = join(dir, 'repo');

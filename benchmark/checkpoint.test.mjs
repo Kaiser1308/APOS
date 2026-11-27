@@ -9,7 +9,7 @@ it('preserves each completed row privately even if a later case fails', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-checkpoint-'));
   saveCheckpoint(dir, { actualVerdict: 'unverifiable' });
   assert.deepEqual(JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8')), { actualVerdict: 'unverifiable' });
-  assert.equal(statSync(join(dir, 'result.json')).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(statSync(join(dir, 'result.json')).mode & 0o777, 0o600);
 });
 
 it('records the sealed corpus identity before starting any gate', async () => {

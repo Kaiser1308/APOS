@@ -12,7 +12,9 @@ import { corpusDigest } from './digest.mjs';
 import { saveCheckpoint, saveRunIdentity } from './checkpoint.mjs';
 import { costFields, gateCommandCount } from './cost.mjs';
 import { gitEnvironment, gitState } from './env.mjs';
+import { assertSupportedPlatform } from './platform.mjs';
 
+assertSupportedPlatform();
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const [corpusArg, outputArg] = process.argv.slice(2);
 if (!corpusArg || !outputArg) throw new Error('usage: npm run bench -- <corpus-directory> <new-output-directory>');

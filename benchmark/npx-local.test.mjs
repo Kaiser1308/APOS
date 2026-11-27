@@ -5,7 +5,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-it('runs a case-local executable and refuses a missing or external one', () => {
+const linuxIt = (name, fn) =>
+  it(name, { skip: process.platform !== 'linux' && 'benchmark execution requires Linux' }, fn);
+
+linuxIt('runs a case-local executable and refuses a missing or external one', () => {
   const temp = mkdtempSync(join(tmpdir(), 'bench-npx-wrapper-'));
   const dir = join(temp, 'repo');
   mkdirSync(dir);

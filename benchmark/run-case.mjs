@@ -7,8 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { attachResultDigest, readGateResult } from './result.mjs';
 import { assertInstallationsSucceeded, prepareCaseDependencies } from './dependencies.mjs';
 import { isolatedPath } from './env.mjs';
+import { assertSupportedPlatform } from './platform.mjs';
 
 export function runCase(item, corpus, cli, work) {
+  assertSupportedPlatform();
   mkdirSync(work, { recursive: false, mode: 0o700 });
   const repo = join(work, 'repo');
   const home = join(work, 'home');

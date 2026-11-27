@@ -6,7 +6,10 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { runCase } from './run-case.mjs';
 
-it('does not invent a verdict when a real APOS command cannot submit a Goal', () => {
+const linuxIt = (name, fn) =>
+  it(name, { skip: process.platform !== 'linux' && 'benchmark execution requires Linux' }, fn);
+
+linuxIt('does not invent a verdict when a real APOS command cannot submit a Goal', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-test-'));
   const repo = join(dir, 'repo');
   mkdirSync(repo);
@@ -45,7 +48,7 @@ it('does not invent a verdict when a real APOS command cannot submit a Goal', ()
   assert.equal(existsSync(join(dir, 'run', 'gate-output.txt')), true);
 });
 
-it('can advance to a fixed commit between APOS preparation steps', () => {
+linuxIt('can advance to a fixed commit between APOS preparation steps', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-checkout-'));
   const repo = join(dir, 'source');
   mkdirSync(repo);
@@ -117,7 +120,7 @@ it('keeps execution diagnostics private when a case cannot start', async () => {
   assert.equal(existsSync(join(dir, 'run.failure.txt')), true);
 });
 
-it('keeps the APOS dependency tree untouched when a case runs npm ci with its own lockfile', () => {
+linuxIt('keeps the APOS dependency tree untouched when a case runs npm ci with its own lockfile', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-deps-'));
   const source = join(dir, 'source');
   const apos = join(dir, 'apos');
@@ -172,7 +175,7 @@ it('keeps the APOS dependency tree untouched when a case runs npm ci with its ow
   assert.equal(existsSync(sentinel), true);
 });
 
-it('does not pass APOS node_modules binaries or NODE_PATH into a case process', () => {
+linuxIt('does not pass APOS node_modules binaries or NODE_PATH into a case process', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-path-env-'));
   const source = join(dir, 'source'),
     apos = join(dir, 'apos');
@@ -225,7 +228,7 @@ it('does not pass APOS node_modules binaries or NODE_PATH into a case process', 
   }
 });
 
-it('does not let npx fall back to an undeclared tool cached outside the case', () => {
+linuxIt('does not let npx fall back to an undeclared tool cached outside the case', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-npx-isolation-'));
   const source = join(dir, 'source'),
     apos = join(dir, 'apos');
@@ -264,7 +267,7 @@ it('does not let npx fall back to an undeclared tool cached outside the case', (
   assert.notEqual(readFileSync(join(work, 'repo', 'npx-status'), 'utf8'), '0');
 });
 
-it('routes npx through the case-local guard rather than an inherited executable', () => {
+linuxIt('routes npx through the case-local guard rather than an inherited executable', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-npx-route-')),
     source = join(dir, 'source'),
     apos = join(dir, 'apos'),
@@ -316,7 +319,7 @@ it('routes npx through the case-local guard rather than an inherited executable'
   }
 });
 
-it('does not invoke an inherited dependency-bin git while cloning a case', () => {
+linuxIt('does not invoke an inherited dependency-bin git while cloning a case', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-git-route-')),
     source = join(dir, 'source'),
     apos = join(dir, 'apos');
@@ -367,7 +370,7 @@ it('does not invoke an inherited dependency-bin git while cloning a case', () =>
   }
 });
 
-it('refuses unlocked npm installs during a case', () => {
+linuxIt('refuses unlocked npm installs during a case', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-npm-route-')),
     source = join(dir, 'source'),
     apos = join(dir, 'apos');
@@ -410,7 +413,7 @@ it('refuses unlocked npm installs during a case', () => {
   assert.notEqual(readFileSync(join(dir, 'run', 'repo', 'status'), 'utf8'), '0');
 });
 
-it('does not let uppercase npm configuration bypass the isolated cache and offline gate', () => {
+linuxIt('does not let uppercase npm configuration bypass the isolated cache and offline gate', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-npm-env-')),
     source = join(dir, 'source'),
     apos = join(dir, 'apos');
@@ -463,7 +466,7 @@ it('does not let uppercase npm configuration bypass the isolated cache and offli
   }
 });
 
-it('refuses an npm executable that resolves into the APOS checkout', () => {
+linuxIt('refuses an npm executable that resolves into the APOS checkout', () => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-npm-alias-')),
     source = join(dir, 'source'),
     apos = join(dir, 'apos'),

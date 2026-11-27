@@ -68,3 +68,15 @@ export function runCase(item, corpus, cli, work) {
     maxRssKb,
   };
 }
+
+export function runSafely(item, corpus, cli, work) {
+  try {
+    return runCase(item, corpus, cli, work);
+  } catch (error) {
+    writeFileSync(`${work}.failure.txt`, error instanceof Error ? (error.stack ?? error.message) : String(error), {
+      mode: 0o600,
+      flag: 'wx',
+    });
+    throw new Error('Benchmark case failed; inspect the private output directory');
+  }
+}

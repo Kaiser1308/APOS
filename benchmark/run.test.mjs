@@ -92,3 +92,27 @@ it('can advance to a fixed commit between APOS preparation steps', () => {
     first,
   );
 });
+
+it('keeps execution diagnostics private when a case cannot start', async () => {
+  const { runSafely } = await import('./run-case.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'bench-private-error-'));
+  const work = join(dir, 'run');
+  assert.throws(
+    () =>
+      runSafely(
+        {
+          id: 'private-id',
+          repository: 'missing.bundle',
+          deliveryCommit: 'a'.repeat(40),
+          actions: [],
+          goalId: 'G',
+          packageId: 'W',
+        },
+        dir,
+        resolve('dist/cli.js'),
+        work,
+      ),
+    error => error.message === 'Benchmark case failed; inspect the private output directory',
+  );
+  assert.equal(existsSync(join(dir, 'run.failure.txt')), true);
+});

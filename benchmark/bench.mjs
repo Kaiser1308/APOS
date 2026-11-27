@@ -5,12 +5,12 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { arch, cpus, platform, release } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseManifest, toCsv, assertPrivateOutput } from './contract.mjs';
-import { runCase } from './run-case.mjs';
+import { readManifest, toCsv, assertPrivateOutput } from './contract.mjs';
+import { runSafely } from './run-case.mjs';
 import { summarize, metricRows } from './metrics.mjs';
 import { corpusDigest } from './digest.mjs';
 import { saveCheckpoint, saveRunIdentity } from './checkpoint.mjs';
-import { gateCommandCount } from './cost.mjs';
+import { costFields, gateCommandCount } from './cost.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const [corpusArg, outputArg] = process.argv.slice(2);
@@ -22,7 +22,7 @@ if (corpus === root || corpus.startsWith(root + sep) || output === root || outpu
 }
 const frozenCorpusDigest = corpusDigest(corpus);
 const manifestBytes = readFileSync(join(corpus, 'manifest.json'));
-const manifest = parseManifest(JSON.parse(manifestBytes));
+const manifest = readManifest(manifestBytes.toString('utf8'));
 const hash = input => createHash('sha256').update(input).digest('hex');
 const aposCommit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const dirty = Boolean(execFileSync('git', ['-C', root, 'status', '--porcelain'], { encoding: 'utf8' }).trim());
@@ -43,7 +43,7 @@ const rows = [];
 for (let repetition = 1; repetition <= 2; repetition++) {
   for (const [index, item] of manifest.cases.entries()) {
     const work = join(output, `run-${repetition}-${index}`);
-    const measured = runCase(item, corpus, cli, work);
+    const measured = runSafely(item, corpus, cli, work);
     rows.push({
       caseId: item.id,
       repetition,
@@ -56,6 +56,7 @@ for (let repetition = 1; repetition <= 2; repetition++) {
       truth: item.truth,
       expected: item.expected,
       ...measured,
+      ...costFields(measured),
       aposCommit,
       aposDirty: dirty,
       nodeVersion: process.version,
@@ -108,6 +109,8 @@ const fields = [
   'expected',
   'actualVerdict',
   'caughtBy',
+  'duration',
+  'cpu',
   'durationMs',
   'userCpuSeconds',
   'systemCpuSeconds',

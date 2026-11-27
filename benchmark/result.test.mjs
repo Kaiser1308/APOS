@@ -43,3 +43,13 @@ it('records the failing check IDs reported by APOS without counting abstentions 
   });
   assert.deepEqual(readGateResult(stdout, 1).caughtBy, ['APOS-LOCKED']);
 });
+
+it('does not leak malformed APOS output in an error message', () => {
+  assert.throws(
+    () => readGateResult('private-case-content is invalid JSON', 1),
+    error => {
+      assert.equal(error.message, 'APOS returned an invalid package result');
+      return true;
+    },
+  );
+});

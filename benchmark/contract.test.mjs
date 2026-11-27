@@ -50,3 +50,14 @@ it('permits a fixed clock but rejects an invalid time for deadline-sensitive cas
   assert.equal(parseManifest({ ...sample, cases: [item] }).cases[0].clock, item.clock);
   assert.throws(() => parseManifest({ ...sample, cases: [{ ...item, clock: 'tomorrow' }] }));
 });
+
+it('does not reveal private input when the manifest is malformed', async () => {
+  const { readManifest } = await import('./contract.mjs');
+  assert.throws(
+    () => readManifest('private-manifest-content'),
+    error => {
+      assert.equal(error.message, 'Invalid corpus manifest');
+      return true;
+    },
+  );
+});

@@ -12,7 +12,15 @@ const gate = z.object({
   commit: z.string().optional(),
 });
 export function readGateResult(stdout, exitCode, identity) {
-  const result = gate.parse(JSON.parse(stdout));
+  let decoded;
+  try {
+    decoded = JSON.parse(stdout);
+  } catch {
+    throw new Error('APOS returned an invalid package result');
+  }
+  const parsed = gate.safeParse(decoded);
+  if (!parsed.success) throw new Error('APOS returned an invalid package result');
+  const result = parsed.data;
   if (
     identity &&
     (result.goalId !== identity.goalId || result.packageId !== identity.packageId || result.commit !== identity.commit)

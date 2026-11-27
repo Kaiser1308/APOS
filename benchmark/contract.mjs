@@ -30,6 +30,13 @@ const manifestSchema = z
     }
   });
 export const parseManifest = value => manifestSchema.parse(value);
+export function readManifest(input) {
+  try {
+    return parseManifest(JSON.parse(input));
+  } catch {
+    throw new Error('Invalid corpus manifest');
+  }
+}
 export function toCsv(rows, fields) {
   const cell = value => `"${String(value ?? '').replaceAll('"', '""')}"`;
   return `${fields.join(',')}\n${rows.map(row => fields.map(field => cell(row[field])).join(',')).join('\n')}\n`;

@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import type { GoalEvent } from '../domain/transitions.js';
+import { InvariantError } from '../domain/errors.js';
 
 /**
  * Per-project controller directory, outside the managed repo so owners working in the repo or its
@@ -105,7 +106,7 @@ export class ChainFile<E> {
     try {
       for (let offset = 0; offset < data.length;) {
         const written = writeSync(fd, data, offset, data.length - offset);
-        if (!written) throw new Error('Unable to append event log');
+        if (!written) throw new InvariantError('Unable to append event log');
         offset += written;
       }
       fsyncSync(fd);

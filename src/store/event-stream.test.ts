@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, unlinkSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { InvariantError, UserError } from '../domain/errors.js';
 import { ChainFile } from './event-log.js';
 import { readEventStream } from './event-stream.js';
 
@@ -86,5 +87,29 @@ describe('event stream', () => {
     expect(resumed.events.map(event => event.id)).toEqual(batch.events.slice(750).map(event => event.id));
     expect(resumed.anchor).toBe(batch.anchor);
     expect(readEventStream(home, 1500, { generation: batch.generation, anchor: batch.anchor }).events).toEqual([]);
+  });
+  it('classifies precondition failures as user errors', () => {
+    const home = mkdtempSync(join(tmpdir(), 'apos-stream-'));
+    mkdirSync(join(home, 'events'));
+    expect(() => readEventStream(home, 0)).toThrow(UserError);
+    const first = readEventStream(home, 0, { initialize: true });
+    expect(() => readEventStream(home, -1)).toThrow(UserError);
+    expect(() => readEventStream(home, 0, { initialize: true })).toThrow(UserError);
+    expect(() => readEventStream(home, 1, { generation: first.generation, anchor: first.anchor })).toThrow(UserError);
+  });
+  it('classifies broken index chains and malformed journal events as invariant errors', () => {
+    const home = mkdtempSync(join(tmpdir(), 'apos-stream-'));
+    mkdirSync(join(home, 'events'));
+    readEventStream(home, 0, { initialize: true });
+    const index = join(home, 'stream.jsonl');
+    const saved = readFileSync(index, 'utf8');
+    writeFileSync(index, saved.replace('generation', 'generatioN'));
+    expect(() => readEventStream(home, 0)).toThrow(InvariantError);
+    writeFileSync(index, saved);
+    new ChainFile(join(home, 'events', '_project.jsonl'), '_project').append({ id: 42, type: 'probe' });
+    expect(() => readEventStream(home, 0)).toThrow(InvariantError);
+    const source = join(home, 'events', '_project.jsonl');
+    writeFileSync(source, readFileSync(source, 'utf8').replace('probe', 'changed'));
+    expect(() => readEventStream(home, 0)).toThrow(InvariantError);
   });
 });

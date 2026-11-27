@@ -13,14 +13,14 @@ import { closeProblems } from '../../domain/transitions.js';
 import { closeLayerProblems } from '../../domain/close-gate.js';
 import { withGateLease } from '../../store/lease.js';
 import { assuranceService } from '../test-lock-wiring.js';
-import { UserError } from '../../domain/errors.js';
+import { InvariantError, UserError } from '../../domain/errors.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
 import type { ProjectJournal } from '../../store/journal.js';
 
 function closeResult(journal: ProjectJournal, id: string, verdict: Verdict, report?: GateReport) {
   const current = journal.getGoal(id);
-  if (!current) throw new Error(`Goal not found after close: ${id}`);
+  if (!current) throw new InvariantError(`Goal not found after close: ${id}`);
   return {
     ...jsonResult('outcome close', current, verdict, report),
     status: current.status,

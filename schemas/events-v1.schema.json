@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "APOS event stream v1",
+  "type": "object",
+  "required": ["schemaVersion", "generation", "anchor", "events"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "generation": {
+      "type": "string"
+    },
+    "anchor": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["seq", "id", "event", "anchor"],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "id": {
+            "type": "string"
+          },
+          "event": {
+            "type": "object",
+            "required": ["id", "type", "at"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string"
+              },
+              "goalId": {
+                "type": "string"
+              },
+              "data": {}
+            }
+          },
+          "anchor": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  }
+}

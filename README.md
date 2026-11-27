@@ -504,14 +504,14 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `goal revise --file <json> --source <path> [--origin <text>]` | New Goal version; needs re-approval. |
 | `lead propose (--file <json> \| --bugfix --goal <id> [--base <sha>] [--stub <path>]... \| --characterize --goal <id> [--base <sha>] \| --maintenance --goal <id> [--base <sha>]) [--by <name>]` | Submit an execution proposal (`baseCommit` required). `--maintenance` writes the Solo plan of a maintenance Goal: `paths` are the manifests and lockfiles of its part plus the Goal's `paths`; no Tester. `--bugfix` writes the Solo plan of a bug Goal from the Goal and its setup: the Tester reproduces, the Worker fixes (for a hotfix Goal the base is the commit before the hotfix, `paths` the files the hotfix changed, and another `--base` is refused). `--characterize` writes the Solo plan of a characterize Goal: the Tester captures the behaviour in tests, no code changes. |
 | `lead commit <id> [--by <name>]` | Accept the plan. Solo gets `WP-MAIN`. A Goal pinned to a setup with test paths goes to `testing` first. |
-| `tests submit <goalId> --commit <sha> [--by <name>]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
+| `tests submit <goalId> --commit <sha> [--by <name>] [--json]` | Tester: check the tests are red for the right reason and lock them. Exit 0 locked, 1 refused. |
 | `tests revise <goalId> --commit <sha> --reason <text> [--by <name>]` | Replace the lock. Exit 0 locked, 1 refused, 3 weaker than the lock and waiting for an exception. |
 | `tests show <goalId>` | The locked commit, tests per layer, the criterion-to-test map. |
 | `exception approve <goalId> --kind <kind> --ref <ref> --reason <text> (--by agent:<name> \| --human)` | An agent, or the Human (**H** with `--human`), approves a sensitive-file change, weakened locked tests, a change to test infrastructure, cutting a floor layer, or overriding a review block (`review-overridden`, `--ref <package>:<review commit>`). |
-| `goal show <id>` | Status, pinned setup, locked tests and the [assurance table](#the-assurance-table) of one Goal. |
+| `goal show <id> [--json]` | Status, pinned setup, locked tests and the [assurance table](#the-assurance-table) of one Goal. |
 | `package add --file <json> --reason <text> [--by <name>]`, `package revise <goalId> --file <json> --reason <text> [--by <name>]`, `package remove <goalId> <packageId> --reason <text> [--by <name>]`, `package list <goalId>` | Plan the packages of a Multi-WP Goal. |
 | `package submit <goalId> <packageId> (--commit <sha> \| --from-pr) [--by <name>] [--json]` | Gate a commit now. Exit 0 green, 1 red, 3 needs-human or unverifiable. `--from-pr` (a maintenance Goal opened with `--from-pr`) fetches the pull request again and gates the sha recorded when the Goal was opened; if the remote moved it, it refuses and asks for `--commit`. |
-| `integration gate <goalId> --commit <sha> --reason <text> [--by <name>]` | Gate the integration commit. |
+| `integration gate <goalId> --commit <sha> --reason <text> [--by <name>] [--json]` | Gate the integration commit. |
 | `integration prepare <goalId>`, `integration complete <goalId> --commit <sha> [--conflict-resolution <text>]`, `integration merge <goalId> --source <commit> --target <branch>` | Multi-WP integration: check, record, merge. |
 | `gate run <goalId> --commit <sha> [--base <sha>]` | Run the Goal-level gate on a specific commit (`--base` is **H**). |
 | `gate confirm <goalId> <checkId> --commit <sha> --by <name> --note <text>` | **H.** Confirm a manual check. |
@@ -520,8 +520,9 @@ Global option: `--repo <path>` (managed Git project; default: the current direct
 | `finding record <id> --kind <intent_gap\|bad_plan\|patch\|defer> --note <text> [--by <name>]` | Record a finding. |
 | `review block <goalId> [<packageId>] --commit <sha> --by <name> [--integration] [--note <text>]` | Run the tests a review added on top of the delivery. Red for a reason in the code: the package is red and the tests are locked into its next delivery (exit 1). Green: advice, nothing blocked. |
 | `review note <goalId> [<packageId>] --by <name> --note <text>` | A remark with no test: advice only. |
-| `outcome close <id> [--merge-to <branch>] [--by <name>]`, `outcome revise <id>`, `outcome stop <id>` | **Gate D (H).** `close` needs the last green gate's commit. |
+| `outcome close <id> [--merge-to <branch>] [--by <name>] [--json]`, `outcome revise <id>`, `outcome stop <id>` | **Gate D (H).** `close` needs the last green gate's commit. |
 | `inbox [--wait] [--timeout <dur>] [--since <cursor>] [--json]` | What needs the Human: blocked Goals, verified Goals, gate A/B waiting, notices and gate warnings (`--since` takes the cursor printed last time; `--wait` blocks read-only and exits 2 on timeout). |
+| `events --since <seq> --json [--initialize] [--generation <id>] [--anchor <hash>]` | Read the resumable event stream; see [JSON integration](docs/json-integration.md). |
 | `ui [--port <n>]` | Read-only local web view. |
 | `metrics show <goalId>` | Submits per package, red gates and minutes. |
 

@@ -1,3 +1,4 @@
+import { exitFor, jsonResult, verdictOf } from '../json-result.js';
 import { UserError } from '../../domain/errors.js';
 import { commitToSubmit } from '../submit-commit.js';
 import { withGateLease } from '../../store/lease.js';
@@ -77,9 +78,18 @@ export function registerPackage(ctx: CliContext): void {
             );
           const outcome = held.value;
           const state = journal.getGoal(goalId);
-          process.exitCode = outcome.result === 'green' ? 0 : outcome.result === 'red' ? 1 : 3;
+          process.exitCode = exitFor(verdictOf(outcome.result));
           if (flags.json) {
-            write(JSON.stringify({ goalId, packageId, commit, ...outcome, goalStatus: state?.status }));
+            write(
+              JSON.stringify({
+                ...jsonResult('package submit', state, verdictOf(outcome.result), state?.packages?.[packageId]?.gate),
+                goalId,
+                packageId,
+                commit,
+                ...outcome,
+                goalStatus: state?.status,
+              }),
+            );
             return;
           }
           write(

@@ -47,4 +47,5 @@ Commands:
   ui [options]                    read-only web view of this project on
                                   127.0.0.1; it never writes controller state
   finding
+  events [options]
   help [command]                  display help for command

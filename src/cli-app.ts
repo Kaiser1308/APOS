@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { registerEvents } from './cli/commands/events.js';
 import { registerBug } from './cli/commands/bug.js';
 import { registerChecks } from './cli/commands/checks.js';
 import { registerGoal } from './cli/commands/goal.js';
@@ -39,6 +40,7 @@ export function buildProgram(options: CliOptions = {}): Command {
   registerChecks(ctx);
   registerReview(ctx);
   registerOutcome(ctx);
+  registerEvents(ctx);
   return program;
 }
 

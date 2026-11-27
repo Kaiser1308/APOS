@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 const parsedGo = z.object({ package: z.string().min(1), imports: z.array(z.string()), active: z.boolean() });
 const parser = fileURLToPath(new URL('../../scripts/go-junit/main.go', import.meta.url));
+const goSource = (file: string) => !/^[._]/.test(basename(file));
 
 function parseGo(text: string, file?: string) {
   const result = execFileSync('go', ['run', parser, '--imports', ...(file ? ['--filename', basename(file)] : [])], {
@@ -79,7 +80,11 @@ export function checkGoEntries(input: {
   const visited = new Set([input.file]);
   const helpers = input.files.filter(
     file =>
-      file !== input.file && file.startsWith(dir) && !file.slice(dir.length).includes('/') && file.endsWith('_test.go'),
+      file !== input.file &&
+      goSource(file) &&
+      file.startsWith(dir) &&
+      !file.slice(dir.length).includes('/') &&
+      file.endsWith('_test.go'),
   );
   for (const file of helpers) {
     const text = input.read?.(file);
@@ -101,6 +106,7 @@ export function checkGoEntries(input: {
   }
   const local = input.files.filter(
     file =>
+      goSource(file) &&
       file.startsWith(dir) &&
       !file.slice(dir.length).includes('/') &&
       file.endsWith('.go') &&
@@ -144,6 +150,7 @@ export function checkGoEntries(input: {
       if (nested) return fail(`nested module at ${prefix}go.mod`);
       const targets = input.files.filter(
         file =>
+          goSource(file) &&
           file.startsWith(prefix) &&
           !file.slice(prefix.length).includes('/') &&
           file.endsWith('.go') &&

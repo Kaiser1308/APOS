@@ -260,3 +260,33 @@ it.skipIf(!hasGo)(
   },
   60_000,
 );
+
+it.skipIf(!hasGo)(
+  'ignores files that Go always excludes even across build contexts',
+  () => {
+    const source: Record<string, string> = {
+      'app/acceptance_test.go': 'package app_test\nimport "testing"\nfunc TestValue(t *testing.T) {}\n',
+      'app/_scratch_test.go': 'package app\nimport "unsafe"\n',
+      'app/.scratch_test.go': 'package app\nimport "unsafe"\n',
+      'app/_scratch.go': 'package app\nimport "unsafe"\n',
+      'app/.scratch.go': 'package app\nimport "unsafe"\n',
+      'app/app.go': 'package app\n',
+    };
+    const helpers: string[] = [];
+    const problems = checkGoEntries({
+      file: 'app/acceptance_test.go',
+      partRoot: '.',
+      files: ['go.mod', ...Object.keys(source)],
+      module: 'module example.com/demo\n\ngo 1.22\n',
+      text: source['app/acceptance_test.go']!,
+      read: path => source[path],
+      allowed: () => true,
+      isTestFile: () => true,
+      conservativeBuild: true,
+      recordHelper: path => helpers.push(path),
+    });
+    expect(problems).toEqual([]);
+    expect(helpers).toEqual(['app/app.go']);
+  },
+  60_000,
+);

@@ -6,6 +6,6 @@ export default defineConfig({
   test: {
     setupFiles: ['./src/test-setup.ts'],
     testTimeout: 20000,
-    exclude: [...configDefaults.exclude, 'examples/**'],
+    exclude: [...configDefaults.exclude, 'examples/**', 'benchmark/**'],
   },
 });

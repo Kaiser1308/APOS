@@ -35,7 +35,7 @@ it('removes arbitrary inherited directories inside node_modules, including symli
     hidden = join(temp, 'node_modules', 'tools'),
     alias = join(temp, 'alias');
   mkdirSync(hidden, { recursive: true });
-  symlinkSync(hidden, alias, 'dir');
+  symlinkSync(hidden, alias, process.platform === 'win32' ? 'junction' : 'dir');
   const safe = join(temp, 'safe');
   mkdirSync(safe);
   assert.equal(isolatedPath([hidden, alias, safe].join(delimiter)), safe);

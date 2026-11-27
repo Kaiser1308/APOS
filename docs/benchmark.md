@@ -19,3 +19,21 @@ A holdout contributor can supply a sealed corpus through a private channel to an
 ## Withdrawn preliminary aggregate
 
 The aggregate previously reported for commit `7cf5220853075993fcff25bbb639ea37a6f863c9` must not be used. The runner linked the APOS checkout's `node_modules` into cases, including cases whose lockfiles did not specify those dependencies; a case could also modify that shared tree. The original private corpus and detailed results are retained for audit. A replacement aggregate requires corrected fixed snapshots and fresh runs.
+
+## First isolated aggregate
+
+A curated private development corpus contained 28 cases derived from the seven demos, covering five Goal kinds and eight fault families. The manifest stated the oracle before the run; an audit compared its fixed snapshots and oracle metadata with the prior corpus, with Node lockfiles corrected for isolated installation. Some oracles also have independent behavioral or source checks. The recorded file times and retained audit are local evidence, not an independently timestamped or externally reviewed oracle certification. This is a small selected sample, not an independent holdout or an estimate for a wider population.
+
+The two sequential repetitions ran on clean APOS commit `6c88d1ba584e33d85fcc332d43b4450edb6ba231`. The subsequent Linux platform guard does not change the measured Linux execution path. Every case produced the same verdict in both repetitions and generated plans matched; the frozen corpus and manifest digests match the retained inputs, and all 56 recorded evidence digests match retained files. Twelve submissions did not provide a tool-log digest; their captured controller result is retained instead.
+
+| Metric | Repetition 1 | Repetition 2 |
+| --- | ---: | ---: |
+| False-green, fault cases | 6/18 (33.3%) | 6/18 (33.3%) |
+| False-red, clean cases | 2/9 (22.2%) | 2/9 (22.2%) |
+| Unverifiable, all cases | 0/28 | 0/28 |
+| Needs-human, all cases | 1/28 (3.6%) | 1/28 (3.6%) |
+| Known limitations, reported separately | 1 | 1 |
+
+Abstentions are included in the population denominators but are not counted as detections or false-reds. A red verdict on a faulty case indicates a block; it does not establish that APOS identified the fault, or distinguish correct code from an incorrect test. Family-level results remain private because the groups are small. Evidence shows what the gate reported, not ground truth.
+
+The run used Linux x64 kernel `7.0.0-44-generic`, an AMD Ryzen 7 4800H, Node `v22.22.1`, npm `9.2.0`, Python `3.14.4`, pytest `9.0.2`, Git `2.53.0`, and GNU `time`. Gate wall times summed to 508.9 s and 506.2 s; user plus system CPU summed to 644.9 s and 639.7 s. Maximum reported individual-process RSS was 237,800 KiB and 236,296 KiB. Total elapsed time was approximately 39.7 minutes including preparation; per-case gate costs exclude setup. This was a shared machine, so scheduling, other activity and caches introduce noise; no random seed was controlled, and two repetitions do not provide a confidence interval. No LLM reviewer was used. The private corpus and detailed results are retained locally, but no independent holdout or backup has been verified.

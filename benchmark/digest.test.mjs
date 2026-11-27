@@ -1,6 +1,6 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { corpusDigest } from './digest.mjs';
@@ -12,6 +12,8 @@ it('changes when a corpus document changes and refuses symbolic links', () => {
   const first = corpusDigest(dir);
   writeFileSync(file, 'after');
   assert.notEqual(corpusDigest(dir), first);
-  symlinkSync(file, join(dir, 'link'));
+  const linked = join(dir, 'linked');
+  mkdirSync(linked);
+  symlinkSync(linked, join(dir, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.throws(() => corpusDigest(dir));
 });

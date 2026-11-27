@@ -41,7 +41,7 @@ it('rejects an output directory reached through a symlink into the public checko
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const temp = mkdtempSync(join(tmpdir(), 'bench-path-'));
-  symlinkSync(process.cwd(), join(temp, 'public'), 'dir');
+  symlinkSync(process.cwd(), join(temp, 'public'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.throws(() => assertPrivateOutput(process.cwd(), join(temp, 'public', 'output')));
 });
 
@@ -112,20 +112,28 @@ it('does not trust an inherited dependency-bin git when checking privacy', async
   const { chmodSync, mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
   const { execFileSync } = await import('node:child_process');
   const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
+  const { delimiter, join } = await import('node:path');
   const temp = mkdtempSync(join(tmpdir(), 'bench-privacy-git-')),
     repo = join(temp, 'repo'),
     bin = join(temp, 'node_modules', '.bin');
   mkdirSync(repo);
   mkdirSync(bin, { recursive: true });
   execFileSync('git', ['init', '-q', repo]);
-  const fake = join(bin, 'git');
-  writeFileSync(fake, '#!/bin/sh\necho "fatal: not a git repository" >&2\nexit 128\n');
+  const fake = join(bin, process.platform === 'win32' ? 'git.cmd' : 'git');
+  writeFileSync(
+    fake,
+    process.platform === 'win32'
+      ? '@echo off\r\necho fatal: not a git repository 1>&2\r\nexit /b 128\r\n'
+      : '#!/bin/sh\necho "fatal: not a git repository" >&2\nexit 128\n',
+  );
   chmodSync(fake, 0o700);
   const before = process.env.PATH;
-  process.env.PATH = `${bin}:${before}`;
+  process.env.PATH = [bin, before].join(delimiter);
   try {
-    assert.throws(() => assertPrivateOutput(process.cwd(), join(repo, 'output')));
+    assert.throws(
+      () => assertPrivateOutput(process.cwd(), join(repo, 'output')),
+      /private benchmark data must be outside Git repositories/,
+    );
   } finally {
     if (before === undefined) delete process.env.PATH;
     else process.env.PATH = before;

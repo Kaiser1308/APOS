@@ -13,6 +13,7 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'target', 'out', 've
 /** Every `detect.files` entry is present and every `contains` substring is found. */
 function matches(entry: CatalogEntry, dir: string): boolean {
   if (!entry.detect.files.every(file => existsSync(join(dir, file)))) return false;
+  if (entry.detect.anyFiles && !entry.detect.anyFiles.some(file => existsSync(join(dir, file)))) return false;
   return Object.entries(entry.detect.contains ?? {}).every(([file, text]) => {
     try {
       return readFileSync(join(dir, file), 'utf8').includes(text);
@@ -25,7 +26,9 @@ function matches(entry: CatalogEntry, dir: string): boolean {
 /** Some file a catalog entry looks for is there, though the entry does not match: a project we cannot name. */
 function looksLikeProject(catalog: CatalogEntry[], dir: string): string[] {
   return catalog
-    .filter(entry => entry.detect.files.some(file => existsSync(join(dir, file))))
+    .filter(entry =>
+      [...entry.detect.files, ...(entry.detect.anyFiles ?? [])].some(file => existsSync(join(dir, file))),
+    )
     .map(entry => entry.stack);
 }
 

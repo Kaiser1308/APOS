@@ -36,6 +36,8 @@ export const catalogToolSchema = z.object({
       if (problem) ctx.addIssue({ code: 'custom', message: `runOne ${problem}` });
     })
     .optional(),
+  /** Require an explicit JUnit file attribute when associating a test with a lockable source file. */
+  testFileRequired: z.boolean().optional(),
 });
 export type CatalogTool = z.infer<typeof catalogToolSchema>;
 
@@ -56,10 +58,13 @@ const catalogLayerId = z.enum(['L0', 'L1', 'L2', 'L3', 'L4', 'L5']);
 export const catalogEntrySchema = z.object({
   stack: z.string().regex(/^[a-z][a-z0-9-]*$/, 'stack is a lowercase word'),
   /** A stack is recognised in a directory when every file exists and every `contains` substring is found. */
-  detect: z.object({
-    files: z.array(z.string().min(1)).min(1),
-    contains: z.record(z.string(), z.string().min(1)).optional(),
-  }),
+  detect: z
+    .object({
+      files: z.array(z.string().min(1)),
+      anyFiles: z.array(z.string().min(1)).min(1).optional(),
+      contains: z.record(z.string(), z.string().min(1)).optional(),
+    })
+    .refine(value => value.files.length > 0 || value.anyFiles?.length, 'detect needs a file marker'),
   layers: z.partialRecord(catalogLayerId, z.array(catalogToolSchema).min(1)),
   /** Globs, relative to the part's root, of the files that hold tests: what a tester may commit and what gets locked. */
   testPaths: z.array(z.string().min(1)).default([]),

@@ -14,6 +14,8 @@ const regexText = z.string().refine(value => {
  * copied into the setup: the core knows no language, it only applies the rule.
  */
 export const entryRuleSchema = z.object({
+  /** Resolve Go imports against the committed go.mod and all source files in each package. */
+  goModule: z.boolean().optional(),
   /**
    * Regexes tried on each line of a test file; the first that matches says what the line imports: group 1 is the module
    * (several, comma-separated, for `import a, b`), the optional group 2 the names a `from <module> import <names>` takes,

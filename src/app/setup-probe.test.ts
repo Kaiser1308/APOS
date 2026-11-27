@@ -80,6 +80,18 @@ const junit = (mode: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
+it.skipIf(process.platform === 'win32')(
+  'preserves literal dollar signs in an existing single-quoted report argument',
+  async () => {
+    const { dir, commit } = await repoWith({
+      L1: [{ id: 't', command: "node tool.js '{report}' ok", format: 'junit' }],
+    });
+    const report = await probeSetup(dir, commit, { codec: jsonCodec, artifactRoot: temp('apos-$HOME-') });
+    expect(report.ok).toBe(true);
+  },
+  60_000,
+);
+
 describe('probeSetup test patterns', () => {
   it('fails the probe when a regex of the tests block does not compile, and names it', async () => {
     const { dir, commit } = await repoWith(

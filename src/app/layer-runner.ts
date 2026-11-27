@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import type { LayerSpec } from '../domain/project-setup.js';
 import type { ParsedReport, TestOutcome } from '../domain/results/index.js';
 import { GitWorktreeFactory, type WorkspaceFactory } from './gate-workspace.js';
@@ -16,11 +17,17 @@ export type RunnerDeps = {
 };
 
 const NOT_FOUND = /command not found|is not recognized as an internal or external command|: not found$/im;
+const EXECUTABLE_NOT_FOUND = /executable file not found in (?:\$PATH|%PATH%)/im;
 /** Why a command did not run at all (timed out, never exited, not installed), or undefined when it ran. */
 export const notRunnable = (result: ExecResult): string | undefined => {
   if (result.timedOut) return 'timed out';
   if (result.exitCode === null) return 'did not exit';
-  if (result.exitCode === 127 || NOT_FOUND.test(result.output)) return 'command not found';
+  if (
+    result.exitCode === 127 ||
+    NOT_FOUND.test(result.output) ||
+    (result.exitCode !== 0 && EXECUTABLE_NOT_FOUND.test(result.output))
+  )
+    return 'command not found';
   return undefined;
 };
 
@@ -61,7 +68,15 @@ export class ToolRunner {
       const dir = join(this.artifactRoot, 'runs', randomUUID());
       mkdirSync(dir, { recursive: true });
       const tempReport = join(dir, 'report').replaceAll('\\', '/');
-      const final = command.replaceAll('{report}', tempReport).replaceAll('{changed}', vars.changed ?? '');
+      const apos = fileURLToPath(new URL('../../', import.meta.url)).replaceAll('\\', '/');
+      const shellValue = (value: string) =>
+        process.platform === 'win32' ? value.replaceAll('"', '\\"') : value.replace(/["\\$`]/g, '\\$&');
+      const final = command.replace(/"\{report\}"|\{report\}|\{changed\}|\{apos\}/g, token => {
+        if (token === '"{report}"') return `"${shellValue(tempReport)}"`;
+        if (token === '{report}') return tempReport;
+        if (token === '{changed}') return vars.changed ?? '';
+        return shellValue(apos);
+      });
       const cwd = join(workspace.path, root);
       const exec = this.executor.run(final, cwd, {}, this.timeoutMs);
       if (!tool.format || tool.format === 'exit' || notRunnable(exec)) return { exec };

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.21)
+project(apos_espidf_host LANGUAGES CXX)
+enable_testing()
+add_executable(host_test test/calc_test.cpp)
+add_test(NAME host_test COMMAND host_test)

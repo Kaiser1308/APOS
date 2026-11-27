@@ -33,7 +33,7 @@ export function runOneProblem(template: string): string | undefined {
       if (!(MODIFIERS as readonly string[]).includes(modifier)) return `unknown modifier |${modifier}`;
   const stray = [...template.matchAll(/\{([^}]*)\}/g)]
     .map(match => match[0])
-    .filter(text => !text.startsWith('{report}') && !new RegExp(PLACEHOLDER.source).test(text));
+    .filter(text => text !== '{report}' && text !== '{apos}' && !new RegExp(PLACEHOLDER.source).test(text));
   if (stray.length) return `unknown placeholder ${stray[0]}`;
   return new RegExp(PLACEHOLDER.source).test(template) ? undefined : 'needs a placeholder such as {id} or {name}';
 }

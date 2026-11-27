@@ -140,6 +140,8 @@ export async function probeSetup(repo: string, commit: string, deps: ProbeDeps):
       if (!same) return { ok: false, reason: 'two runs gave different results (flaky)' };
       summary += ', stable over 2 runs';
     }
+    if (tool.testFileRequired && report.kind === 'tests' && report.tests.some(test => !test.file))
+      summary += ', test-file linkage unverified; tests submit cannot lock tests without file evidence';
     return { ok: true, reason: summary };
   };
 

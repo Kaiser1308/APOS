@@ -124,6 +124,14 @@ describe('apos-json', () => {
 });
 
 describe('junit', () => {
+  it('keeps the diagnostic text of gotestsum failures whose message is only Failed', () => {
+    const xml =
+      '<testsuite><testcase classname="calc_test.go" name="TestAdd"><failure message="Failed">not implemented</failure></testcase></testsuite>';
+    expect(readReport('junit', xml)).toMatchObject({
+      kind: 'tests',
+      tests: [{ id: 'calc_test.go::TestAdd', status: 'fail', message: expect.stringContaining('not implemented') }],
+    });
+  });
   it('reads vitest: ids use the file as classname, entities decode, skip is skip', () => {
     expect(readReport('junit', fixture('vitest.junit.xml'))).toEqual({
       kind: 'tests',

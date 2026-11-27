@@ -1,3 +1,4 @@
+import { goLockProblems } from './go-lock-check.js';
 import {
   infraCheck,
   inventoryCheck,
@@ -138,7 +139,7 @@ export class AssuranceService {
             }),
           ),
           delivery: delivery.set,
-          runProblems: delivery.problems,
+          runProblems: [...delivery.problems, ...goLockProblems(this.deps.repo, setup, state, input.head)],
           criteria: lock.map.map(entry => entry.acceptanceId),
         }),
       );
@@ -298,7 +299,7 @@ export class AssuranceService {
           lock,
           deliveryFiles,
           delivery: delivery.set,
-          runProblems: delivery.problems,
+          runProblems: [...delivery.problems, ...goLockProblems(repo, setup, state, head)],
           criteria: item.spec.acceptance.flatMap(criterion =>
             criterion.goalAcceptanceId ? [criterion.goalAcceptanceId] : [],
           ),

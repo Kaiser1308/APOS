@@ -338,17 +338,19 @@ export class GateService {
         reason: `the recheck of the new failure(s) has an unusable report: ${again.reportProblem}`,
       };
     const recheck = evaluateCommandCheck(check, base, again ? [again] : []);
-    const unexpected = recheck.newFailures.filter(item => !first.newFailures.includes(item));
+    const unexpected = (again?.failures ?? []).filter(item => !first.delivery[0].failures.includes(item));
+    const contradictory = again?.exitCode === 0 && again.failures.length > 0;
     if (
       recheck.status === 'unverifiable' ||
       (recheck.status === 'fail' && !recheck.newFailures.length) ||
-      unexpected.length
+      unexpected.length ||
+      contradictory
     )
       return {
         ...first,
         delivery: again ? [...first.delivery, again] : first.delivery,
         status: 'unverifiable',
-        reason: `recheck inconclusive: ${unexpected.length ? `different new failure(s): ${unexpected.join(', ')}` : recheck.reason}`,
+        reason: `recheck inconclusive: ${unexpected.length ? `different failure(s): ${unexpected.join(', ')}` : contradictory ? 'exit 0 with failures' : recheck.reason}`,
       };
     const seen = new Set(again?.failures ?? []);
     const persistent = first.newFailures.filter(item => seen.has(item));

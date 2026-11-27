@@ -235,6 +235,35 @@ ${scenario === 'crash' ? "require('./missing.js');" : "console.log('FAIL regress
     60_000,
   );
 
+  it.each([
+    { name: 'a baseline failure absent from the first delivery', exit: 1 },
+    { name: 'an exit-zero result containing a failure', exit: 0 },
+  ])(
+    'does not pass a recheck with $name',
+    async ({ exit }) => {
+      const counterDir = mkdtempSync(join(tmpdir(), 'apos-recheck-known-'));
+      dirs.push(counterDir);
+      const counter = join(counterDir, 'counter');
+      const script = `const fs = require('fs');
+if (!fs.existsSync('feature.js')) { console.log('FAIL legacy-flaky-network'); process.exit(1); }
+const counter = ${JSON.stringify(counter)};
+if (!fs.existsSync(counter)) { fs.writeFileSync(counter, '1'); console.log('FAIL regression-A'); ${exit === 0 ? "console.log('FAIL legacy-flaky-network');" : ''} process.exit(1); }
+console.log('FAIL legacy-flaky-network'); process.exit(${exit});`;
+      const { dir, commit, gate } = await project();
+      const base = commit({ 'runner.js': script }, 'runner');
+      const delivery = commit({ 'feature.js': 'process.exit(0);' }, 'delivery');
+      const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery, baseCommit: base });
+      const check = report.checks.find(item => item.checkId === 'CHK-REG')!;
+      expect(check.base[0].failures).toEqual(['legacy-flaky-network']);
+      expect(check.delivery.map(run => [run.exitCode, run.failures])).toEqual([
+        [1, exit === 0 ? ['legacy-flaky-network', 'regression-A'] : ['regression-A']],
+        [exit, ['legacy-flaky-network']],
+      ]);
+      expect(report.result).toBe('unverifiable');
+    },
+    60_000,
+  );
+
   it('runs in a clean checkout, so uncommitted files in the owner tree do not count', async () => {
     const { dir, gate, git } = await project();
     writeFileSync(join(dir, 'feature.js'), 'process.exit(0);');

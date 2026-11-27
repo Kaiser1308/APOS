@@ -205,9 +205,13 @@ describe('controller gate on real commits', () => {
     );
     const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery });
     const regression = report.checks.find(item => item.checkId === 'CHK-REG')!;
+    expect(regression.base.map(run => [run.exitCode, run.failures])).toEqual([[1, ['legacy-flaky-network']]]);
+    expect(regression.delivery.map(run => [run.exitCode, run.failures])).toEqual([
+      [1, ['legacy-flaky-network', 'run-with-callback']],
+      [1, ['legacy-flaky-network']],
+    ]);
     expect(report.result).toBe('green');
     expect(regression.reason).toMatch(/did not reproduce on recheck \(flaky\): run-with-callback/);
-    expect(regression.delivery).toHaveLength(2);
   }, 60_000);
 
   it.each(['crash', 'different'])(

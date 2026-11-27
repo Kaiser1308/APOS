@@ -1,34 +1,31 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { arch, cpus, platform, release } from 'node:os';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readManifest, toCsv, assertPrivateOutput } from './contract.mjs';
+import { readManifest, toCsv, assertPrivateCorpus, assertPrivateOutput } from './contract.mjs';
 import { runSafely } from './run-case.mjs';
 import { summarize, metricRows } from './metrics.mjs';
 import { corpusDigest } from './digest.mjs';
 import { saveCheckpoint, saveRunIdentity } from './checkpoint.mjs';
 import { costFields, gateCommandCount } from './cost.mjs';
+import { gitEnvironment, gitState } from './env.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const [corpusArg, outputArg] = process.argv.slice(2);
 if (!corpusArg || !outputArg) throw new Error('usage: npm run bench -- <corpus-directory> <new-output-directory>');
-const corpus = realpathSync(corpusArg);
+const corpus = assertPrivateCorpus(corpusArg);
 const output = assertPrivateOutput(root, resolve(outputArg));
-if (corpus === root || corpus.startsWith(root + sep) || output === root || output.startsWith(root + sep)) {
-  throw new Error('corpus and output must be outside the APOS checkout');
-}
 const frozenCorpusDigest = corpusDigest(corpus);
 const manifestBytes = readFileSync(join(corpus, 'manifest.json'));
 const manifest = readManifest(manifestBytes.toString('utf8'));
 const hash = input => createHash('sha256').update(input).digest('hex');
-const aposCommit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-const dirty = Boolean(execFileSync('git', ['-C', root, 'status', '--porcelain'], { encoding: 'utf8' }).trim());
+const { aposCommit, dirty } = gitState(root);
 const cli = join(root, 'dist', 'cli.js');
 const versionOf = command => {
-  const result = spawnSync(command, ['--version'], { encoding: 'utf8' });
+  const result = spawnSync(command, ['--version'], { encoding: 'utf8', env: gitEnvironment(process.env) });
   return result.status === 0 ? (result.stdout || result.stderr).trim() : null;
 };
 mkdirSync(output, { mode: 0o700 });

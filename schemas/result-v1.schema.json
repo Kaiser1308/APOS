@@ -132,6 +132,28 @@
     },
     "timeout": {
       "type": "boolean"
+    },
+    "merge": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": ["sourceRef", "targetBranch", "mergeCommit"],
+          "properties": {
+            "sourceRef": {
+              "type": "string"
+            },
+            "targetBranch": {
+              "type": "string"
+            },
+            "mergeCommit": {
+              "type": "string"
+            }
+          }
+        }
+      ]
     }
   },
   "additionalProperties": true,
@@ -182,6 +204,18 @@
       },
       "then": {
         "required": ["cursor", "items"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "outcome close"
+          }
+        }
+      },
+      "then": {
+        "required": ["status", "merge"]
       }
     }
   ]

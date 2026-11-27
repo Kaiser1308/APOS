@@ -87,10 +87,27 @@ export class ChainFile<E> {
   }
 
   append(event: E): void {
-    const prev = this.lines().at(-1)?.hash ?? GENESIS;
+    this.appendMany([event]);
+  }
+
+  /** The caller serializes writers; a partial final line remains detectable after a crash. */
+  appendMany(events: E[]): void {
+    if (!events.length) return;
+    let prev = this.lines().at(-1)?.hash ?? GENESIS;
+    const lines: string[] = [];
+    for (const event of events) {
+      const hash = chain(prev, event);
+      lines.push(JSON.stringify({ event, prev, hash } satisfies Line<E>));
+      prev = hash;
+    }
+    const data = Buffer.from(`${lines.join('\n')}\n`);
     const fd = openSync(this.path, 'a');
     try {
-      writeSync(fd, `${JSON.stringify({ event, prev, hash: chain(prev, event) } satisfies Line<E>)}\n`);
+      for (let offset = 0; offset < data.length;) {
+        const written = writeSync(fd, data, offset, data.length - offset);
+        if (!written) throw new Error('Unable to append event log');
+        offset += written;
+      }
       fsyncSync(fd);
     } finally {
       closeSync(fd);

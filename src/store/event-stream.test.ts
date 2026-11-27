@@ -58,4 +58,33 @@ describe('event stream', () => {
     new ChainFile(join(home, 'events', '_project.jsonl'), '_project').append({ id: 42, type: 'probe' });
     expect(() => readEventStream(home, 0, { initialize: true })).toThrow();
   });
+  it('resumes after an individual event in a batch using its own anchor', () => {
+    const home = mkdtempSync(join(tmpdir(), 'apos-stream-'));
+    mkdirSync(join(home, 'events'));
+    const source = new ChainFile(join(home, 'events', '_project.jsonl'), '_project');
+    for (let i = 1; i <= 3; i++) source.append({ id: `e${i}`, type: 'example', at: '2025-01-01' });
+    const batch = readEventStream(home, 0, { initialize: true });
+    const first = batch.events[0]!;
+    const resumed = readEventStream(home, first.seq, { generation: batch.generation, anchor: first.anchor });
+    expect(resumed.events.map(event => event.id)).toEqual(['e2', 'e3']);
+    expect(() => readEventStream(home, first.seq, { generation: batch.generation, anchor: batch.anchor })).toThrow(
+      /cursor/,
+    );
+  });
+  it('reconciles a complete prefix of a batch after interruption and preserves its anchor', () => {
+    const home = mkdtempSync(join(tmpdir(), 'apos-stream-'));
+    mkdirSync(join(home, 'events'));
+    const source = new ChainFile(join(home, 'events', '_project.jsonl'), '_project');
+    source.appendMany(Array.from({ length: 1500 }, (_, i) => ({ id: `e${i}`, type: 'example', at: '2025-01-01' })));
+    const batch = readEventStream(home, 0, { initialize: true });
+    expect(batch.events).toHaveLength(1500);
+    const path = join(home, 'stream.jsonl');
+    const lines = readFileSync(path, 'utf8').split('\n');
+    writeFileSync(path, `${lines.slice(0, 751).join('\n')}\n`);
+    const cursor = batch.events[749]!;
+    const resumed = readEventStream(home, cursor.seq, { generation: batch.generation, anchor: cursor.anchor });
+    expect(resumed.events.map(event => event.id)).toEqual(batch.events.slice(750).map(event => event.id));
+    expect(resumed.anchor).toBe(batch.anchor);
+    expect(readEventStream(home, 1500, { generation: batch.generation, anchor: batch.anchor }).events).toEqual([]);
+  });
 });

@@ -18,7 +18,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["seq", "id", "event"],
+        "required": ["seq", "id", "event", "anchor"],
         "properties": {
           "seq": {
             "type": "integer",
@@ -45,6 +45,10 @@
               },
               "data": {}
             }
+          },
+          "anchor": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           }
         }
       }

@@ -31,11 +31,15 @@ export function readEventStream(home: string, since: number, options: Options = 
       if (!options.initialize || since !== 0)
         throw new Error('Event index missing; explicitly initialize and reset cursor');
       index.append({ generation: randomUUID() });
-      const fd = openSync(home, 'r');
-      try {
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
+      // Windows does not allow Node to open a directory for fsync. File data is flushed above;
+      // its directory entry must be included in a coordinated backup on every platform.
+      if (process.platform !== 'win32') {
+        const fd = openSync(home, 'r');
+        try {
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+        }
       }
     } else if (options.initialize) throw new Error('Event index exists; initialization refused');
     const raw = readFileSync(path, 'utf8');
@@ -73,19 +77,23 @@ export function readEventStream(home: string, since: number, options: Options = 
       if (JSON.stringify(available.get(entry.id)) !== JSON.stringify(entry.event))
         throw new Error(`Event index source missing or changed: ${entry.id}`);
     }
+    const pending: Entry[] = [];
     for (const event of available.values()) {
       if (!ids.has(event.id)) {
-        const entry = { seq: entries.length + 1, id: event.id, event };
-        index.append(entry);
-        entries.push(entry);
+        const entry = { seq: entries.length + pending.length + 1, id: event.id, event };
+        pending.push(entry);
       }
     }
+    index.appendMany(pending);
+    for (const entry of pending) entries.push(entry);
     const finalRaw = readFileSync(path, 'utf8');
     const finalLines = verifyChain<Header | Entry>('stream', finalRaw.split('\n').slice(0, -1));
     return {
       generation: header.generation,
       anchor: finalLines.at(-1)!.hash,
-      events: entries.filter(entry => entry.seq > since),
+      events: entries
+        .filter(entry => entry.seq > since)
+        .map(entry => ({ ...entry, anchor: finalLines[entry.seq]!.hash })),
     };
   });
 }

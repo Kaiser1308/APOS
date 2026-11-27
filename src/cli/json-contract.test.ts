@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import Ajv from 'ajv';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { testingProject, cleanProjects, goodTests } from '../app/test-lock.test-support.js';
+import { testingProject, lockedProject, cleanProjects, goodTests } from '../app/test-lock.test-support.js';
 import { approval, proposal, sourceText, spec } from '../domain/fixtures.test-support.js';
 import { initProject } from '../app/init-project.js';
 import { newEvent } from '../app/events.js';
@@ -22,7 +22,10 @@ afterAll(() => {
 
 it('validates real CLI snapshots and a resumable event stream against the published schemas', async () => {
   const p = await testingProject({
-    goal: { ...spec, checks: [{ ...spec.checks[0]!, command: 'node -e \"process.exit(0)\"' }] },
+    goal: {
+      ...spec,
+      checks: [{ ...spec.checks[0]!, command: "node -e \"process.exit(require('fs').existsSync('post-red')?1:0)\"" }],
+    },
   });
   const bad = p.commit({ ...goodTests(p.goalId), 'tests/acceptance/calc.t': 'case add pass\n' }, 'bad tests');
   p.close();
@@ -70,8 +73,27 @@ it('validates real CLI snapshots and a resumable event stream against the publis
   expect(missing.status).toBe(1);
   const first = run('events', '--since', '0', '--json', '--initialize');
   expect(first.status).toBe(0);
-  const stream = JSON.parse(first.stdout) as { generation: string; anchor: string; events: { seq: number }[] };
+  const stream = JSON.parse(first.stdout) as {
+    generation: string;
+    anchor: string;
+    events: { seq: number; id: string; anchor: string }[];
+  };
   expect(event(stream)).toBe(true);
+  const midpoint = stream.events[Math.floor(stream.events.length / 2)]!;
+  const partial = run(
+    'events',
+    '--since',
+    String(midpoint.seq),
+    '--generation',
+    stream.generation,
+    '--anchor',
+    midpoint.anchor,
+    '--json',
+  );
+  expect(partial.status).toBe(0);
+  expect((JSON.parse(partial.stdout) as { events: { id: string }[] }).events.map(item => item.id)).toEqual(
+    stream.events.filter(item => item.seq > midpoint.seq).map(item => item.id),
+  );
   const last = stream.events.at(-1)?.seq ?? 0;
   const resumed = run(
     'events',
@@ -130,9 +152,22 @@ it('validates real CLI snapshots and a resumable event stream against the publis
   expect(events).toHaveLength(4);
   expect(events.map(item => item.seq)).toEqual([last + 1, last + 2, last + 3, last + 4]);
   expect(new Set(events.map(item => item.id)).size).toBe(4);
-  const closed = run('outcome', 'close', p.goalId, '--on-behalf', 'contract test', '--json');
-  expect([0, 3], closed.stderr).toContain(closed.status);
-  expect(result(JSON.parse(closed.stdout))).toBe(true);
+  p.git('checkout', '-qb', 'target', good);
+  const targetHead = p.commit({ 'post-red': 'break post-merge gate' }, 'target diverged');
+  const failed = run('outcome', 'close', p.goalId, '--merge-to', 'target', '--on-behalf', 'contract test', '--json');
+  expect(failed.status, failed.stderr).toBe(1);
+  const closeResult = JSON.parse(failed.stdout) as {
+    status: string;
+    merge: { mergeCommit: string; targetBranch: string };
+  };
+  expect(result(closeResult)).toBe(true);
+  expect(closeResult.status).toBe('verified');
+  expect(closeResult.merge.targetBranch).toBe('target');
+  expect(p.git('rev-parse', `${closeResult.merge.mergeCommit}^1`)).toBe(targetHead);
+  expect(p.git('rev-parse', `${closeResult.merge.mergeCommit}^2`)).toBe(delivery);
+  const retried = run('outcome', 'close', p.goalId, '--on-behalf', 'contract test', '--json');
+  expect(retried.status).toBe(1);
+  expect(JSON.parse(retried.stdout).merge.mergeCommit).toBe(closeResult.merge.mergeCommit);
 }, 60_000);
 
 it('validates an integration gate produced by the real CLI', async () => {
@@ -215,4 +250,41 @@ it('validates an integration gate produced by the real CLI', async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}, 60_000);
+
+it('reports the merge and closed status after a successful real CLI close', async () => {
+  const p = await lockedProject();
+  const delivery = p.commit({ 'src/impl.txt': 'add\n' }, 'delivery');
+  expect((await p.submit(delivery)).result).toBe('green');
+  p.git('checkout', '-qb', 'target', p.lockCommit);
+  const targetHead = p.commit({ 'independent.txt': 'target change' }, 'target diverged');
+  p.close();
+  const target = controllerHome(p.dir, homeRoot);
+  mkdirSync(target, { recursive: true });
+  cpSync(p.home, target, { recursive: true });
+  const closed = spawnSync(
+    process.execPath,
+    [
+      join(root, 'dist/cli.js'),
+      '--repo',
+      p.dir,
+      'outcome',
+      'close',
+      p.goalId,
+      '--merge-to',
+      'target',
+      '--on-behalf',
+      'contract test',
+      '--json',
+    ],
+    { encoding: 'utf8', env: { ...process.env, APOS_HOME: homeRoot } },
+  );
+  expect([0, 3], closed.stderr).toContain(closed.status);
+  const value = JSON.parse(closed.stdout) as { status: string; merge: { mergeCommit: string; targetBranch: string } };
+  const schema: object = JSON.parse(readFileSync(join(root, 'schemas/result-v1.schema.json'), 'utf8'));
+  expect(new Ajv().validate(schema, value)).toBe(true);
+  expect(value.status).toBe('closed');
+  expect(value.merge.targetBranch).toBe('target');
+  expect(p.git('rev-parse', `${value.merge.mergeCommit}^1`)).toBe(targetHead);
+  expect(p.git('rev-parse', `${value.merge.mergeCommit}^2`)).toBe(delivery);
 }, 60_000);

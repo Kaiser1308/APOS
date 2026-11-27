@@ -1,4 +1,4 @@
-import { exitFor, jsonResult, verdictOf } from '../json-result.js';
+import { exitFor, jsonResult, verdictOf, type Verdict } from '../json-result.js';
 import type { GateReport } from '../../domain/gate.js';
 import { newEvent } from '../../app/events.js';
 import { existsSync } from 'node:fs';
@@ -16,6 +16,17 @@ import { assuranceService } from '../test-lock-wiring.js';
 import { UserError } from '../../domain/errors.js';
 import { ON_BEHALF_FLAGS, ON_BEHALF_HELP } from '../human-confirm.js';
 import type { CliContext } from '../context.js';
+import type { ProjectJournal } from '../../store/journal.js';
+
+function closeResult(journal: ProjectJournal, id: string, verdict: Verdict, report?: GateReport) {
+  const current = journal.getGoal(id);
+  if (!current) throw new Error(`Goal not found after close: ${id}`);
+  return {
+    ...jsonResult('outcome close', current, verdict, report),
+    status: current.status,
+    merge: current.merge ?? null,
+  };
+}
 
 export function registerOutcome(ctx: CliContext): void {
   const { program, options, write, repo, withJournal, withJournalAsync, assertHuman } = ctx;
@@ -59,7 +70,7 @@ export function registerOutcome(ctx: CliContext): void {
               const verdict =
                 closeReport && closeReport.result !== 'green' ? verdictOf(closeReport.result) : 'unverifiable';
               process.exitCode = exitFor(verdict);
-              write(JSON.stringify({ ...jsonResult('outcome close', state, verdict, closeReport), problems: blocked }));
+              write(JSON.stringify({ ...closeResult(journal, id, verdict, closeReport), problems: blocked }));
               return;
             }
             if (blocked.length)
@@ -71,15 +82,28 @@ export function registerOutcome(ctx: CliContext): void {
             const merges = new MergeService(journal);
             merges.authorize(id, flags.mergeTo, flags.by ?? 'human');
             const mergeCommit = merges.merge(id, repo(), state.gate!.deliveryCommit, flags.mergeTo);
-            const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(
-              id,
-              repo(),
-            );
+            let report: GateReport;
+            try {
+              report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(
+                id,
+                repo(),
+              );
+            } catch (error) {
+              if (!flags.json) throw error;
+              process.exitCode = 3;
+              write(
+                JSON.stringify({
+                  ...closeResult(journal, id, 'unverifiable'),
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+              );
+              return;
+            }
             if (!flags.json) write(`Merged ${id}: ${mergeCommit}; post-merge gate ${report.result}`);
             if (report.result !== 'green' && flags.json) {
               const verdict = verdictOf(report.result);
               process.exitCode = exitFor(verdict);
-              write(JSON.stringify(jsonResult('outcome close', state, verdict, report)));
+              write(JSON.stringify(closeResult(journal, id, verdict, report)));
               return;
             }
             if (report.result !== 'green')
@@ -87,15 +111,28 @@ export function registerOutcome(ctx: CliContext): void {
           }
           // Merged but not yet closed (the post-merge gate was pending or red): rerun it so a confirmation on the merge commit can count.
           if (!flags.mergeTo && state.merge && state.postMergeGate?.result !== 'green') {
-            const report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(
-              id,
-              repo(),
-            );
+            let report: GateReport;
+            try {
+              report = new GateService(journal, { inspector: options.inspector, ...options.gate }).runPostMerge(
+                id,
+                repo(),
+              );
+            } catch (error) {
+              if (!flags.json) throw error;
+              process.exitCode = 3;
+              write(
+                JSON.stringify({
+                  ...closeResult(journal, id, 'unverifiable'),
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+              );
+              return;
+            }
             if (!flags.json) write(`Post-merge gate ${report.result} on ${state.merge.mergeCommit}`);
             if (report.result !== 'green' && flags.json) {
               const verdict = verdictOf(report.result);
               process.exitCode = exitFor(verdict);
-              write(JSON.stringify(jsonResult('outcome close', state, verdict, report)));
+              write(JSON.stringify(closeResult(journal, id, verdict, report)));
               return;
             }
             if (report.result !== 'green')
@@ -106,7 +143,7 @@ export function registerOutcome(ctx: CliContext): void {
         if (decision === 'close' && flags.json) {
           const verdict = closeReport ? verdictOf(closeReport.result) : 'unverifiable';
           process.exitCode = exitFor(verdict);
-          write(JSON.stringify({ ...jsonResult('outcome close', state, verdict, closeReport), status: 'closed' }));
+          write(JSON.stringify(closeResult(journal, id, verdict, closeReport)));
         } else write(`${decision} ${id}`);
       }),
     );

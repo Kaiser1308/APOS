@@ -1,3 +1,5 @@
+import { exitFor, jsonResult, verdictOf } from '../json-result.js';
+import type { GateReport } from '../../domain/gate.js';
 import { newEvent } from '../../app/events.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,13 +25,15 @@ export function registerOutcome(ctx: CliContext): void {
     const command = outcome.command(decision).argument('<id>');
     if (decision === 'close')
       command
+        .option('--json', 'emit JSON')
         .option('--merge-to <branch>', 'authorize and perform one merge of the gated commit')
         .option('--by <name>', 'who decided', 'human');
     command.option(ON_BEHALF_FLAGS, ON_BEHALF_HELP);
-    command.action((id: string, flags: { mergeTo?: string; by?: string; onBehalf?: string }) =>
+    command.action((id: string, flags: { mergeTo?: string; by?: string; onBehalf?: string; json?: boolean }) =>
       withJournalAsync(async journal => {
         const confirmation = await assertHuman(`outcome ${decision}`, id, flags.onBehalf);
         const state = journal.getGoal(id);
+        let closeReport: GateReport | undefined;
         if (decision === 'close') {
           if (state?.status !== 'verified') throw new Error('Verified Goal required before closing');
           // Before any merge: a close that is going to be refused must not have merged anything first.
@@ -47,8 +51,17 @@ export function registerOutcome(ctx: CliContext): void {
               throw new UserError(
                 `Another gate is running for this project (pid ${held.holder}): wait for it, then close again`,
               );
-            write(`Close-stage layers ${held.value?.result ?? 'did not run'} on ${state.verifiedCommit}`);
+            closeReport = held.value;
+            if (!flags.json)
+              write(`Close-stage layers ${held.value?.result ?? 'did not run'} on ${state.verifiedCommit}`);
             const blocked = closeLayerProblems(journal.getGoal(id)!);
+            if (blocked.length && flags.json) {
+              const verdict =
+                closeReport && closeReport.result !== 'green' ? verdictOf(closeReport.result) : 'unverifiable';
+              process.exitCode = exitFor(verdict);
+              write(JSON.stringify({ ...jsonResult('outcome close', state, verdict, closeReport), problems: blocked }));
+              return;
+            }
             if (blocked.length)
               throw new UserError(
                 `${blocked.join('; ')}. Fix it and submit again, or approve an exception (apos exception approve --kind floor-reduced --ref ${id}:close:<layer>); a verified Goal whose verified commit cannot pass is revised with \`apos outcome revise\``,
@@ -62,7 +75,13 @@ export function registerOutcome(ctx: CliContext): void {
               id,
               repo(),
             );
-            write(`Merged ${id}: ${mergeCommit}; post-merge gate ${report.result}`);
+            if (!flags.json) write(`Merged ${id}: ${mergeCommit}; post-merge gate ${report.result}`);
+            if (report.result !== 'green' && flags.json) {
+              const verdict = verdictOf(report.result);
+              process.exitCode = exitFor(verdict);
+              write(JSON.stringify(jsonResult('outcome close', state, verdict, report)));
+              return;
+            }
             if (report.result !== 'green')
               throw new Error(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
           }
@@ -72,13 +91,23 @@ export function registerOutcome(ctx: CliContext): void {
               id,
               repo(),
             );
-            write(`Post-merge gate ${report.result} on ${state.merge.mergeCommit}`);
+            if (!flags.json) write(`Post-merge gate ${report.result} on ${state.merge.mergeCommit}`);
+            if (report.result !== 'green' && flags.json) {
+              const verdict = verdictOf(report.result);
+              process.exitCode = exitFor(verdict);
+              write(JSON.stringify(jsonResult('outcome close', state, verdict, report)));
+              return;
+            }
             if (report.result !== 'green')
               throw new UserError(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
           }
         }
         new VerificationService(journal).recordOutcome(id, decision, confirmation);
-        write(`${decision} ${id}`);
+        if (decision === 'close' && flags.json) {
+          const verdict = closeReport ? verdictOf(closeReport.result) : 'unverifiable';
+          process.exitCode = exitFor(verdict);
+          write(JSON.stringify({ ...jsonResult('outcome close', state, verdict, closeReport), status: 'closed' }));
+        } else write(`${decision} ${id}`);
       }),
     );
   }
@@ -118,6 +147,7 @@ export function registerOutcome(ctx: CliContext): void {
         if (flags.json)
           write(
             JSON.stringify({
+              ...jsonResult('inbox', undefined, 'unverifiable'),
               timeout: true,
               cursor,
               items: [],
@@ -129,9 +159,15 @@ export function registerOutcome(ctx: CliContext): void {
         return;
       }
       const result = hit ?? filterInboxSince(buildHumanInbox(readOnlyRepo(homeDir), ctx.now()), flags.since);
-      process.exitCode = 0;
+      process.exitCode = flags.json ? 3 : 0;
       if (flags.json) {
-        write(JSON.stringify({ cursor: result.cursor, items: result.fresh }));
+        write(
+          JSON.stringify({
+            ...jsonResult('inbox', undefined, 'unverifiable'),
+            cursor: result.cursor,
+            items: result.fresh,
+          }),
+        );
         return;
       }
       if (!result.fresh.length) {

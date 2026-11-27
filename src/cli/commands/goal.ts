@@ -1,3 +1,4 @@
+import { exitFor, jsonResult, verdictOf } from '../json-result.js';
 import { Option, type Command } from 'commander';
 import { UserError } from '../../domain/errors.js';
 import { readFileSync } from 'node:fs';
@@ -77,10 +78,22 @@ export function registerGoal(ctx: CliContext): void {
     .command('show')
     .argument('<id>')
     .description('status, pinned setup, locked tests and the assurance table of one Goal')
-    .action((id: string) =>
+    .option('--json', 'emit JSON')
+    .action((id: string, flags: { json?: boolean }) =>
       withJournal(journal => {
         const state = journal.getGoal(id);
         if (!state) throw new UserError(`Goal not found: ${id}`);
+        if (flags.json) {
+          const verdict = state.gate ? verdictOf(state.gate.result) : 'unverifiable';
+          process.exitCode = exitFor(verdict);
+          write(
+            JSON.stringify({
+              ...jsonResult('goal show', state, verdict, state.gate),
+              status: state.status,
+            }),
+          );
+          return;
+        }
         const unproven = unprovenCount(hotfixRows(journal.listGoals(), ctx.now()));
         if (unproven) write(unprovenLine(unproven));
         write(`${id}\t${state.status}\t${state.spec.outcome}`);

@@ -1,3 +1,4 @@
+import { exitFor, jsonResult, verdictOf } from '../json-result.js';
 import { IntegrationService } from '../../app/integration.js';
 import { MergeService } from '../../app/merge.js';
 import { GateService } from '../../app/gate-service.js';
@@ -23,30 +24,37 @@ export function registerIntegration(ctx: CliContext): void {
     .requiredOption('--commit <sha>', 'the integration commit')
     .requiredOption('--reason <text>', 'why this commit is the integration')
     .option('--by <name>', 'who asks, for the log', 'lead')
+    .option('--json', 'emit JSON')
     .description('Lead: gate the integration commit now; the request is an event with its reason')
-    .action((goalId: string, { commit, reason, by }: { commit: string; reason: string; by: string }) =>
-      withJournal(journal => {
-        const state = journal.getGoal(goalId);
-        if (!state) throw new UserError(`Goal not found: ${goalId}`);
-        const problem = integrationGateProblem(state, commit, reason);
-        if (problem) throw new UserError(problem);
-        journal.append(
-          newEvent(goalId, 'integration-gate-requested', {
-            commit,
-            reason,
-            by,
-          }),
-        );
-        const report = new GateService(journal, {
-          inspector: options.inspector,
-          ...options.gate,
-          assurance: assuranceService(ctx, journal, goalId),
-        }).run(goalId, repo(), {
-          deliveryCommit: commit,
-        });
-        write(`Integration gate ${report.result} on ${commit}`);
-        for (const line of reasonsOf(report)) write(line);
-      }),
+    .action(
+      (goalId: string, { commit, reason, by, json }: { commit: string; reason: string; by: string; json?: boolean }) =>
+        withJournal(journal => {
+          const state = journal.getGoal(goalId);
+          if (!state) throw new UserError(`Goal not found: ${goalId}`);
+          const problem = integrationGateProblem(state, commit, reason);
+          if (problem) throw new UserError(problem);
+          journal.append(
+            newEvent(goalId, 'integration-gate-requested', {
+              commit,
+              reason,
+              by,
+            }),
+          );
+          const report = new GateService(journal, {
+            inspector: options.inspector,
+            ...options.gate,
+            assurance: assuranceService(ctx, journal, goalId),
+          }).run(goalId, repo(), {
+            deliveryCommit: commit,
+          });
+          process.exitCode = exitFor(verdictOf(report.result));
+          if (json) {
+            write(JSON.stringify(jsonResult('integration gate', state, verdictOf(report.result), report)));
+            return;
+          }
+          write(`Integration gate ${report.result} on ${commit}`);
+          for (const line of reasonsOf(report)) write(line);
+        }),
     );
   integration
     .command('prepare')

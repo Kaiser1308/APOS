@@ -1,3 +1,4 @@
+import { jsonResult } from '../json-result.js';
 import { withGateLease } from '../../store/lease.js';
 import { UserError } from '../../domain/errors.js';
 import { lockedTestKeys } from '../../domain/test-lock.js';
@@ -14,8 +15,9 @@ export function registerTests(ctx: CliContext): void {
     .argument('<goalId>')
     .requiredOption('--commit <sha>', 'the full sha of the commit holding the tests, the stubs and tests.json')
     .option('--by <name>', 'who submits, for the log', 'tester')
+    .option('--json', 'emit JSON')
     .description('check the tests are red for the right reason and lock them; exits 0 locked, 1 refused')
-    .action((goalId: string, flags: { commit: string; by: string }) =>
+    .action((goalId: string, flags: { commit: string; by: string; json?: boolean }) =>
       withJournalAsync(async journal => {
         const service = testLockService(ctx, journal, goalId);
         const held = await withGateLease(ctx.home(), () => service.submit(goalId, flags.commit, flags.by));
@@ -23,6 +25,18 @@ export function registerTests(ctx: CliContext): void {
           throw new UserError(
             `Another gate is running for this project (pid ${held.holder}): wait for it, then submit again`,
           );
+        if (flags.json) {
+          const verdict = held.value.ok ? 'green' : 'red';
+          process.exitCode = held.value.ok ? 0 : 1;
+          write(
+            JSON.stringify({
+              ...jsonResult('tests submit', journal.getGoal(goalId), verdict),
+              deliveryCommit: flags.commit,
+              problems: held.value.ok ? [] : held.value.problems,
+            }),
+          );
+          return;
+        }
         if (!held.value.ok) {
           process.exitCode = 1;
           write(`tests refused on ${flags.commit}: nothing is locked`);

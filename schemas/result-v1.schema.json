@@ -1,0 +1,188 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "APOS command result v1",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "command",
+    "goalId",
+    "goalVersion",
+    "setupVersion",
+    "baseCommit",
+    "deliveryCommit",
+    "verdict",
+    "findings",
+    "evidence",
+    "retryable",
+    "requiresHuman",
+    "assuranceLimitations",
+    "caughtBy"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "command": {
+      "enum": ["package submit", "integration gate", "outcome close", "goal show", "inbox", "tests submit"]
+    },
+    "goalId": {
+      "type": ["string", "null"]
+    },
+    "goalVersion": {
+      "type": ["integer", "null"]
+    },
+    "setupVersion": {
+      "type": ["integer", "null"]
+    },
+    "baseCommit": {
+      "type": ["string", "null"]
+    },
+    "deliveryCommit": {
+      "type": ["string", "null"]
+    },
+    "verdict": {
+      "enum": ["green", "red", "unverifiable", "needs-human"]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "layer", "severity", "status"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "layer": {
+            "type": ["string", "null"]
+          },
+          "severity": {
+            "type": ["string", "null"]
+          },
+          "status": {
+            "enum": ["new", "existing", "resolved", "changed-severity", "unverifiable"]
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["digest"],
+        "properties": {
+          "digest": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "retryable": {
+      "type": ["boolean", "null"]
+    },
+    "requiresHuman": {
+      "type": ["boolean", "null"]
+    },
+    "assuranceLimitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "caughtBy": {
+      "type": ["string", "null"]
+    },
+    "status": {
+      "type": "string"
+    },
+    "packageId": {
+      "type": "string"
+    },
+    "commit": {
+      "type": "string"
+    },
+    "result": {
+      "enum": ["green", "red", "unverifiable", "needs-human", "pending"]
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cursor": {
+      "type": "string"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "timeout": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "package submit"
+          }
+        }
+      },
+      "then": {
+        "required": ["packageId", "commit", "result", "reasons", "warnings"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "goal show"
+          }
+        }
+      },
+      "then": {
+        "required": ["status"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "tests submit"
+          }
+        }
+      },
+      "then": {
+        "required": ["problems"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "inbox"
+          }
+        }
+      },
+      "then": {
+        "required": ["cursor", "items"]
+      }
+    }
+  ]
+}

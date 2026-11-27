@@ -6,12 +6,14 @@ import { z } from 'zod';
 const parsedGo = z.object({ package: z.string().min(1), imports: z.array(z.string()), active: z.boolean() });
 const parser = fileURLToPath(new URL('../../scripts/go-junit/main.go', import.meta.url));
 const goSource = (file: string) => !/^[._]/.test(basename(file));
+const parserError = (error: unknown, fallback: string) =>
+  error instanceof Error && 'code' in error && error.code === 'ETIMEDOUT' ? 'Go parser timed out' : fallback;
 
 function parseGo(text: string, file?: string) {
   const result = execFileSync('go', ['run', parser, '--imports', ...(file ? ['--filename', basename(file)] : [])], {
     input: text,
     encoding: 'utf8',
-    timeout: 30_000,
+    timeout: 120_000,
     env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -70,8 +72,8 @@ export function checkGoEntries(input: {
   let parsed: z.infer<typeof parsedGo>;
   try {
     parsed = parseGo(input.text);
-  } catch {
-    return fail('Go parser unavailable or test file cannot be parsed');
+  } catch (error) {
+    return fail(parserError(error, 'Go parser unavailable or test file cannot be parsed'));
   }
   const dir = input.file.includes('/') ? input.file.slice(0, input.file.lastIndexOf('/') + 1) : '';
   const conservativeBuild = input.conservativeBuild || uncertainToolchain(input.module);
@@ -100,8 +102,8 @@ export function checkGoEntries(input: {
       sources.push({ file, text, parsed: helper });
       visited.add(file);
       input.recordHelper?.(file);
-    } catch {
-      return fail(`cannot parse ${file}`);
+    } catch (error) {
+      return fail(parserError(error, `cannot parse ${file}`));
     }
   }
   const local = input.files.filter(
@@ -128,8 +130,8 @@ export function checkGoEntries(input: {
           input.recordHelper?.(file);
         }
       }
-    } catch {
-      return fail(`cannot parse ${file}`);
+    } catch (error) {
+      return fail(parserError(error, `cannot parse ${file}`));
     }
   }
   const problems: string[] = [];
@@ -168,8 +170,8 @@ export function checkGoEntries(input: {
             sources.push({ file, text, parsed: parsedFile });
             visited.add(file);
             input.recordHelper?.(file);
-          } catch {
-            return fail(`cannot parse ${file}`);
+          } catch (error) {
+            return fail(parserError(error, `cannot parse ${file}`));
           }
         }
       }

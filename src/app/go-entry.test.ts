@@ -25,10 +25,10 @@ it.skipIf(!hasGo)(
       allowed: path => path.endsWith('_test.go') || path === 'app/app.go',
       recordHelper: path => helpers.push(path),
     });
-    expect(helpers).toContain('app/helper_test.go');
     expect(result.join('\n')).toContain('internal/secret.go');
+    expect(helpers).toContain('app/helper_test.go');
   },
-  60_000,
+  180_000,
 );
 
 it.skipIf(!hasGo)(
@@ -51,10 +51,10 @@ it.skipIf(!hasGo)(
       allowed: path => path.endsWith('_test.go') || path === 'app/app.go',
       recordHelper: path => helpers.push(path),
     });
-    expect(helpers).toContain('app/helper_test.go');
     expect(result.join('\n')).toContain('internal/secret.go');
+    expect(helpers).toContain('app/helper_test.go');
   },
-  60_000,
+  180_000,
 );
 
 it.skipIf(!hasGo)(

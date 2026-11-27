@@ -43,112 +43,117 @@ export function registerOutcome(ctx: CliContext): void {
     command.action((id: string, flags: { mergeTo?: string; by?: string; onBehalf?: string; json?: boolean }) =>
       withJournalAsync(async journal => {
         const confirmation = await assertHuman(`outcome ${decision}`, id, flags.onBehalf);
-        const state = journal.getGoal(id);
-        let closeReport: GateReport | undefined;
-        if (decision === 'close') {
-          if (state?.status !== 'verified') throw new Error('Verified Goal required before closing');
-          // Before any merge: a close that is going to be refused must not have merged anything first.
-          const problems = closeProblems(state);
-          if (problems.length) throw new UserError(problems.join('; '));
-          // The close-stage layers run on the commit the Goal was verified on, before anything is merged or closed.
-          if (state.setupVersion !== undefined) {
-            const gate = new GateService(journal, {
-              inspector: options.inspector,
-              ...options.gate,
-              assurance: assuranceService(ctx, journal, id),
-            });
-            const held = await withGateLease(ctx.home(), () => Promise.resolve(gate.runClose(id, repo())));
-            if (!held.ran)
-              throw new UserError(
-                `Another gate is running for this project (pid ${held.holder}): wait for it, then close again`,
-              );
-            closeReport = held.value;
-            if (!flags.json)
-              write(`Close-stage layers ${held.value?.result ?? 'did not run'} on ${state.verifiedCommit}`);
-            const blocked = closeLayerProblems(journal.getGoal(id)!);
-            if (blocked.length && flags.json) {
-              const verdict =
-                closeReport && closeReport.result !== 'green' ? verdictOf(closeReport.result) : 'unverifiable';
-              process.exitCode = exitFor(verdict);
-              write(JSON.stringify({ ...closeResult(journal, id, verdict, closeReport), problems: blocked }));
-              return;
-            }
-            if (blocked.length)
-              throw new UserError(
-                `${blocked.join('; ')}. Fix it and submit again, or approve an exception (apos exception approve --kind floor-reduced --ref ${id}:close:<layer>); a verified Goal whose verified commit cannot pass is revised with \`apos outcome revise\``,
-              );
-          }
-          if (flags.mergeTo) {
-            const merges = new MergeService(journal);
-            merges.authorize(id, flags.mergeTo, flags.by ?? 'human');
-            const mergeCommit = merges.merge(id, repo(), state.gate!.deliveryCommit, flags.mergeTo);
-            let report: GateReport;
-            try {
-              report = new GateService(journal, {
+        const perform = async () => {
+          const state = journal.getGoal(id);
+          let closeReport: GateReport | undefined;
+          if (decision === 'close') {
+            if (state?.status !== 'verified') throw new Error('Verified Goal required before closing');
+            // Before any merge: a close that is going to be refused must not have merged anything first.
+            const problems = closeProblems(state);
+            if (problems.length) throw new UserError(problems.join('; '));
+            // The close-stage layers run on the commit the Goal was verified on, before anything is merged or closed.
+            if (state.setupVersion !== undefined) {
+              const gate = new GateService(journal, {
                 inspector: options.inspector,
                 ...options.gate,
                 assurance: assuranceService(ctx, journal, id),
-              }).runPostMerge(id, repo());
-            } catch (error) {
-              if (!flags.json) throw error;
-              process.exitCode = 3;
-              write(
-                JSON.stringify({
-                  ...closeResult(journal, id, 'unverifiable'),
-                  error: error instanceof Error ? error.message : String(error),
-                }),
-              );
-              return;
+              });
+              closeReport = gate.runClose(id, repo());
+              if (!flags.json)
+                write(`Close-stage layers ${closeReport?.result ?? 'did not run'} on ${state.verifiedCommit}`);
+              const blocked = closeLayerProblems(journal.getGoal(id)!);
+              if (blocked.length && flags.json) {
+                const verdict =
+                  closeReport && closeReport.result !== 'green' ? verdictOf(closeReport.result) : 'unverifiable';
+                process.exitCode = exitFor(verdict);
+                write(JSON.stringify({ ...closeResult(journal, id, verdict, closeReport), problems: blocked }));
+                return;
+              }
+              if (blocked.length)
+                throw new UserError(
+                  `${blocked.join('; ')}. Fix it and submit again, or approve an exception (apos exception approve --kind floor-reduced --ref ${id}:close:<layer>); a verified Goal whose verified commit cannot pass is revised with \`apos outcome revise\``,
+                );
             }
-            closeReport = report;
-            if (!flags.json) write(`Merged ${id}: ${mergeCommit}; post-merge gate ${report.result}`);
-            if (report.result !== 'green' && flags.json) {
-              const verdict = verdictOf(report.result);
-              process.exitCode = exitFor(verdict);
-              write(JSON.stringify(closeResult(journal, id, verdict, report)));
-              return;
+            if (flags.mergeTo) {
+              const merges = new MergeService(journal);
+              merges.authorize(id, flags.mergeTo, flags.by ?? 'human');
+              const mergeCommit = merges.merge(id, repo(), state.gate!.deliveryCommit, flags.mergeTo);
+              let report: GateReport;
+              try {
+                report = new GateService(journal, {
+                  inspector: options.inspector,
+                  ...options.gate,
+                  assurance: assuranceService(ctx, journal, id),
+                }).runPostMerge(id, repo());
+              } catch (error) {
+                if (!flags.json) throw error;
+                process.exitCode = 3;
+                write(
+                  JSON.stringify({
+                    ...closeResult(journal, id, 'unverifiable'),
+                    error: error instanceof Error ? error.message : String(error),
+                  }),
+                );
+                return;
+              }
+              closeReport = report;
+              if (!flags.json) write(`Merged ${id}: ${mergeCommit}; post-merge gate ${report.result}`);
+              if (report.result !== 'green' && flags.json) {
+                const verdict = verdictOf(report.result);
+                process.exitCode = exitFor(verdict);
+                write(JSON.stringify(closeResult(journal, id, verdict, report)));
+                return;
+              }
+              if (report.result !== 'green')
+                throw new Error(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
             }
-            if (report.result !== 'green')
-              throw new Error(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
+            // Merged but not yet closed (the post-merge gate was pending or red): rerun it so a confirmation on the merge commit can count.
+            if (!flags.mergeTo && state.merge) {
+              let report: GateReport;
+              try {
+                report = new GateService(journal, {
+                  inspector: options.inspector,
+                  ...options.gate,
+                  assurance: assuranceService(ctx, journal, id),
+                }).runPostMerge(id, repo());
+              } catch (error) {
+                if (!flags.json) throw error;
+                process.exitCode = 3;
+                write(
+                  JSON.stringify({
+                    ...closeResult(journal, id, 'unverifiable'),
+                    error: error instanceof Error ? error.message : String(error),
+                  }),
+                );
+                return;
+              }
+              closeReport = report;
+              if (!flags.json) write(`Post-merge gate ${report.result} on ${state.merge.mergeCommit}`);
+              if (report.result !== 'green' && flags.json) {
+                const verdict = verdictOf(report.result);
+                process.exitCode = exitFor(verdict);
+                write(JSON.stringify(closeResult(journal, id, verdict, report)));
+                return;
+              }
+              if (report.result !== 'green')
+                throw new UserError(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
+            }
           }
-          // Merged but not yet closed (the post-merge gate was pending or red): rerun it so a confirmation on the merge commit can count.
-          if (!flags.mergeTo && state.merge) {
-            let report: GateReport;
-            try {
-              report = new GateService(journal, {
-                inspector: options.inspector,
-                ...options.gate,
-                assurance: assuranceService(ctx, journal, id),
-              }).runPostMerge(id, repo());
-            } catch (error) {
-              if (!flags.json) throw error;
-              process.exitCode = 3;
-              write(
-                JSON.stringify({
-                  ...closeResult(journal, id, 'unverifiable'),
-                  error: error instanceof Error ? error.message : String(error),
-                }),
-              );
-              return;
-            }
-            closeReport = report;
-            if (!flags.json) write(`Post-merge gate ${report.result} on ${state.merge.mergeCommit}`);
-            if (report.result !== 'green' && flags.json) {
-              const verdict = verdictOf(report.result);
-              process.exitCode = exitFor(verdict);
-              write(JSON.stringify(closeResult(journal, id, verdict, report)));
-              return;
-            }
-            if (report.result !== 'green')
-              throw new UserError(`Post-merge gate is ${report.result}; Goal stays verified, not closed`);
-          }
+          new VerificationService(journal).recordOutcome(id, decision, confirmation);
+          if (decision === 'close' && flags.json) {
+            const verdict = closeReport ? verdictOf(closeReport.result) : 'unverifiable';
+            process.exitCode = exitFor(verdict);
+            write(JSON.stringify(closeResult(journal, id, verdict, closeReport)));
+          } else write(`${decision} ${id}`);
+        };
+        if (decision !== 'close') return perform();
+        const held = await withGateLease(ctx.home(), perform);
+        if (!held.ran) {
+          const error = `Another gate is running for this project (pid ${held.holder}): wait for it, then close again`;
+          if (!flags.json) throw new UserError(error);
+          process.exitCode = 3;
+          write(JSON.stringify({ ...closeResult(journal, id, 'unverifiable'), error }));
         }
-        new VerificationService(journal).recordOutcome(id, decision, confirmation);
-        if (decision === 'close' && flags.json) {
-          const verdict = closeReport ? verdictOf(closeReport.result) : 'unverifiable';
-          process.exitCode = exitFor(verdict);
-          write(JSON.stringify(closeResult(journal, id, verdict, closeReport)));
-        } else write(`${decision} ${id}`);
       }),
     );
   }

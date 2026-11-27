@@ -4,6 +4,7 @@ import { MergeService } from '../../app/merge.js';
 import { GateService } from '../../app/gate-service.js';
 import type { GateReport } from '../../domain/gate.js';
 import { newEvent } from '../../app/events.js';
+import { withGateLease } from '../../store/lease.js';
 import { UserError } from '../../domain/errors.js';
 import { integrationGateProblem } from '../../domain/integration-gate.js';
 import { assuranceService } from '../test-lock-wiring.js';
@@ -16,7 +17,7 @@ const reasonsOf = (report: GateReport): string[] =>
     .map(check => `  ${check.checkId} ${check.status}: ${check.reason}`);
 
 export function registerIntegration(ctx: CliContext): void {
-  const { program, options, write, repo, withJournal } = ctx;
+  const { program, options, write, repo, withJournal, withJournalAsync } = ctx;
   const integration = program.command('integration');
   integration
     .command('gate')
@@ -94,14 +95,20 @@ export function registerIntegration(ctx: CliContext): void {
     .requiredOption('--source <commit>')
     .requiredOption('--target <branch>')
     .action((goalId: string, { source, target }: { source: string; target: string }) =>
-      withJournal(journal => {
-        const mergeCommit = new MergeService(journal).merge(goalId, repo(), source, target);
-        const report = new GateService(journal, {
-          inspector: options.inspector,
-          ...options.gate,
-          assurance: assuranceService(ctx, journal, goalId),
-        }).runPostMerge(goalId, repo());
-        write(`Merged ${goalId}: ${mergeCommit}; post-merge gate ${report.result}`);
+      withJournalAsync(async journal => {
+        const held = await withGateLease(ctx.home(), async () => {
+          const mergeCommit = new MergeService(journal).merge(goalId, repo(), source, target);
+          const report = new GateService(journal, {
+            inspector: options.inspector,
+            ...options.gate,
+            assurance: assuranceService(ctx, journal, goalId),
+          }).runPostMerge(goalId, repo());
+          write(`Merged ${goalId}: ${mergeCommit}; post-merge gate ${report.result}`);
+        });
+        if (!held.ran)
+          throw new UserError(
+            `Another gate is running for this project (pid ${held.holder}): wait for it, then merge again`,
+          );
       }),
     );
 }

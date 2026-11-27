@@ -20,10 +20,15 @@ export function isolatedPath(path) {
 }
 
 export function gitEnvironment(source) {
+  const entries = Object.entries(source);
+  const path = entries.find(([key]) => key.toLowerCase() === 'path')?.[1];
   const env = Object.fromEntries(
-    Object.entries(source).filter(([key]) => !key.startsWith('GIT_') && key !== 'NODE_PATH' && key !== 'NODE_OPTIONS'),
+    entries.filter(([key]) => {
+      const name = key.toUpperCase();
+      return name !== 'PATH' && !name.startsWith('GIT_') && name !== 'NODE_PATH' && name !== 'NODE_OPTIONS';
+    }),
   );
-  return { ...env, PATH: isolatedPath(env.PATH) };
+  return { ...env, PATH: isolatedPath(path) };
 }
 
 export function gitState(root, source = process.env) {

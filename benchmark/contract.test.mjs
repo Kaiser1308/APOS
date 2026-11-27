@@ -109,8 +109,8 @@ it('allows fixed extra commits for dependencies referenced by external plan file
 });
 
 it('does not trust an inherited dependency-bin git when checking privacy', async () => {
-  const { chmodSync, mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
-  const { execFileSync } = await import('node:child_process');
+  const { chmodSync, copyFileSync, mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { execFileSync, spawnSync } = await import('node:child_process');
   const { tmpdir } = await import('node:os');
   const { delimiter, join } = await import('node:path');
   const temp = mkdtempSync(join(tmpdir(), 'bench-privacy-git-')),
@@ -119,17 +119,16 @@ it('does not trust an inherited dependency-bin git when checking privacy', async
   mkdirSync(repo);
   mkdirSync(bin, { recursive: true });
   execFileSync('git', ['init', '-q', repo]);
-  const fake = join(bin, process.platform === 'win32' ? 'git.cmd' : 'git');
-  writeFileSync(
-    fake,
-    process.platform === 'win32'
-      ? '@echo off\r\necho fatal: not a git repository 1>&2\r\nexit /b 128\r\n'
-      : '#!/bin/sh\necho "fatal: not a git repository" >&2\nexit 128\n',
-  );
+  const fake = join(bin, process.platform === 'win32' ? 'git.exe' : 'git');
+  if (process.platform === 'win32') copyFileSync(process.execPath, fake);
+  else writeFileSync(fake, '#!/bin/sh\necho "fatal: not a git repository" >&2\nexit 128\n');
   chmodSync(fake, 0o700);
   const before = process.env.PATH;
   process.env.PATH = [bin, before].join(delimiter);
   try {
+    const unfiltered = spawnSync('git', ['--version'], { encoding: 'utf8', env: process.env });
+    assert.notEqual(unfiltered.status, null);
+    assert.doesNotMatch(unfiltered.stdout, /^git version /);
     assert.throws(
       () => assertPrivateOutput(process.cwd(), join(repo, 'output')),
       /private benchmark data must be outside Git repositories/,

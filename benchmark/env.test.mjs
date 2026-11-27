@@ -47,3 +47,13 @@ it('removes inherited Node preloads from subprocess metadata checks', async () =
   assert.equal(env.NODE_PATH, undefined);
   assert.equal(env.NODE_OPTIONS, undefined);
 });
+
+it('preserves a mixed-case Windows PATH key while removing inherited Git overrides', async () => {
+  const { gitEnvironment } = await import('./env.mjs');
+  const safe = process.cwd();
+  const env = gitEnvironment({ Path: safe, git_dir: '/spoof', Node_Options: '--require injected' });
+  assert.equal(env.PATH, safe);
+  assert.equal(Object.keys(env).filter(key => key.toLowerCase() === 'path').length, 1);
+  assert.equal(env.git_dir, undefined);
+  assert.equal(env.Node_Options, undefined);
+});

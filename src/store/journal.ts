@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -93,13 +93,38 @@ export class ProjectJournal implements GoalRepository {
     if (sourceDigest(sourceText) !== spec.source.sha256)
       throw new Error('Source text does not match the Goal source sha256');
     withLock(this.home, () => {
+      this.rebuildIndex();
+      if (this.store.hasEvent(event.id)) return;
+      this.validateEvent(event);
       const path = this.sourcePath(spec.id, spec.version);
-      if (!this.store.hasEvent(event.id)) {
+      if (existsSync(path)) {
+        if (readFileSync(path, 'utf8') !== sourceText)
+          throw new UserError(`Source snapshot already exists with different content: ${path}`);
+      } else {
         mkdirSync(join(path, '..'), { recursive: true });
-        writeFileSync(path, sourceText, 'utf8');
+        writeFileSync(path, sourceText, { encoding: 'utf8', flag: 'wx', flush: true });
       }
+      this.syncSource(path, spec.id);
       this.appendLocked(event);
     });
+  }
+
+  /** Make the source durable before its event; Windows cannot fsync directory handles through Node. */
+  private syncSource(path: string, goalId: string): void {
+    const sync = (target: string, mode: 'r' | 'r+') => {
+      const fd = openSync(target, mode);
+      try {
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+    };
+    sync(path, 'r+');
+    if (process.platform !== 'win32') {
+      sync(join(this.home, 'sources', goalId), 'r');
+      sync(join(this.home, 'sources'), 'r');
+      sync(this.home, 'r');
+    }
   }
 
   private sourcePath(goalId: string, version: number): string {
@@ -133,6 +158,15 @@ export class ProjectJournal implements GoalRepository {
   private appendLocked(event: GoalEvent): void {
     this.rebuildIndex();
     if (this.store.hasEvent(event.id)) return;
+    const next = this.validateEvent(event);
+    this.log.append(event);
+    this.store.append(event);
+    if (MILESTONES.has(event.type) || (event.type === 'package-gate-recorded' && next.status === 'verified'))
+      this.publish(event.goalId, next, `apos: ${event.goalId} ${event.type}`);
+  }
+
+  /** Validate before any associated source snapshot or event is written. Caller holds the journal lock. */
+  private validateEvent(event: GoalEvent): GoalState {
     if (!isWritableEventType(event.type))
       throw new UserError(`${event.type} is not an APOS v3 event: APOS no longer runs agents`);
     if (this.store.getGoal(event.goalId)?.status === 'legacy')
@@ -146,11 +180,7 @@ export class ProjectJournal implements GoalRepository {
       if (pinned !== undefined && !this.projectLog.history().approvals.some(item => item.version === pinned))
         throw new UserError(`Setup version ${pinned} was never approved: a Goal can only pin an approved setup`);
     }
-    const next = applyEvent(this.store.getGoal(event.goalId), event);
-    this.log.append(event);
-    this.store.append(event);
-    if (MILESTONES.has(event.type) || (event.type === 'package-gate-recorded' && next.status === 'verified'))
-      this.publish(event.goalId, next, `apos: ${event.goalId} ${event.type}`);
+    return applyEvent(this.store.getGoal(event.goalId), event);
   }
 
   /** Renders the readable Goal record from controller state. Appetite never leaves the controller. */

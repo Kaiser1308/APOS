@@ -3,12 +3,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { ProjectJournal } from './journal.js';
 import { spec, proposal, sourceText, approval } from '../domain/fixtures.test-support.js';
 import { parseProjectSetup } from '../domain/project-setup.js';
 import { yamlCodec } from '../domain/setup-codec.js';
 import { initProject } from '../app/init-project.js';
 import { newEvent } from '../app/events.js';
+import { sourceDigest } from '../domain/gate.js';
 import type { GoalEventType } from '../domain/transitions.js';
 
 const dirs: string[] = [];
@@ -71,6 +73,120 @@ it('does not log an event that fails its transition', async () => {
   );
   expect(existsSync(join(home, 'events', `${spec.id}.jsonl`))).toBe(false);
   close();
+});
+
+it('preserves the existing source, event log and Goal when a duplicate draft is rejected', async () => {
+  const { home, journal, draft, close } = await project();
+  try {
+    draft();
+    const snapshot = join(home, 'sources', spec.id, 'v1.md');
+    const log = join(home, 'events', `${spec.id}.jsonl`);
+    const beforeLog = readFileSync(log, 'utf8');
+    const replacement = 'A different brief for the same goal.\n';
+    const duplicate = { ...spec, source: { ...spec.source, sha256: sourceDigest(replacement) } };
+    expect(() =>
+      journal.appendWithSource(
+        { id: 'EV-duplicate', goalId: spec.id, type: 'goal-drafted', data: duplicate, at },
+        replacement,
+      ),
+    ).toThrow(/Goal already exists/);
+    expect(readFileSync(snapshot, 'utf8')).toBe(sourceText);
+    expect(readFileSync(log, 'utf8')).toBe(beforeLog);
+    expect(journal.currentSourceDigest(spec.id)).toBe(spec.source.sha256);
+    expect(journal.getGoal(spec.id)?.spec.source.sha256).toBe(spec.source.sha256);
+  } finally {
+    close();
+  }
+});
+
+it('does not overwrite a conflicting orphan source snapshot after an interrupted write', async () => {
+  const { home, journal, close } = await project();
+  try {
+    const dir = join(home, 'sources', spec.id);
+    mkdirSync(dir, { recursive: true });
+    const snapshot = join(dir, 'v1.md');
+    writeFileSync(snapshot, 'earlier incomplete source');
+    expect(() =>
+      journal.appendWithSource({ id: 'EV-orphan', goalId: spec.id, type: 'goal-drafted', data: spec, at }, sourceText),
+    ).toThrow(/source snapshot/i);
+    expect(readFileSync(snapshot, 'utf8')).toBe('earlier incomplete source');
+    expect(journal.getGoal(spec.id)).toBeUndefined();
+    expect(existsSync(join(home, 'events', `${spec.id}.jsonl`))).toBe(false);
+  } finally {
+    close();
+  }
+});
+
+it('can retry a draft when an identical orphan snapshot already exists', async () => {
+  const { home, journal, close } = await project();
+  try {
+    const dir = join(home, 'sources', spec.id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'v1.md'), sourceText);
+    journal.appendWithSource({ id: 'EV-retry', goalId: spec.id, type: 'goal-drafted', data: spec, at }, sourceText);
+    expect(journal.currentSourceDigest(spec.id)).toBe(spec.source.sha256);
+    expect(journal.getGoal(spec.id)?.status).toBe('draft');
+  } finally {
+    close();
+  }
+});
+
+it('rebuilds a stale index under the lock before rejecting a duplicate source', async () => {
+  const { home, journal, draft, close } = await project();
+  try {
+    draft();
+    const db = new DatabaseSync(join(home, 'state.sqlite'));
+    try {
+      db.exec('DELETE FROM events');
+    } finally {
+      db.close();
+    }
+    const replacement = 'A stale-index replacement.\n';
+    const duplicate = { ...spec, source: { ...spec.source, sha256: sourceDigest(replacement) } };
+    expect(() =>
+      journal.appendWithSource(
+        { id: 'EV-stale', goalId: spec.id, type: 'goal-drafted', data: duplicate, at },
+        replacement,
+      ),
+    ).toThrow(/Goal already exists/);
+    expect(readFileSync(join(home, 'sources', spec.id, 'v1.md'), 'utf8')).toBe(sourceText);
+    expect(journal.currentSourceDigest(spec.id)).toBe(spec.source.sha256);
+  } finally {
+    close();
+  }
+});
+
+it('replays an already recorded draft without adding an event or changing its source', async () => {
+  const { home, journal, close } = await project();
+  try {
+    const event = { id: 'EV-replayed', goalId: spec.id, type: 'goal-drafted' as const, data: spec, at };
+    journal.appendWithSource(event, sourceText);
+    const log = join(home, 'events', `${spec.id}.jsonl`);
+    const before = readFileSync(log, 'utf8');
+    journal.appendWithSource(event, sourceText);
+    expect(readFileSync(log, 'utf8')).toBe(before);
+    expect(journal.currentSourceDigest(spec.id)).toBe(spec.source.sha256);
+  } finally {
+    close();
+  }
+});
+
+it('does not create a source snapshot for a rejected revision', async () => {
+  const { home, journal, draft, close } = await project();
+  try {
+    draft();
+    const invalid = { ...spec, version: 1 };
+    expect(() =>
+      journal.appendWithSource(
+        { id: 'EV-bad-revision', goalId: spec.id, type: 'goal-revised', data: invalid, at },
+        sourceText,
+      ),
+    ).toThrow(/revision must advance version/i);
+    expect(readFileSync(join(home, 'sources', spec.id, 'v1.md'), 'utf8')).toBe(sourceText);
+    expect(journal.getGoal(spec.id)?.spec.version).toBe(1);
+  } finally {
+    close();
+  }
 });
 
 it('rebuilds a lost SQLite index from the controller log', async () => {
@@ -163,6 +279,13 @@ it('refuses to append an orchestration event, or anything at all to a legacy Goa
   expect(() =>
     opened.journal.append({ id: 'EV-new', goalId: 'GOAL-001', type: 'decision-logged', data: { note: 'x' }, at }),
   ).toThrow(/legacy Goal.*read-only/);
+  expect(() =>
+    opened.journal.appendWithSource(
+      { id: 'EV-legacy-revise', goalId: spec.id, type: 'goal-revised', data: { ...spec, version: 2 }, at },
+      sourceText,
+    ),
+  ).toThrow(/legacy Goal.*read-only/);
+  expect(existsSync(join(legacyHome, 'sources', spec.id, 'v2.md'))).toBe(false);
   expect(readFileSync(join(events, 'GOAL-001.jsonl'), 'utf8')).toBe(before);
   opened.close();
 });

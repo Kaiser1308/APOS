@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssuranceService } from './assurance-service.js';
 import { GitCommitInspector } from './integration.js';
 import { cleanProjects, lockedProject, testingProject } from './test-lock.test-support.js';
@@ -57,6 +57,33 @@ const check = (checks: { checkId: string }[], id: string) =>
   };
 
 describe('the integration gate runs the package checks on the integration commit', () => {
+  it('does not accept locked test evidence when the test process fails despite a passing report', async () => {
+    const p = await project();
+    const head = p.commit({ 'src/impl.txt': 'add\n' }, 'implement');
+    const run = p.runner.layerTests.bind(p.runner);
+    vi.spyOn(p.runner, 'layerTests').mockImplementation((...args) => {
+      const result = run(...args);
+      return args[3] === 'L2'
+        ? { ...result, processFailures: ['acceptance process exited 1 with a passing report'] }
+        : result;
+    });
+    const assurance = new AssuranceService({
+      repo: p.dir,
+      runner: p.runner,
+      inspector: new GitCommitInspector(),
+      loadSetup: p.loadSetup,
+    });
+    const checks = assurance.layerChecks(p.state(), {
+      stage: 'close',
+      scope: p.goalId,
+      head,
+      base: p.lockCommit,
+      changed: [],
+      postMergeVerified: head,
+    }).checks;
+    expect(check(checks, 'APOS-LOCKED').status).toBe('unverifiable');
+  }, 120_000);
+
   it('passes an integration commit that keeps the locked tests and stays inside the packages', async () => {
     const p = await project();
     const head = p.commit({ 'src/a/x.txt': 'a\n', 'src/b/y.txt': 'b\n', 'src/impl.txt': 'add\n' }, 'integration');

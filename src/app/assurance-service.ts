@@ -1,5 +1,6 @@
 import { goLockProblems } from './go-lock-check.js';
 import { postMergeAssurance } from './post-merge-assurance.js';
+import { postMergeReview } from './post-merge-review.js';
 import {
   infraCheck,
   inventoryCheck,
@@ -67,17 +68,18 @@ export class AssuranceService {
     if (input.stage === 'close') ran.checks = [...ran.checks, ...this.removalChecks(state, input)];
     if (input.postMergeVerified) {
       const setup = this.deps.loadSetup(state);
-      if (setup)
-        ran.checks.push(
-          ...postMergeAssurance({
-            repo: this.deps.repo,
-            setup,
-            state,
-            head: input.head,
-            verified: input.postMergeVerified,
-            runTests: (...args) => this.runTests(...args),
-          }),
-        );
+      if (setup) {
+        const deps = {
+          repo: this.deps.repo,
+          setup,
+          state,
+          head: input.head,
+          verified: input.postMergeVerified,
+          runTests: (setup: ProjectSetup, wanted: Map<string, { part: string; layer: LayerId }>, commit: string) =>
+            this.runTests(setup, wanted, commit, true),
+        };
+        ran.checks.push(...postMergeAssurance(deps), ...postMergeReview(deps));
+      }
     }
     if (input.stage !== 'integrate') return ran;
     ran.checks = [...ran.checks, ...this.integration(state, input)];
@@ -191,14 +193,19 @@ export class AssuranceService {
   }
 
   /** Every test of the given layers, run once on `commit` in a clean worktree. */
-  private runTests(setup: ProjectSetup, wanted: Map<string, { part: string; layer: LayerId }>, commit: string) {
+  private runTests(
+    setup: ProjectSetup,
+    wanted: Map<string, { part: string; layer: LayerId }>,
+    commit: string,
+    requireSuccessfulProcess = false,
+  ) {
     const outcomes: LayerOutcome[] = [];
     const problems: string[] = [];
     for (const { part, layer } of wanted.values()) {
       const where = setup.parts[part];
       if (!where) continue;
       const result = this.deps.runner.layerTests(commit, part, where.root, layer, where.layers[layer] ?? []);
-      problems.push(...result.problems);
+      problems.push(...result.problems, ...(requireSuccessfulProcess ? result.processFailures : []));
       outcomes.push({ part, layer: layer as LockedLayer, tests: result.tests });
     }
     return { set: testSetOf(outcomes) as TestSet, problems };

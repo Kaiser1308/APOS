@@ -1,9 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  constants,
+  copyFileSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmdirSync,
   rmSync,
@@ -12,8 +16,9 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { assertGitRoot } from '../store/project-history.js';
+import { UserError } from '../domain/errors.js';
 import { ShellExecutor, type CommandExecutor } from './shell-executor.js';
 
 export interface Workspace {
@@ -35,7 +40,7 @@ export type WorktreeOptions = {
 const INSTALL_COMMAND = 'npm ci --no-audit --no-fund';
 const DEFAULT_INSTALL_TIMEOUT_MS = 10 * 60_000;
 
-type Preparation = { note?: string; link?: string };
+type Preparation = { note?: string };
 
 function isDirectory(path: string): boolean {
   try {
@@ -46,6 +51,56 @@ function isDirectory(path: string): boolean {
 }
 
 const sameText = (a: string, b: string) => a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n');
+
+function externalTo(root: string, target: string): boolean {
+  const within = relative(root, target);
+  return isAbsolute(within) || within === '..' || within.startsWith(`..${sep}`);
+}
+
+/** Reject links in committed dependencies that could let commands mutate an external tree. */
+function assertIsolatedDependencies(root: string, path = root): void {
+  for (const name of readdirSync(path)) {
+    const entry = join(path, name);
+    const info = lstatSync(entry);
+    if (info.isSymbolicLink()) {
+      if (externalTo(root, realpathSync(entry)))
+        throw new UserError(`Dependency link points outside node_modules: ${entry}`);
+    } else if (info.isDirectory()) assertIsolatedDependencies(root, entry);
+  }
+}
+
+/** Rebase internal links into the copy; an external or cyclic link forces a fresh install. */
+function copyDependencies(
+  source: string,
+  destination: string,
+  sourceRoot: string,
+  destinationRoot: string,
+  ancestors = new Set<string>(),
+): void {
+  const original = lstatSync(source);
+  const info = statSync(source);
+  if (original.isSymbolicLink()) {
+    const real = realpathSync(source);
+    const within = relative(sourceRoot, real);
+    if (externalTo(sourceRoot, real)) throw new Error(`Dependency link points outside node_modules: ${source}`);
+    if (info.isDirectory() && ancestors.has(real)) throw new Error(`Cyclic dependency link: ${source}`);
+    const mapped = join(destinationRoot, within);
+    const target = process.platform === 'win32' && info.isDirectory() ? mapped : relative(dirname(destination), mapped);
+    symlinkSync(target, destination, info.isDirectory() ? (process.platform === 'win32' ? 'junction' : 'dir') : 'file');
+    return;
+  }
+  if (info.isFile()) {
+    copyFileSync(source, destination, constants.COPYFILE_FICLONE);
+    return;
+  }
+  if (!info.isDirectory()) throw new Error(`Unsupported dependency entry: ${source}`);
+  const real = realpathSync(source);
+  if (ancestors.has(real)) throw new Error(`Cyclic dependency link: ${source}`);
+  const next = new Set(ancestors).add(real);
+  mkdirSync(destination);
+  for (const name of readdirSync(source))
+    copyDependencies(join(source, name), join(destination, name), sourceRoot, destinationRoot, next);
+}
 
 /**
  * Workspace packages and `file:` directory deps are installed as links into the checkout that ran
@@ -89,7 +144,7 @@ function hasRootInstallScript(packageJsonPath: string): boolean {
 /**
  * Seen live (GOAL-G3, WP-SIGNALS): CHK-2 `npm run check` went red with "prettier is not recognized"
  * because a fresh worktree has no node_modules. When the gate commit's lock file is identical to the
- * main checkout's, that checkout's node_modules is linked in; otherwise `npm ci` runs, so a real
+ * main checkout's, an isolated copy of that checkout's node_modules is used; otherwise `npm ci` runs, so a real
  * dependency change is installed and tested instead of hidden behind the old tree.
  */
 export function prepareDependencies(
@@ -98,12 +153,20 @@ export function prepareDependencies(
   executor: CommandExecutor,
   timeoutMs: number,
 ): Preparation {
+  const targetModules = join(path, 'node_modules');
+  let committedDirectory = false;
+  try {
+    if (lstatSync(targetModules).isSymbolicLink()) removeLink(targetModules);
+    else committedDirectory = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  if (committedDirectory && isDirectory(targetModules)) assertIsolatedDependencies(realpathSync(targetModules));
   if (!existsSync(join(path, 'package.json'))) return {};
   const lockPath = join(path, 'package-lock.json');
   if (!existsSync(lockPath))
     return { note: '# dependencies: package.json without package-lock.json; nothing prepared' };
-  const link = join(path, 'node_modules');
-  if (existsSync(link)) return { note: '# dependencies: node_modules is committed at this commit; left as is' };
+  if (committedDirectory) return { note: '# dependencies: node_modules is committed at this commit; left as is' };
   const mainModules = join(repo, 'node_modules');
   const mainLock = join(repo, 'package-lock.json');
   let reason: string;
@@ -115,15 +178,15 @@ export function prepareDependencies(
   else if (hasRootInstallScript(join(path, 'package.json')) || hasRootInstallScript(join(repo, 'package.json')))
     reason = 'package.json has a root install script that may generate into node_modules';
   else {
-    const target = realpathSync(mainModules);
     try {
-      symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+      const sourceRoot = realpathSync(mainModules);
+      copyDependencies(sourceRoot, targetModules, sourceRoot, targetModules);
       return {
-        link,
-        note: `# dependencies: linked node_modules from ${target} (package-lock.json identical to the main checkout)`,
+        note: '# dependencies: copied node_modules from the main checkout (package-lock.json identical)',
       };
     } catch (error) {
-      reason = `linking ${target} failed: ${(error as Error).message}`;
+      rmSync(targetModules, { recursive: true, force: true });
+      reason = `copying node_modules failed: ${(error as Error).message}`;
     }
   }
   const started = Date.now();
@@ -171,10 +234,7 @@ export class GitWorktreeFactory implements WorkspaceFactory {
     const path = mkdtempSync(join(tmpdir(), 'apos-gate-'));
     execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', '--force', path, full], { stdio: 'ignore' });
     const head = execFileSync('git', ['-C', path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    let link: string | undefined;
     const dispose = () => {
-      // Never let git or rmSync walk into a linked node_modules: drop the link before removing the tree.
-      if (link) removeLink(link);
       try {
         execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', path], { stdio: 'ignore' });
       } catch {
@@ -192,7 +252,6 @@ export class GitWorktreeFactory implements WorkspaceFactory {
     }
     try {
       const prepared = prepareDependencies(repo, path, this.executor, this.installTimeoutMs);
-      link = prepared.link;
       return { path, preparation: prepared.note, dispose };
     } catch (error) {
       dispose();

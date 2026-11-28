@@ -16,7 +16,6 @@ import {
   summarizeGate,
   type CheckResult,
   type CheckRun,
-  type GateEnvironment,
   type GateReport,
 } from '../domain/gate.js';
 import { reportFailures } from '../domain/results/failures.js';
@@ -144,13 +143,11 @@ export class GateService {
         delivery: [],
         newFailures: [],
       });
-    // The evidence of a hotfix is the hotfix plus the tests: a delivery that does not contain the commit proves nothing about it.
     if (state.hotfix)
       checks.push(
         hotfixCheck({ hotfix: state.hotfix, contains: this.inspector.contains(repoPath, state.hotfix.commit, head) }),
       );
     const changedFiles = this.inspector.files(repoPath, head, base);
-    // APOS's own milestone commits are legitimate changes under .apos/; anything else there is not.
     const guard = protectedCheck(goalId, untrustedProtectedFiles(this.store, goalId, repoPath, head, changedFiles));
     if (guard) checks.push(guard);
     checks.push(...(this.assurance?.checks(state, item, head, base, changedFiles) ?? []));
@@ -235,11 +232,6 @@ export class GateService {
         check.expect === 'no-new-failures' ? this.runMany(check, repoPath, baseCommit, 'base', artifacts) : [];
       return this.evaluate(check, repoPath, input.deliveryCommit, base, artifacts);
     });
-    const environment: GateEnvironment = {
-      platform: process.platform,
-      shell: this.executor.shell,
-      node: process.version,
-    };
     const changedFiles = this.inspector.files(repoPath, input.deliveryCommit, baseCommit);
     // After a merge the target legitimately carries APOS milestone commits; the guard applies to deliveries.
     const guard =
@@ -250,17 +242,26 @@ export class GateService {
           )
         : undefined;
     if (guard) checks.push(guard);
-    // The integration commit of a Multi-WP Goal runs the layers of the integrate stage, on top of the Goal's own checks.
+    if (phase === 'post-merge' && state.setupVersion !== undefined && (!this.assurance || !state.verifiedCommit))
+      throw new UserError('Pinned setup assurance and verified commit are required for the post-merge gate');
     const layered =
-      phase === 'delivery' && state.proposal?.mode === 'multi-wp'
+      phase === 'post-merge' || (phase === 'delivery' && state.proposal?.mode === 'multi-wp')
         ? this.assurance?.layerChecks(state, {
-            stage: 'integrate',
+            stage: phase === 'post-merge' ? 'close' : 'integrate',
+            ...(phase === 'post-merge' && state.verifiedCommit ? { postMergeVerified: state.verifiedCommit } : {}),
             scope: goalId,
             head: input.deliveryCommit,
-            base: state.testLock?.commit ?? baseCommit,
-            changed: changedFiles,
+            base:
+              state.testLock?.commit ??
+              (phase === 'post-merge' ? (state.proposal?.baseCommit ?? baseCommit) : baseCommit),
+            changed:
+              phase === 'post-merge' && state.proposal?.baseCommit
+                ? this.inspector.files(repoPath, input.deliveryCommit, state.proposal.baseCommit)
+                : changedFiles,
           })
         : undefined;
+    if (phase === 'post-merge' && state.setupVersion !== undefined && !layered?.layers)
+      throw new UserError('Pinned setup layers are unavailable for the post-merge gate');
     checks.push(...(layered?.checks ?? []));
     const report: GateReport = {
       gateId,
@@ -283,7 +284,7 @@ export class GateService {
               testLocked: Boolean(state.testLock),
             })
           : [],
-      environment,
+      environment: { platform: process.platform, shell: this.executor.shell, node: process.version },
       checks,
       result: summarizeGate(checks),
       at: this.now(),

@@ -117,6 +117,7 @@ export async function testingProject(
     paths?: string[];
     /** Extra fields of the plan (`layers`, ...). */
     plan?: object;
+    packages?: object[];
   } = {},
 ) {
   const dir = temp('apos-lock-repo-');
@@ -187,6 +188,7 @@ export async function testingProject(
       ...options.plan,
     }),
   );
+  for (const item of options.packages ?? []) journal.append(newEvent(goal.id, 'package-added', item));
   journal.append(newEvent(goal.id, 'proposal-approved', { by: 'lead', testing: true }));
   const runner = new ToolRunner(dir, { artifactRoot: artifacts });
   const loadSetup = (state: GoalState) => loadPinnedSetup(dir, journal.setupHistory(), state.setupVersion, jsonCodec)!;

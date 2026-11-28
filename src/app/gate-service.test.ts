@@ -340,7 +340,7 @@ console.log('FAIL legacy-flaky-network'); process.exit(${exit});`;
     expect(report.checks.find(item => item.checkId === 'APOS-PROTECTED')?.reason).toMatch(/.apos\/project.yaml/);
   }, 60_000);
 
-  it('gives the checks the main checkout node_modules when the lock is unchanged and records it in the log (seen live: GOAL-G3 CHK-2 "prettier is not recognized")', async () => {
+  it('gives the checks isolated dependencies when the lock is unchanged and records it in the log', async () => {
     const { dir, commit, gate } = await project();
     const lock = `${JSON.stringify({ name: 'p', lockfileVersion: 3, requires: true, packages: {} })}\n`;
     const delivery = commit(
@@ -357,7 +357,7 @@ console.log('FAIL legacy-flaky-network'); process.exit(${exit});`;
     const report = gate.run(baseSpec.id, dir, { deliveryCommit: delivery });
     const check = report.checks.find(item => item.checkId === 'CHK-1')!;
     expect(check.status).toBe('pass');
-    expect(readFileSync(check.delivery[0].logRef, 'utf8')).toMatch(/# dependencies: linked node_modules from /);
+    expect(readFileSync(check.delivery[0].logRef, 'utf8')).toMatch(/# dependencies: copied node_modules from /);
     expect(existsSync(join(dir, 'node_modules', 'tool', 'bin.txt'))).toBe(true);
   }, 60_000);
 
